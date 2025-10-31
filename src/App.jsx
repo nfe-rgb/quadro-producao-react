@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { supabase } from './lib/supabaseClient'
+import { supabase } from './lib/supabaseClient.js';
 
 const MAQUINAS = ['P1','P2','P3','I1','I2','I3','I4','I5','I6']
 
