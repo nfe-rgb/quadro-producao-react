@@ -209,7 +209,13 @@ export default function App(){
   // ========================= Render =========================
   return (
     <div className="app">
-      <h1>Painel de Produção</h1>
+<div className="brand-bar">
+  <img src="/savanti-logo.png" alt="Savanti Plásticos" className="brand-logo" />
+  <div className="brand-titles">
+    <h1 className="brand-title">Painel de Produção</h1>
+    <div className="brand-sub">Savanti Plásticos • Controle de Ordens</div>
+  </div>
+</div>
 
       {/* Tabs */}
       <div className="tabs">
