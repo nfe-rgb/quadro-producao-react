@@ -478,4 +478,22 @@ body{
     min-width: 220px;             /* um pouco menor pra caber mais no mobile */
   }
 }
+.drag-handle{
+  cursor: grab;
+  border:none;
+  background:transparent;
+  font-size:18px;
+  line-height:1;
+  padding:4px 6px;
+  margin-right:8px;
+}
+.fila-item{
+  display:flex;
+  align-items:flex-start;
+  gap:8px;
+}
+.fila-content{
+  flex:1;
+  min-width:0;
+}
 

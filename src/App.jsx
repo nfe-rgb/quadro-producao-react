@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from './lib/supabaseClient.js'
-import { DndContext, closestCenter, useSensor, useSensors, MouseSensor, TouchSensor } from '@dnd-kit/core'
+import { DndContext, closestCenter, useSensor, useSensors, MouseSensor, TouchSensor, DragOverlay } from '@dnd-kit/core'
 import { SortableContext, horizontalListSortingStrategy, arrayMove, useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
+import { restrictToHorizontalAxis, restrictToParentElement } from '@dnd-kit/modifiers'
 
 
 
@@ -54,20 +55,35 @@ function Modal({open,onClose,title,children}){
   )
 }
 
-function FilaSortableItem({ordem, onEdit}){
-  const {attributes, listeners, setNodeRef, transform, transition} = useSortable({id: ordem.id})
-  const style = { transform: CSS.Transform.toString(transform), transition }
+function FilaSortableItem({ordem, onEdit}) {
+  const {attributes, listeners, setNodeRef, transform, transition, isDragging} =
+    useSortable({ id: ordem.id })
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.4 : 1
+  }
+
   return (
-    <div ref={setNodeRef} style={style} className="card" {...attributes} {...listeners}>
-      <Etiqueta o={ordem}/>
-      <div className="sep"></div>
-      <button className="btn" onClick={onEdit}>Editar</button>
+    <div ref={setNodeRef} style={style} className="card fila-item">
+      {/* handle: arrasta só aqui */}
+      <button className="drag-handle" {...attributes} {...listeners} title="Arrastar">
+        ⠿
+      </button>
+
+      <div className="fila-content">
+        <Etiqueta o={ordem}/>
+        <div className="sep"></div>
+        <button className="btn" onClick={onEdit}>Editar</button>
+      </div>
     </div>
   )
 }
 
 export default function App(){
   const [tab,setTab] = useState('painel')
+  const [activeId, setActiveId] = useState(null);
   const mouseSensor = useSensor(MouseSensor, { activationConstraint: { distance: 5 }});
   const touchSensor = useSensor(TouchSensor, { pressDelay: 150, activationConstraint: { distance: 5 }});
   const sensors = useSensors(mouseSensor, touchSensor);
@@ -232,23 +248,60 @@ async function setStatus(ordem, s) {
     if (error) alert('Erro ao finalizar: ' + error.message)
   }
 
-  async function moverNaFila(maquina, e){
-    const {active, over} = e; if(!active || !over) return
-    const aId = String(active.id); const oId = String(over.id); if(aId===oId) return
-    const lista = ordens
-      .filter(o=>!o.finalized && o.machine_id===maquina)
-      .sort((a,b)=>(a.pos ?? 999)-(b.pos ?? 999));
-    if(!lista.length) return
-    const ativa = lista[0]
-    const fila = lista.slice(1)
-    const oldIndex = fila.findIndex(x=>x.id===aId)
-    const newIndex = fila.findIndex(x=>x.id===oId)
-    if(oldIndex<0 || newIndex<0) return
-    const novaFila = arrayMove(fila, oldIndex, newIndex)
-    const nova = [ativa, ...novaFila].map((o,i)=>({ id:o.id, pos:i }))
-    const { error } = await supabase.from('orders').upsert(nova)
-    if (error) alert('Erro ao mover: ' + error.message)
+async function moverNaFila(maquina, e){
+  const {active, over} = e; 
+  if(!active || !over) return;
+
+  const aId = String(active.id);
+  const oId = String(over.id);
+  if(aId === oId) return;
+
+  // snapshot estável das ordens
+  const lista = [...ordens]
+    .filter(o => !o.finalized && o.machine_id === maquina)
+    .sort((a,b) => (a.pos ?? 999) - (b.pos ?? 999));
+  if (!lista.length) return;
+
+  const ativa = lista[0];
+  const fila = lista.slice(1);
+
+  const oldIndex = fila.findIndex(x => String(x.id) === aId);
+  const newIndex = fila.findIndex(x => String(x.id) === oId);
+  if (oldIndex < 0 || newIndex < 0) return;
+
+  const novaFila = arrayMove(fila, oldIndex, newIndex);
+
+  // Monta a nova ordem (0 = painel, 1.. = fila)
+  const nova = [ativa, ...novaFila]
+    .filter(o => o && o.id && !String(o.id).startsWith('tmp-'))
+    .map((o, i) => ({ id: o.id, pos: i }));
+
+  if (nova.length === 0) return;
+
+  // Atualiza uma por uma (somente UPDATE; jamais INSERT)
+  for (const row of nova) {
+    const { error } = await supabase
+      .from('orders')
+      .update({ pos: row.pos })
+      .eq('id', row.id);
+    if (error) {
+      alert('Erro ao mover: ' + error.message);
+      return;
+    }
   }
+
+  // (opcional) pequena atualização otimista local pra já refletir a ordem
+  setOrdens(prev => {
+    const map = new Map(prev.map(o => [o.id, { ...o }]));
+    for (const row of nova) {
+      const o = map.get(row.id);
+      if (o) o.pos = row.pos;
+    }
+    return Array.from(map.values());
+  });
+}
+
+
 
 async function excluirRegistro(ordem) {
   const ok = confirm(`Excluir o registro da O.P ${ordem.code}? Esta ação é permanente.`)
