@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from './lib/supabaseClient.js'
-import { DndContext, closestCenter } from '@dnd-kit/core'
+import { DndContext, closestCenter, useSensor, useSensors, MouseSensor, TouchSensor } from '@dnd-kit/core'
 import { SortableContext, horizontalListSortingStrategy, arrayMove, useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 
@@ -68,6 +68,9 @@ function FilaSortableItem({ordem, onEdit}){
 
 export default function App(){
   const [tab,setTab] = useState('painel')
+  const mouseSensor = useSensor(MouseSensor, { activationConstraint: { distance: 5 }});
+  const touchSensor = useSensor(TouchSensor, { pressDelay: 150, activationConstraint: { distance: 5 }});
+  const sensors = useSensors(mouseSensor, touchSensor);
 
   // abertas
   const [ordens,setOrdens] = useState([])
@@ -396,62 +399,72 @@ useEffect(() => {
 
       {/* ====================== LISTA (visão ampla) ====================== */}
       {tab==='lista' && (
-        <div className="grid">
-          <div className="tablehead">
-            <div>MÁQUINA</div><div>PAINEL</div><div>FILA</div>
+  <div className="grid">
+    <div className="tablehead">
+      <div>MÁQUINA</div><div>PAINEL</div><div>FILA</div>
+    </div>
+
+    {MAQUINAS.map(m=>{
+      const lista = ativosPorMaquina[m] || []
+      const ativa = lista[0] || null
+      const fila = lista.slice(1)
+
+      return (
+<div className="tableline" key={m}>
+  <div className="cell-machine">
+    <span className="badge">{m}</span>
+  </div>
+
+  <div className="cell-painel">
+    {ativa ? (
+      <div className={statusClass(ativa.status)}>
+        <Etiqueta o={ativa}/>
+        <div className="sep"></div>
+        <div className="grid2">
+          <div>
+            <div className="label">Situação (só painel)</div>
+            <select
+              className="select"
+              value={ativa.status}
+              onChange={e=>setStatus(ativa,e.target.value)}
+            >
+              {STATUS.map(s => <option key={s} value={s}>{s === 'BAIXA_EFICIENCIA' ? 'Baixa Eficiência' : s === 'PRODUZINDO' ? 'Produzindo' : s === 'PARADA' ? 'Parada' : s}</option>)}
+            </select>
           </div>
-
-          {MAQUINAS.map(m=>{
-            const lista = ativosPorMaquina[m] || []
-            const ativa = lista[0] || null
-            const fila = lista.slice(1)
-
-            return (
-              <div className="tableline" key={m}>
-                <div><span className="badge">{m}</span></div>
-
-                {/* Painel */}
-                <div>
-                  {ativa ? (
-                    <div className={statusClass(ativa.status)}>
-                      <Etiqueta o={ativa}/>
-                      <div className="sep"></div>
-                      <div className="grid2">
-                        <div>
-                          <div className="label">Situação (só painel)</div>
-                          <select className="select" value={ativa.status} onChange={e=>setStatus(ativa,e.target.value)}>
-                            {STATUS.map(s=><option key={s} value={s}>{s.replace('_',' ')}</option>)}
-                          </select>
-                        </div>
-                        <div className="flex" style={{justifyContent:'flex-end'}}>
-                          <button className="btn" onClick={()=>setFinalizando(ativa)}>Finalizar</button>
-                          {/* Na LISTA mantém o Editar completo */}
-                          <button className="btn" onClick={()=>setEditando(ativa)}>Editar</button>
-                        </div>
-                      </div>
-                    </div>
-                  ) : <div className="muted">Sem Programação</div>}
-                </div>
+          <div className="flex" style={{justifyContent:'flex-end'}}>
+            <button className="btn" onClick={()=>setFinalizando(ativa)}>Finalizar</button>
+            <button className="btn" onClick={()=>setEditando(ativa)}>Editar</button>
+          </div>
+        </div>
+      </div>
+    ) : (
+      <div className="muted">Sem Programação</div>
+    )}
+  </div>
 
                 {/* Fila (visível e arrastável apenas na LISTA) */}
-                <div>
-                  <DndContext onDragEnd={(e)=>moverNaFila(m,e)} collisionDetection={closestCenter}>
-                    <SortableContext items={fila.map(f=>f.id)} strategy={horizontalListSortingStrategy}>
-                      <div className="fila">
-                        {fila.length===0 && <div className="muted">Sem itens na fila</div>}
-                        {fila.map(f=>(
-                          <FilaSortableItem key={f.id} ordem={f} onEdit={()=>setEditando(f)} />
-                        ))}
-                      </div>
-                    </SortableContext>
-                  </DndContext>
-                </div>
-              </div>
-            )
-          })}
+<div className="cell-fila">
+  {fila.length === 0 ? (
+    <div className="fila">
+      <div className="muted">Sem itens na fila</div>
+    </div>
+  ) : (
+    <DndContext sensors={sensors} onDragEnd={(e)=>moverNaFila(m,e)} collisionDetection={closestCenter}>
+      <SortableContext items={fila.map(f=>f.id)} strategy={horizontalListSortingStrategy}>
+        <div className="fila">
+          {fila.map(f => (
+            <FilaSortableItem key={f.id} ordem={f} onEdit={()=>setEditando(f)} />
+          ))}
         </div>
-      )}
-
+      </SortableContext>
+    </DndContext>
+  )}
+</div>
+        </div>
+      )
+    })}
+  </div>
+)}
       {/* ====================== NOVA ORDEM ====================== */}
       {tab==='nova' && (
         <div className="grid" style={{maxWidth:900}}>

@@ -422,3 +422,60 @@ body{
   /* cronômetro parado: fonte um pouco menor pra caber bem */
   .parada-timer{ font-size: 13px; }
 }
+/* ===== LISTA: layout de 3 áreas no desktop ===== */
+.tableline{
+  display: grid;
+  grid-template-columns: 120px 1fr 1fr;
+  grid-template-areas: "machine painel fila";
+  gap: 12px;
+  align-items: start;
+}
+.cell-machine{ grid-area: machine; }
+.cell-painel { grid-area: painel; }
+.cell-fila   { grid-area: fila;   overflow: hidden; }
+
+/* Fila como faixa rolável horizontal (funciona em desktop e mobile) */
+.fila{
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  padding: 6px 2px 8px;
+  scroll-snap-type: x proximity;
+  -webkit-overflow-scrolling: touch;
+}
+.fila .card{
+  min-width: 260px;               /* cada item ocupa largura “de cartão” */
+  scroll-snap-align: start;
+}
+
+/* Scrollbar discreta (opcional) */
+.fila::-webkit-scrollbar{ height: 6px; }
+.fila::-webkit-scrollbar-thumb{
+  background: rgba(0,0,0,.15);
+  border-radius: 999px;
+}
+
+/* ===== MOBILE: máquina + fila lado a lado; painel desce ===== */
+@media (max-width: 768px){
+  .tableline{
+    grid-template-columns: 90px 1fr;
+    grid-template-areas:
+      "machine fila"
+      "painel  painel";
+    gap: 8px;
+  }
+  .badge{
+    min-width: 56px;
+    font-size: 16px;
+  }
+  .cell-fila{
+    overflow-x: auto;             /* garante rolagem lateral */
+  }
+  .fila{
+    flex-wrap: nowrap;            /* tudo em uma linha rolável */
+  }
+  .fila .card{
+    min-width: 220px;             /* um pouco menor pra caber mais no mobile */
+  }
+}
+
