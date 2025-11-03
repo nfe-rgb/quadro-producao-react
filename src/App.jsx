@@ -34,7 +34,7 @@ function Etiqueta({o}) {
       {o.qty && <div><b>Qtd:</b> {o.qty}</div>}
       {o.boxes && <div><b>Caixas:</b> {o.boxes}</div>}
       {o.standard && <div><b>Padrão:</b> {o.standard}</div>}
-      {o.due_date && <div><b>Prazo:</b> {o.due_date}</div>}
+      {o.due_date && (<div><b>Prazo:</b> {new Date(o.due_date).toLocaleDateString('pt-BR')}</div>)}
       {o.notes && <div className="muted">{o.notes}</div>}
     </div>
   )
@@ -82,6 +82,26 @@ export default function App(){
   const [form,setForm] = useState({
     code:'', customer:'', product:'', color:'', qty:'', boxes:'', standard:'', due_date:'', notes:'', machine_id:'P1'
   })
+  
+  // Guarda o início da parada por máquina (só front-end)
+const [paradaDesde, setParadaDesde] = useState({}); // { P1: timestampMs, ... }
+// Tick para re-render a cada segundo (cronômetro)
+const [tick, setTick] = useState(0);
+useEffect(() => {
+  const id = setInterval(() => setTick(t => t + 1), 1000);
+  return () => clearInterval(id);
+}, []);
+
+// Formata duração HH:MM:SS a partir do timestamp de início
+function fmtDuracaoDESDE(startMs){
+  if (!startMs) return '00:00:00';
+  const total = Math.max(0, Math.floor((Date.now() - startMs) / 1000));
+  const h = String(Math.floor(total / 3600)).padStart(2,'0');
+  const m = String(Math.floor((total % 3600) / 60)).padStart(2,'0');
+  const s = String(total % 60).padStart(2,'0');
+  return `${h}:${m}:${s}`;
+}
+
 
   // ========================= Supabase fetch =========================
   async function fetchOrdensAbertas(){
@@ -161,9 +181,21 @@ export default function App(){
   }
 
   async function setStatus(ordem, s){
-    const { error } = await supabase.from('orders').update({ status:s }).eq('id', ordem.id)
-    if (error) alert('Erro ao alterar status: ' + error.message)
+  const { error } = await supabase.from('orders').update({ status:s }).eq('id', ordem.id)
+  if (error) { alert('Erro ao alterar status: ' + error.message); return; }
+
+  // feedback imediato no cronômetro (sem esperar RT)
+  setParadaDesde(prev => {
+    const next = { ...prev };
+    if (s === 'PARADA') {
+      next[ordem.machine_id] = Date.now();
+    } else {
+      delete next[ordem.machine_id];
+    }
+    return next;
+    });
   }
+
 
   async function finalizar(ordem, {por,data,hora}){
     const { error } = await supabase.from('orders').update({
@@ -218,6 +250,26 @@ async function excluirRegistro(ordem) {
     return map
   },[ordens])
 
+  // Atualiza início da parada por máquina conforme status atual
+useEffect(() => {
+  setParadaDesde(prev => {
+    const next = { ...prev };
+    for (const m of MAQUINAS) {
+      const lista = ativosPorMaquina[m] || [];
+      const ativa = lista[0];
+      if (ativa?.status === 'PARADA') {
+        // se não tinha início registrado, começa agora
+        if (!next[m]) next[m] = Date.now();
+      } else {
+        // se não está parada, zera o cronômetro dessa máquina
+        if (next[m]) delete next[m];
+      }
+    }
+    return next;
+  });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [ativosPorMaquina, tick]); // 'tick' faz re-render do cronômetro a cada 1s
+
   // ========================= UI helpers =========================
   const [confirmData, setConfirmData] = useState({por:'', data:'', hora:''})
   useEffect(()=>{
@@ -263,7 +315,10 @@ async function excluirRegistro(ordem) {
 
             return (
               <div key={m} className="column">
-                <div className="column-header">{m}</div>
+<div className={"column-header " + (ativa?.status === 'PARADA' ? "blink-red" : "")}>
+  {m}{ativa?.status === 'PARADA' && (<span className="parada-timer">{fmtDuracaoDESDE(paradaDesde[m])}</span>
+)}
+</div>
                 <div className="column-body">
                   {/* Só o que está no painel */}
                   {ativa ? (

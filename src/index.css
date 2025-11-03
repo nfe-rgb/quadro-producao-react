@@ -54,9 +54,10 @@ body{
 }
 
 .brand-logo{
-  height: 56px;              /* maior que 44px */
+  height: 80px;       /* antes 56px — agora bem mais visível */
   width: auto;
   display: block;
+  filter: drop-shadow(0 4px 12px rgba(0,0,0,0.25));
 }
 .brand-titles{
   display:flex;
@@ -177,9 +178,20 @@ body{
   border-left: 6px solid var(--yellow);
   background: linear-gradient(180deg, #FFF3E5, var(--card));
 }
-.card.red{
-  border-left: 6px solid var(--red);
-  background: linear-gradient(180deg, #FBEAEA, var(--card));
+.card.red {
+  border-left: 8px solid #C62828; /* vermelho intenso */
+  background: linear-gradient(180deg, #EF9A9A 0%, #FFEBEE 100%);
+  color: #B71C1C;
+  box-shadow: 0 0 10px rgba(198,40,40,0.25);
+}
+.card.red {
+  animation: pulse-card-red 1.2s ease-in-out infinite;
+}
+
+@keyframes pulse-card-red {
+  0%   { box-shadow: 0 0 0 0 rgba(198,40,40,0.4); }
+  50%  { box-shadow: 0 0 15px 4px rgba(198,40,40,0.25); }
+  100% { box-shadow: 0 0 0 0 rgba(198,40,40,0.4); }
 }
 
 /* Inputs */
@@ -322,4 +334,15 @@ body{
 @media (max-width: 720px){
   .brand-title{ font-size: 24px; }
   .grid2{ grid-template-columns: 1fr; }
+}
+
+/* Cronômetro no cabeçalho (ao lado do nome da máquina) */
+.parada-timer{
+  font-weight: 800;
+  margin-left: 10px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(198,40,40,.12);
+  color: #C62828; /* mesmo vermelho da paleta */
+  font-size: 18px;
 }
