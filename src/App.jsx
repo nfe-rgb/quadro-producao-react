@@ -14,6 +14,16 @@ function statusClass(s){
   return 'card'
 }
 
+function fmtDateTime(ts) {
+  if (!ts) return ''
+  try {
+    const d = new Date(ts)
+    const dia = d.toLocaleDateString('pt-BR')
+    const hora = d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+    return `${dia} ${hora}`
+  } catch { return ts }
+}
+
 function Etiqueta({o}) {
   return (
     <div className="small">
@@ -56,31 +66,55 @@ function FilaSortableItem({ordem, onEdit}){
 
 export default function App(){
   const [tab,setTab] = useState('painel')
-  const [ordens,setOrdens] = useState([])               // linhas da tabela orders (não finalizadas)
-  const [editando,setEditando] = useState(null)         // ordem em edição (objeto)
-  const [finalizando,setFinalizando] = useState(null)   // ordem a finalizar (objeto)
-  const [form,setForm] = useState({                     // Nova Ordem
+
+  // abertas
+  const [ordens,setOrdens] = useState([])
+  // finalizadas (para a aba Registro)
+  const [finalizadas, setFinalizadas] = useState([])
+
+  const [editando,setEditando] = useState(null)
+  const [finalizando,setFinalizando] = useState(null)
+
+  const [form,setForm] = useState({
     code:'', customer:'', product:'', color:'', qty:'', boxes:'', standard:'', due_date:'', notes:'', machine_id:'P1'
   })
 
-  // ======= Supabase =======
-  async function fetchOrdens(){
-    const { data, error } = await supabase.from('orders')
-      .select('*').eq('finalized', false)
+  // ========================= Supabase fetch =========================
+  async function fetchOrdensAbertas(){
+    const { data, error } = await supabase
+      .from('orders')
+      .select('*')
+      .eq('finalized', false)
       .order('pos', { ascending:true })
       .order('created_at', { ascending:true })
     if (!error) setOrdens(data || [])
   }
 
+  async function fetchOrdensFinalizadas(){
+    const { data, error } = await supabase
+      .from('orders')
+      .select('*')
+      .eq('finalized', true)
+      .order('finalized_at', { ascending:false })
+      .limit(500)
+    if (!error) setFinalizadas(data || [])
+  }
+
   useEffect(()=>{
-    fetchOrdens()
+    fetchOrdensAbertas()
+    fetchOrdensFinalizadas()
+
     const ch = supabase.channel('orders-rt')
-      .on('postgres_changes', { event:'*', schema:'public', table:'orders' }, fetchOrdens)
+      .on('postgres_changes', { event:'*', schema:'public', table:'orders' }, ()=>{
+        fetchOrdensAbertas()
+        fetchOrdensFinalizadas()
+      })
       .subscribe()
+
     return ()=> supabase.removeChannel(ch)
   },[])
 
-  // ======= CRUD
+  // ========================= CRUD =========================
   async function criarOrdem(){
     if(!form.code.trim()) return
     const count = ordens.filter(o=>o.machine_id===form.machine_id && !o.finalized).length
@@ -91,7 +125,7 @@ export default function App(){
       status: 'PRODUZINDO', pos: count, finalized: false
     }
 
-    // Otimista: aparece na hora
+    // otimista
     const tempId = `tmp-${crypto.randomUUID()}`
     setOrdens(prev => [...prev, { id: tempId, ...novo }])
 
@@ -102,20 +136,17 @@ export default function App(){
       .single()
 
     if (error) {
-      // rollback
       setOrdens(prev => prev.filter(o => o.id !== tempId))
       alert('Erro ao criar ordem: ' + error.message)
       return
     }
-
-    // troca temp pelo real
     setOrdens(prev => prev.map(o => o.id === tempId ? data : o))
 
     setForm({code:'', customer:'', product:'', color:'', qty:'', boxes:'', standard:'', due_date:'', notes:'', machine_id:'P1'})
     setTab('painel')
   }
 
-  async function atualizar(ordemParcial){ // salvar edição
+  async function atualizar(ordemParcial){
     const { error } = await supabase.from('orders').update({
       machine_id: ordemParcial.machine_id,
       code: ordemParcial.code, customer: ordemParcial.customer, product: ordemParcial.product, color: ordemParcial.color,
@@ -155,7 +186,7 @@ export default function App(){
     if (error) alert('Erro ao mover: ' + error.message)
   }
 
-  // ======= Derivados: ativos por máquina e painel =======
+  // ========================= Derivados =========================
   const ativosPorMaquina = useMemo(()=>{
     const map = Object.fromEntries(MAQUINAS.map(m=>[m,[]]))
     ordens.forEach(o => { if (!o.finalized) map[o.machine_id]?.push(o) })
@@ -165,13 +196,7 @@ export default function App(){
     return map
   },[ordens])
 
-  const painel = useMemo(()=>{
-    const obj = Object.fromEntries(MAQUINAS.map(m=>[m, null]))
-    MAQUINAS.forEach(m=>{ obj[m] = (ativosPorMaquina[m][0] || null) })
-    return obj
-  },[ativosPorMaquina])
-
-  // ======= UI helpers =======
+  // ========================= UI helpers =========================
   const [confirmData, setConfirmData] = useState({por:'', data:'', hora:''})
   useEffect(()=>{
     const now = new Date()
@@ -181,7 +206,7 @@ export default function App(){
     })
   },[finalizando?.id])
 
-  // ======= Render =======
+  // ========================= Render =========================
   return (
     <div className="app">
       <h1>Painel de Produção</h1>
@@ -191,72 +216,73 @@ export default function App(){
         <button className={`tabbtn ${tab==='painel'?'active':''}`} onClick={()=>setTab('painel')}>Painel</button>
         <button className={`tabbtn ${tab==='lista'?'active':''}`} onClick={()=>setTab('lista')}>Lista</button>
         <button className={`tabbtn ${tab==='nova'?'active':''}`} onClick={()=>setTab('nova')}>Nova Ordem</button>
+        <button className={`tabbtn ${tab==='registro'?'active':''}`} onClick={()=>setTab('registro')}>Registro</button>
       </div>
 
-      {/* ====================== PAINEL (EM COLUNAS) ====================== */}
-{tab==='painel' && (
-  <div className="board">
-    {MAQUINAS.map(m=>{
-      const lista = (ativosPorMaquina[m] ?? []);
-      const ativa = lista[0] || null;
-      const fila  = lista.slice(1);
+      {/* ====================== PAINEL (KANBAN) ====================== */}
+      {tab==='painel' && (
+        <div className="board">
+          {MAQUINAS.map(m=>{
+            const lista = (ativosPorMaquina[m] ?? []);
+            const ativa = lista[0] || null;
+            const fila  = lista.slice(1);
 
-      return (
-        <div key={m} className="column">
-          <div className="column-header">
-            {m}
-            <span style={{fontWeight:400, opacity:.8}}> • fila: {fila.length}</span>
-          </div>
-          <div className="column-body">
-            {/* card do painel da máquina */}
-            {ativa ? (
-              <div className={statusClass(ativa.status)}>
-                <Etiqueta o={ativa}/>
-                <div className="sep"></div>
-                <div className="grid2">
-                  <div>
-                    <div className="label">Situação</div>
-                    <select
-                      className="select"
-                      value={ativa.status}
-                      onChange={e=>setStatus(ativa,e.target.value)}
-                    >
-                      {STATUS.map(s=>(
-                        <option key={s} value={s}>{s.replace('_',' ')}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="flex" style={{justifyContent:'flex-end'}}>
-                    <button className="btn" onClick={()=>setFinalizando(ativa)}>Finalizar</button>
-                    <button className="btn" onClick={()=>setEditando(ativa)}>Editar</button>
-                  </div>
+            return (
+              <div key={m} className="column">
+                <div className="column-header">
+                  {m}
+                  <span style={{fontWeight:400, opacity:.8}}> • fila: {fila.length}</span>
+                </div>
+                <div className="column-body">
+                  {/* Painel */}
+                  {ativa ? (
+                    <div className={statusClass(ativa.status)}>
+                      <Etiqueta o={ativa}/>
+                      <div className="sep"></div>
+                      <div className="grid2">
+                        <div>
+                          <div className="label">Situação</div>
+                          <select
+                            className="select"
+                            value={ativa.status}
+                            onChange={e=>setStatus(ativa,e.target.value)}
+                          >
+                            {STATUS.map(s=>(
+                              <option key={s} value={s}>{s.replace('_',' ')}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className="flex" style={{justifyContent:'flex-end'}}>
+                          <button className="btn" onClick={()=>setFinalizando(ativa)}>Finalizar</button>
+                          <button className="btn" onClick={()=>setEditando(ativa)}>Editar</button>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="muted">Sem Programação</div>
+                  )}
+
+                  {/* Fila */}
+                  <div className="sep"></div>
+                  <div className="label">Fila</div>
+                  <DndContext onDragEnd={(e)=>moverNaFila(m,e)} collisionDetection={closestCenter}>
+                    <SortableContext items={fila.map(f=>f.id)} strategy={horizontalListSortingStrategy}>
+                      <div className="fila">
+                        {fila.length===0 && <div className="muted">Sem itens na fila</div>}
+                        {fila.map(f=>(
+                          <FilaSortableItem key={f.id} ordem={f} onEdit={()=>setEditando(f)} />
+                        ))}
+                      </div>
+                    </SortableContext>
+                  </DndContext>
                 </div>
               </div>
-            ) : (
-              <div className="muted">Sem Programação</div>
-            )}
-
-            {/* fila arrastável */}
-            <div className="sep"></div>
-            <div className="label">Fila</div>
-            <DndContext onDragEnd={(e)=>moverNaFila(m,e)} collisionDetection={closestCenter}>
-              <SortableContext items={fila.map(f=>f.id)} strategy={horizontalListSortingStrategy}>
-                <div className="fila">
-                  {fila.length===0 && <div className="muted">Sem itens na fila</div>}
-                  {fila.map(f=>(
-                    <FilaSortableItem key={f.id} ordem={f} onEdit={()=>setEditando(f)} />
-                  ))}
-                </div>
-              </SortableContext>
-            </DndContext>
-          </div>
+            );
+          })}
         </div>
-      );
-    })}
-  </div>
-)}
+      )}
 
-      {/* ====================== LISTA ====================== */}
+      {/* ====================== LISTA (visão ampla) ====================== */}
       {tab==='lista' && (
         <div className="grid">
           <div className="tablehead">
@@ -272,7 +298,7 @@ export default function App(){
               <div className="tableline" key={m}>
                 <div><span className="badge">{m}</span></div>
 
-                {/* Painel (com status e cores) */}
+                {/* Painel */}
                 <div>
                   {ativa ? (
                     <div className={statusClass(ativa.status)}>
@@ -294,7 +320,7 @@ export default function App(){
                   ) : <div className="muted">Sem Programação</div>}
                 </div>
 
-                {/* Fila (sem cor de status) */}
+                {/* Fila */}
                 <div>
                   <DndContext onDragEnd={(e)=>moverNaFila(m,e)} collisionDetection={closestCenter}>
                     <SortableContext items={fila.map(f=>f.id)} strategy={horizontalListSortingStrategy}>
@@ -372,6 +398,40 @@ export default function App(){
         </div>
       )}
 
+      {/* ====================== REGISTRO ====================== */}
+      {tab==='registro' && (
+        <div className="card">
+          <div className="label" style={{marginBottom:8}}>Últimas finalizações</div>
+          <div className="table">
+            <div className="thead">
+              <div>Número O.P</div>
+              <div>Máquina</div>
+              <div>Cliente</div>
+              <div>Produto</div>
+              <div>Qtd</div>
+              <div>Operador</div>
+              <div>Data/Hora</div>
+            </div>
+            <div className="tbody">
+              {finalizadas.length === 0 && (
+                <div className="row muted" style={{gridColumn:'1 / -1', padding:'8px 0'}}>Nenhuma ordem finalizada ainda.</div>
+              )}
+              {finalizadas.map(o => (
+                <div className="row" key={o.id}>
+                  <div>{o.code}</div>
+                  <div>{o.machine_id}</div>
+                  <div>{o.customer || '-'}</div>
+                  <div>{o.product || '-'}</div>
+                  <div>{o.qty || '-'}</div>
+                  <div>{o.finalized_by || '-'}</div>
+                  <div>{fmtDateTime(o.finalized_at)}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ====================== MODAL EDITAR ====================== */}
       <Modal
         open={!!editando}
@@ -445,7 +505,7 @@ export default function App(){
       <Modal
         open={!!finalizando}
         onClose={()=>setFinalizando(null)}
-        title={finalizando ? `Finalizar ${finalizando.code}` : ''}
+        title={finalizando ? `Finalizar O.P ${finalizando.code}` : ''}
       >
         {finalizando && (
           <div className="grid">
