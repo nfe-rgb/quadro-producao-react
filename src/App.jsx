@@ -1,9 +1,14 @@
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from './lib/supabaseClient.js'
-import { DndContext, closestCenter } from '@dnd-kit/core'
+import { DndContext, closestCenter, useSensor, useSensors, MouseSensor, TouchSensor } from '@dnd-kit/core'
 import { SortableContext, horizontalListSortingStrategy, arrayMove, useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 
+
+// Configuração de sensores para mouse e toque (funciona no celular)
+const mouseSensor = useSensor(MouseSensor, { activationConstraint: { distance: 5 }});
+const touchSensor = useSensor(TouchSensor, { pressDelay: 150, activationConstraint: { distance: 5 }});
+const sensors = useSensors(mouseSensor, touchSensor);
 const MAQUINAS = ['P1','P2','P3','I1','I2','I3','I4','I5','I6']
 const STATUS = ['PRODUZINDO','BAIXA_EFICIENCIA','PARADA']
 
@@ -433,7 +438,7 @@ useEffect(() => {
 
                 {/* Fila (visível e arrastável apenas na LISTA) */}
                 <div>
-                  <DndContext onDragEnd={(e)=>moverNaFila(m,e)} collisionDetection={closestCenter}>
+                  <DndContext sensors={sensors} onDragEnd={(e)=>moverNaFila(m,e)} collisionDetection={closestCenter}>
                     <SortableContext items={fila.map(f=>f.id)} strategy={horizontalListSortingStrategy}>
                       <div className="fila">
                         {fila.length===0 && <div className="muted">Sem itens na fila</div>}

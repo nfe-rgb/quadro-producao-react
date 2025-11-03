@@ -353,3 +353,72 @@ body{
   color: #C62828; /* mesmo vermelho da paleta */
   font-size: 18px;
 }
+/* ====== MOBILE FIRST TWEAKS (ate 768px) ====== */
+@media (max-width: 768px){
+  /* layout geral */
+  .app { padding: 12px; }
+
+  /* topo: logo e títulos empilhados e centralizados */
+  .brand-bar{
+    flex-direction: column;
+    gap: 10px;
+    align-items: center;
+    text-align: center;
+  }
+  .brand-logo{ height: 80px; }          /* maior no mobile */
+  .brand-title{ font-size: 28px; }
+  .brand-sub{ font-size: 14px; }
+
+  /* tabs: fáceis de tocar */
+  .tabs{ gap:8px; justify-content:center; }
+  .tabbtn{ padding: 12px 16px; font-size: 16px; }
+
+  /* painel: 1 coluna (uma máquina por vez por linha) */
+  .board{
+    grid-template-columns: 1fr;          /* deita tudo em 1 coluna */
+    gap: 12px;
+  }
+
+  .column{ border-radius: 12px; }
+  .column-header{ font-size: 16px; padding: 10px 12px; }
+  .column-body{ padding: 10px; gap: 8px; }
+
+  /* inputs e botões maiores (alvo de toque) */
+  .input, .select { padding: 14px 12px; font-size: 16px; }
+  .btn{ padding: 12px 14px; font-size: 16px; }
+
+  /* grid de situação + botões: vira 1 coluna pra não sobrepor */
+  .grid2{ grid-template-columns: 1fr; gap: 12px; }
+  .grid2 .flex{ justify-content: center; gap: 10px; }
+
+  /* badge das máquinas maior e sem borda fina */
+  .badge{
+    min-width: 56px; padding: 6px 12px; font-size: 16px;
+    border: none;
+  }
+
+  /* LISTA: cabeçalho compacto e sem faixa */
+  .tablehead{
+    background: transparent;
+    font-size: 14px;
+    position: sticky; top: 0;
+  }
+
+  /* LISTA: quando faltar espaço, esconda campos menos críticos */
+  .tableline{
+    grid-template-columns: 90px 1fr;     /* Máquina + Painel; Fila embaixo */
+    gap: 8px;
+  }
+  .tableline > :nth-child(3){ grid-column: 1 / -1; } /* Fila quebra pra linha de baixo */
+
+  /* REGISTRO: menos colunas em telas estreitas */
+  .thead, .row{
+    grid-template-columns: 110px 70px 1fr 1fr; /* code, máquina, cliente, data/hora */
+    gap: 8px;
+  }
+  .thead > :nth-child(4){ display:none; } /* ex.: ocultar Produto */
+  .row  > :nth-child(4){ display:none; }
+
+  /* cronômetro parado: fonte um pouco menor pra caber bem */
+  .parada-timer{ font-size: 13px; }
+}
