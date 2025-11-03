@@ -5,11 +5,11 @@ import { SortableContext, horizontalListSortingStrategy, arrayMove, useSortable 
 import { CSS } from '@dnd-kit/utilities'
 
 const MAQUINAS = ['P1','P2','P3','I1','I2','I3','I4','I5','I6']
-const STATUS = ['PRODUZINDO','BAIXA_EFICIÊNCIA','PARADA']
+const STATUS = ['PRODUZINDO','BAIXA_EFICIENCIA','PARADA']
 
 function statusClass(s){
   if(s==='PRODUZINDO') return 'card green'
-  if(s==='BAIXA_EFICIÊNCIA') return 'card yellow'
+  if(s==='BAIXA_EFICIENCIA') return 'card yellow'
   if(s==='PARADA') return 'card red'
   return 'card'
 }
@@ -72,7 +72,7 @@ export default function App(){
   // finalizadas (para a aba Registro)
   const [finalizadas, setFinalizadas] = useState([])
 
-    // =========================================================
+  // =========================================================
   // Controle de nível de acesso (PCP / Supervisor)
   // =========================================================
   const [role, setRole] = useState('supervisor'); // padrão seguro
