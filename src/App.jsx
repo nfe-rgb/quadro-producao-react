@@ -72,6 +72,31 @@ export default function App(){
   // finalizadas (para a aba Registro)
   const [finalizadas, setFinalizadas] = useState([])
 
+    // =========================================================
+  // Controle de nível de acesso (PCP / Supervisor)
+  // =========================================================
+  const [role, setRole] = useState('supervisor'); // padrão seguro
+
+  useEffect(() => {
+    (async () => {
+      const { data: userData } = await supabase.auth.getUser();
+      const uid = userData?.user?.id;
+      if (!uid) return;
+
+      const { data, error } = await supabase
+        .from('user_roles')
+        .select('role')
+        .eq('user_id', uid)
+        .single();
+
+      if (!error && data?.role) setRole(data.role);
+      else setRole('supervisor'); // fallback
+    })();
+  }, []);
+
+  const isPCP = role === 'pcp';
+  const isSupervisor = role === 'supervisor';
+
   const [editando,setEditando] = useState(null)       // modal de edição completa (usado na LISTA)
   const [finalizando,setFinalizando] = useState(null) // modal de finalizar
 
@@ -93,12 +118,12 @@ useEffect(() => {
 }, []);
 
 // Formata duração HH:MM:SS a partir do timestamp de início
-function fmtDuracaoDESDE(startMs){
+function fmtDuracaoDESDE(startMs) {
   if (!startMs) return '00:00:00';
   const total = Math.max(0, Math.floor((Date.now() - startMs) / 1000));
-  const h = String(Math.floor(total / 3600)).padStart(2,'0');
-  const m = String(Math.floor((total % 3600) / 60)).padStart(2,'0');
-  const s = String(total % 60).padStart(2,'0');
+  const h = String(Math.floor(total / 3600)).padStart(2, '0');
+  const m = String(Math.floor((total % 3600) / 60)).padStart(2, '0');
+  const s = String(total % 60).padStart(2, '0');
   return `${h}:${m}:${s}`;
 }
 
@@ -180,22 +205,20 @@ function fmtDuracaoDESDE(startMs){
     if (error) alert('Erro ao atualizar: ' + error.message)
   }
 
-  async function setStatus(ordem, s){
-  const { error } = await supabase.from('orders').update({ status:s }).eq('id', ordem.id)
-  if (error) { alert('Erro ao alterar status: ' + error.message); return; }
+async function setStatus(ordem, s) {
+  const patch = { status: s };
 
-  // feedback imediato no cronômetro (sem esperar RT)
-  setParadaDesde(prev => {
-    const next = { ...prev };
-    if (s === 'PARADA') {
-      next[ordem.machine_id] = Date.now();
-    } else {
-      delete next[ordem.machine_id];
-    }
-    return next;
-    });
+  if (s === 'PARADA') {
+    // Se ainda não havia data de parada, grava agora
+    patch.stopped_at = ordem.stopped_at ?? new Date().toISOString();
+  } else {
+    // Se voltar a produzir ou sair do ciclo, limpa o horário de parada
+    patch.stopped_at = null;
   }
 
+  const { error } = await supabase.from('orders').update(patch).eq('id', ordem.id);
+  if (error) alert('Erro ao alterar status: ' + error.message);
+}
 
   async function finalizar(ordem, {por,data,hora}){
     const { error } = await supabase.from('orders').update({
@@ -241,14 +264,14 @@ async function excluirRegistro(ordem) {
   }
 }
   // ========================= Derivados =========================
-  const ativosPorMaquina = useMemo(()=>{
-    const map = Object.fromEntries(MAQUINAS.map(m=>[m,[]]))
-    ordens.forEach(o => { if (!o.finalized) map[o.machine_id]?.push(o) })
-    for (const m of MAQUINAS) {
-      map[m] = [...map[m]].sort((a,b)=>(a.pos ?? 999)-(b.pos ?? 999))
-    }
-    return map
-  },[ordens])
+  const ativosPorMaquina = useMemo(() => {
+  const map = Object.fromEntries(MAQUINAS.map(m => [m, []]))
+  ordens.forEach(o => { if (!o.finalized) map[o.machine_id]?.push(o) })
+  for (const m of MAQUINAS) {
+    map[m] = [...map[m]].sort((a,b)=>(a.pos ?? 999)-(b.pos ?? 999))
+  }
+  return map
+}, [ordens])    // <- nada de [ordens, tick]
 
   // Atualiza início da parada por máquina conforme status atual
 useEffect(() => {
@@ -307,18 +330,24 @@ useEffect(() => {
       </div>
 
       {/* ====================== PAINEL (sem Fila) ====================== */}
-      {tab==='painel' && (
-        <div className="board">
+      {tab === 'painel' && (
+        <div className="board">   {/* força atualização visual */}
           {MAQUINAS.map(m=>{
             const lista = (ativosPorMaquina[m] ?? []);
             const ativa = lista[0] || null;
 
             return (
               <div key={m} className="column">
-<div className={"column-header " + (ativa?.status === 'PARADA' ? "blink-red" : "")}>
-  {m}{ativa?.status === 'PARADA' && (<span className="parada-timer">{fmtDuracaoDESDE(paradaDesde[m])}</span>
+<div
+  className={
+    "column-header " + (ativa?.status === 'PARADA' ? "blink-red" : "")
+  }>{m}{ativa?.status === 'PARADA' && (
+  <span className="parada-timer">
+    {fmtDuracaoDESDE(ativa.stopped_at ? new Date(ativa.stopped_at).getTime() : null)}
+  </span>
 )}
 </div>
+
                 <div className="column-body">
                   {/* Só o que está no painel */}
                   {ativa ? (

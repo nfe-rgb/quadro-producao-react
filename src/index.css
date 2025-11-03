@@ -170,14 +170,21 @@ body{
   box-shadow: var(--shadow);
   color: var(--text);
 }
-.card.green{
-  border-left: 6px solid var(--green);
-  background: linear-gradient(180deg, #F0F7F2, var(--card));
+/* ==== cores mais vibrantes nas situações ==== */
+.card.green {
+  border-left: 8px solid #2E7D32; /* verde mais forte */
+  background: linear-gradient(180deg, #A5D6A7 0%, #E8F5E9 100%);
+  color: #1B5E20;
+  box-shadow: 0 0 10px rgba(46,125,50,0.25);
 }
-.card.yellow{
-  border-left: 6px solid var(--yellow);
-  background: linear-gradient(180deg, #FFF3E5, var(--card));
+
+.card.yellow {
+  border-left: 8px solid #F57C00; /* laranja forte */
+  background: linear-gradient(180deg, #FFE082 0%, #FFF3E0 100%);
+  color: #E65100;
+  box-shadow: 0 0 10px rgba(245,124,0,0.25);
 }
+
 .card.red {
   border-left: 8px solid #C62828; /* vermelho intenso */
   background: linear-gradient(180deg, #EF9A9A 0%, #FFEBEE 100%);
