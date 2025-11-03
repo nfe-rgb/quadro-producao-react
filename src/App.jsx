@@ -72,8 +72,12 @@ export default function App(){
   // finalizadas (para a aba Registro)
   const [finalizadas, setFinalizadas] = useState([])
 
-  const [editando,setEditando] = useState(null)
-  const [finalizando,setFinalizando] = useState(null)
+  const [editando,setEditando] = useState(null)       // modal de edição completa (usado na LISTA)
+  const [finalizando,setFinalizando] = useState(null) // modal de finalizar
+
+  // novo: edição só de observações (usado no PAINEL)
+  const [obsEdit, setObsEdit] = useState(null)        // guarda a ordem que terá notes editado
+  const [obsTexto, setObsTexto] = useState('')
 
   const [form,setForm] = useState({
     code:'', customer:'', product:'', color:'', qty:'', boxes:'', standard:'', due_date:'', notes:'', machine_id:'P1'
@@ -186,6 +190,24 @@ export default function App(){
     if (error) alert('Erro ao mover: ' + error.message)
   }
 
+async function excluirRegistro(ordem) {
+  const ok = confirm(`Excluir o registro da O.P ${ordem.code}? Esta ação é permanente.`)
+  if (!ok) return
+
+  // otimista: remove da lista visível
+  setFinalizadas(prev => prev.filter(o => o.id !== ordem.id))
+
+  const { error } = await supabase
+    .from('orders')
+    .delete()
+    .eq('id', ordem.id)
+
+  if (error) {
+    alert('Erro ao excluir: ' + error.message)
+    // rollback (recarrega do banco)
+    fetchOrdensFinalizadas()
+  }
+}
   // ========================= Derivados =========================
   const ativosPorMaquina = useMemo(()=>{
     const map = Object.fromEntries(MAQUINAS.map(m=>[m,[]]))
@@ -209,13 +231,20 @@ export default function App(){
   // ========================= Render =========================
   return (
     <div className="app">
-<div className="brand-bar">
-  <img src="/savanti-logo.png" alt="Savanti Plásticos" className="brand-logo" />
-  <div className="brand-titles">
-    <h1 className="brand-title">Painel de Produção</h1>
-    <div className="brand-sub">Savanti Plásticos • Controle de Ordens</div>
-  </div>
-</div>
+      {/* Brand bar com logo do /public (corrigido) */}
+      <div className="brand-bar">
+        {/* coloque o arquivo exatamente em /public/Logotipo Savanti.png  */}
+        <img
+          src="/Logotipo Savanti.png"
+          alt="Savanti Plásticos"
+          className="brand-logo"
+          onError={(e)=>{ e.currentTarget.src='/savanti-logo.png'; }}
+        />
+        <div className="brand-titles">
+          <h1 className="brand-title">Painel de Produção</h1>
+          <div className="brand-sub">Savanti Plásticos • Controle de Ordens</div>
+        </div>
+      </div>
 
       {/* Tabs */}
       <div className="tabs">
@@ -225,22 +254,18 @@ export default function App(){
         <button className={`tabbtn ${tab==='registro'?'active':''}`} onClick={()=>setTab('registro')}>Registro</button>
       </div>
 
-      {/* ====================== PAINEL (KANBAN) ====================== */}
+      {/* ====================== PAINEL (sem Fila) ====================== */}
       {tab==='painel' && (
         <div className="board">
           {MAQUINAS.map(m=>{
             const lista = (ativosPorMaquina[m] ?? []);
             const ativa = lista[0] || null;
-            const fila  = lista.slice(1);
 
             return (
               <div key={m} className="column">
-                <div className="column-header">
-                  {m}
-                  <span style={{fontWeight:400, opacity:.8}}> • fila: {fila.length}</span>
-                </div>
+                <div className="column-header">{m}</div>
                 <div className="column-body">
-                  {/* Painel */}
+                  {/* Só o que está no painel */}
                   {ativa ? (
                     <div className={statusClass(ativa.status)}>
                       <Etiqueta o={ativa}/>
@@ -260,27 +285,22 @@ export default function App(){
                         </div>
                         <div className="flex" style={{justifyContent:'flex-end'}}>
                           <button className="btn" onClick={()=>setFinalizando(ativa)}>Finalizar</button>
-                          <button className="btn" onClick={()=>setEditando(ativa)}>Editar</button>
+                          {/* Observações no lugar de Editar */}
+                          <button
+                            className="btn"
+                            onClick={()=>{
+                              setObsEdit(ativa)
+                              setObsTexto(ativa.notes || '')
+                            }}
+                          >
+                            Observações
+                          </button>
                         </div>
                       </div>
                     </div>
                   ) : (
                     <div className="muted">Sem Programação</div>
                   )}
-
-                  {/* Fila */}
-                  <div className="sep"></div>
-                  <div className="label">Fila</div>
-                  <DndContext onDragEnd={(e)=>moverNaFila(m,e)} collisionDetection={closestCenter}>
-                    <SortableContext items={fila.map(f=>f.id)} strategy={horizontalListSortingStrategy}>
-                      <div className="fila">
-                        {fila.length===0 && <div className="muted">Sem itens na fila</div>}
-                        {fila.map(f=>(
-                          <FilaSortableItem key={f.id} ordem={f} onEdit={()=>setEditando(f)} />
-                        ))}
-                      </div>
-                    </SortableContext>
-                  </DndContext>
                 </div>
               </div>
             );
@@ -319,6 +339,7 @@ export default function App(){
                         </div>
                         <div className="flex" style={{justifyContent:'flex-end'}}>
                           <button className="btn" onClick={()=>setFinalizando(ativa)}>Finalizar</button>
+                          {/* Na LISTA mantém o Editar completo */}
                           <button className="btn" onClick={()=>setEditando(ativa)}>Editar</button>
                         </div>
                       </div>
@@ -326,7 +347,7 @@ export default function App(){
                   ) : <div className="muted">Sem Programação</div>}
                 </div>
 
-                {/* Fila */}
+                {/* Fila (visível e arrastável apenas na LISTA) */}
                 <div>
                   <DndContext onDragEnd={(e)=>moverNaFila(m,e)} collisionDetection={closestCenter}>
                     <SortableContext items={fila.map(f=>f.id)} strategy={horizontalListSortingStrategy}>
@@ -405,40 +426,63 @@ export default function App(){
       )}
 
       {/* ====================== REGISTRO ====================== */}
-      {tab==='registro' && (
-        <div className="card">
-          <div className="label" style={{marginBottom:8}}>Últimas finalizações</div>
-          <div className="table">
-            <div className="thead">
-              <div>Número O.P</div>
-              <div>Máquina</div>
-              <div>Cliente</div>
-              <div>Produto</div>
-              <div>Qtd</div>
-              <div>Operador</div>
-              <div>Data/Hora</div>
-            </div>
-            <div className="tbody">
-              {finalizadas.length === 0 && (
-                <div className="row muted" style={{gridColumn:'1 / -1', padding:'8px 0'}}>Nenhuma ordem finalizada ainda.</div>
-              )}
-              {finalizadas.map(o => (
-                <div className="row" key={o.id}>
-                  <div>{o.code}</div>
-                  <div>{o.machine_id}</div>
-                  <div>{o.customer || '-'}</div>
-                  <div>{o.product || '-'}</div>
-                  <div>{o.qty || '-'}</div>
-                  <div>{o.finalized_by || '-'}</div>
-                  <div>{fmtDateTime(o.finalized_at)}</div>
-                </div>
-              ))}
+{tab==='registro' && (
+  <div className="card">
+    <div className="label" style={{marginBottom:8}}>Últimas finalizações</div>
+    <div className="table">
+      <div
+        className="thead"
+        style={{gridTemplateColumns: '140px 80px 1fr 1fr 100px 160px 180px 120px'}}
+      >
+        <div>Número O.P</div>
+        <div>Máquina</div>
+        <div>Cliente</div>
+        <div>Produto</div>
+        <div>Qtd</div>
+        <div>Operador</div>
+        <div>Data/Hora</div>
+        <div>Ações</div>
+      </div>
+
+      <div className="tbody">
+        {finalizadas.length === 0 && (
+          <div className="row muted" style={{gridColumn:'1 / -1', padding:'8px 0'}}>
+            Nenhuma ordem finalizada ainda.
+          </div>
+        )}
+
+        {finalizadas.map(o => (
+          <div
+            className="row"
+            key={o.id}
+            style={{gridTemplateColumns: '140px 80px 1fr 1fr 100px 160px 180px 120px'}}
+          >
+            <div>{o.code}</div>
+            <div>{o.machine_id}</div>
+            <div>{o.customer || '-'}</div>
+            <div>{o.product || '-'}</div>
+            <div>{o.qty || '-'}</div>
+            <div>{o.finalized_by || '-'}</div>
+            <div>{fmtDateTime(o.finalized_at)}</div>
+
+            {/* Ações */}
+            <div className="flex" style={{justifyContent:'flex-end'}}>
+              <button
+                className="btn ghost small"
+                onClick={()=>excluirRegistro(o)}
+                title="Excluir registro"
+              >
+                Excluir
+              </button>
             </div>
           </div>
-        </div>
-      )}
+        ))}
+      </div>
+    </div>
+  </div>
+)}
 
-      {/* ====================== MODAL EDITAR ====================== */}
+      {/* ====================== MODAL EDITAR (completo – usado na LISTA) ====================== */}
       <Modal
         open={!!editando}
         onClose={()=>setEditando(null)}
@@ -502,6 +546,41 @@ export default function App(){
                 await atualizar(editando)
                 setEditando(null)
               }}>Salvar</button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      {/* ====================== MODAL OBSERVAÇÕES (apenas notes – usado no PAINEL) ====================== */}
+      <Modal
+        open={!!obsEdit}
+        onClose={()=>setObsEdit(null)}
+        title={obsEdit ? `Observações • ${obsEdit.machine_id} • O.P ${obsEdit.code}` : ''}
+      >
+        {obsEdit && (
+          <div className="grid">
+            <div>
+              <div className="label">Observações da Máquina</div>
+              <textarea
+                className="textarea"
+                rows={5}
+                value={obsTexto}
+                onChange={(e)=>setObsTexto(e.target.value)}
+                placeholder="Anote informações importantes desta produção..."
+              />
+            </div>
+            <div className="sep"></div>
+            <div className="flex" style={{justifyContent:'flex-end'}}>
+              <button className="btn ghost" onClick={()=>setObsEdit(null)}>Cancelar</button>
+              <button
+                className="btn primary"
+                onClick={async ()=>{
+                  await atualizar({ ...obsEdit, notes: obsTexto })
+                  setObsEdit(null)
+                }}
+              >
+                Salvar
+              </button>
             </div>
           </div>
         )}

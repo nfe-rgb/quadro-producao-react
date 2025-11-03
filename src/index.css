@@ -1,30 +1,30 @@
 /* =======================
-   TEMA SAVANTI (Dark)
+   TEMA SAVANTI (Light)
    ======================= */
 
-/* (Opcional) Fonte Inter – pode remover se preferir só system-ui */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+/* Fonte (pode remover se quiser só system-ui) */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
 
 :root{
-  /* Cores base (inspiradas na sua logo) */
-  --bg:           #0b0e14;   /* fundo */
-  --panel:        #0f1420;   /* painéis/colunas */
-  --card:         #121a27;   /* cartões */
-  --card-2:       #0f1726;   /* variação */
-  --border:       #1f2a3a;
-  --text:         #e6edf3;
-  --muted:        #a7b3c2;
+  /* Paleta base (a partir do logo) */
+  --bg:            #b1e2e9;  /* fundo da página */
+  --panel:         #FFFFFF;  /* painéis/colunas */
+  --card:          #FFFFFF;  /* cartões */
+  --card-2:        #F7F9FC;  /* variação sutil */
+  --border:        #D6DEE6;  /* linhas/bordas */
+  --text:          #000000;  /* texto padrão */
+  --muted:         #607482;  /* texto secundário */
 
-  --primary:      #ff8a00;   /* laranja Savanti */
-  --primary-700:  #cc6d00;
-  --secondary:    #1aa3ff;   /* azul/ciano do miolo do logo */
-  --secondary-700:#1283cc;
+  --primary:       #FF6F00;  /* laranja Savanti */
+  --primary-700:   #E65100;
+  --secondary:     #0277BD;  /* azul Savanti */
+  --secondary-700: #015F96;
 
-  --green:  #16a34a;
-  --yellow: #f59e0b;
-  --red:    #ef4444;
+  --green:  #2E7D32;
+  --yellow: #EF6C00;
+  --red:    #C62828;
 
-  --shadow: 0 12px 24px rgba(0,0,0,.35);
+  --shadow: 0 8px 18px rgba(31, 45, 61, .08);
 }
 
 * { box-sizing: border-box; }
@@ -34,6 +34,7 @@ body{
   background: var(--bg);
   color: var(--text);
   font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+  font-size: 17px;          /* novo: aumenta base do app (era implícito ~16px) */
 }
 
 /* Remover limites do template Vite */
@@ -44,20 +45,36 @@ body{
    Brand bar (topo)
    ======================= */
 .brand-bar{
-  display: flex; align-items: center; gap: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;   /* CENTRALIZA HORIZONTAL */
+  gap: 14px;
   margin: 6px 0 18px;
+  text-align: center;        /* garante centralização do texto */
 }
+
 .brand-logo{
-  height: 44px; width: auto; display: block;
-  filter: drop-shadow(0 6px 16px rgba(0,0,0,.35));
+  height: 56px;              /* maior que 44px */
+  width: auto;
+  display: block;
 }
-.brand-titles{ display:flex; flex-direction:column; gap:4px; }
+.brand-titles{
+  display:flex;
+  flex-direction:column;
+  gap:4px;
+  align-items: center;        /* alinha os textos ao centro */
+}
 .brand-title{
-  margin:0; font-size: 30px; line-height: 1.15; font-weight: 800;
+  margin:0;
+  font-size: 36px;            /* antes: 30px */
+  line-height: 1.15;
+  font-weight: 800;
   letter-spacing:.2px;
+  color: var(--text);
 }
 .brand-sub{
-  font-size: 13px; color: var(--muted);
+  font-size: 15px;            /* antes: 13px */
+  color: var(--muted);
 }
 
 /* =======================
@@ -72,27 +89,47 @@ body{
   padding: 8px 14px;
   cursor: pointer;
   font-weight: 600;
-  transition: transform .05s ease, background .2s ease, border-color .2s ease;
+  transition: transform .05s ease, background .2s ease, border-color .2s ease, box-shadow .2s ease;
+  box-shadow: 0 2px 0 rgba(2, 119, 189, .0);
 }
-.tabbtn:hover{ border-color: var(--secondary); }
+.tabbtn:hover{ border-color: var(--secondary); box-shadow: 0 2px 0 rgba(2, 119, 189, .12); }
 .tabbtn:active{ transform: translateY(1px); }
 .tabbtn.active{
   background: linear-gradient(90deg, var(--primary), var(--secondary));
   border-color: transparent;
-  color: #0b0e14;
-  text-shadow: 0 1px 0 rgba(255,255,255,.15);
+  color: #FFFFFF;
+  text-shadow: none;
 }
 
 /* =======================
    Helpers
    ======================= */
 .grid { display:grid; gap: 12px; }
-.grid2{ display:grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 12px; }
+.grid2{ 
+  display:grid; 
+  grid-template-columns: repeat(2, minmax(0,1fr)); 
+  gap: 12px; 
+}
+.grid2 .flex {
+  flex-wrap: wrap;                 /* permite quebra de linha */
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+/* Em telas menores, empilha os botões abaixo do select */
+@media (max-width: 880px){
+  .grid2 {
+    grid-template-columns: 1fr;    /* força uma coluna só */
+  }
+  .grid2 .flex {
+    justify-content: center;       /* centraliza botões ao empilhar */
+  }
+}
 .flex { display:flex; gap:8px; align-items:center; }
 .sep  { height:1px; background: var(--border); margin: 10px 0; }
-.label{ font-size:12px; color: var(--muted); margin-bottom: 6px; font-weight: 600; letter-spacing:.3px; }
+.label{ font-size:13px; color: var(--muted); margin-bottom: 6px; font-weight: 600; letter-spacing:.3px; }
 .muted{ color: var(--muted); font-style: italic; }
-.small{ font-size: 13px; line-height: 1.35; }
+.small{ font-size: 14px; line-height: 1.35; }
 
 /* =======================
    Kanban (Painel)
@@ -113,9 +150,10 @@ body{
 .column-header{
   padding: 12px 14px;
   font-weight: 800;
-  background: linear-gradient(180deg, rgba(255,138,0,.08), rgba(0,0,0,0));
+  background: linear-gradient(180deg, rgba(2,119,189,.06), rgba(255,255,255,0));
   border-bottom: 1px solid var(--border);
   letter-spacing:.4px;
+  color: var(--text);
 }
 .column-body{
   padding: 12px;
@@ -129,10 +167,20 @@ body{
   border-radius: 12px;
   padding: 12px;
   box-shadow: var(--shadow);
+  color: var(--text);
 }
-.card.green  { border-left: 6px solid var(--green);  background: linear-gradient(180deg, #0e1a15, var(--card)); }
-.card.yellow { border-left: 6px solid var(--yellow); background: linear-gradient(180deg, #1e180b, var(--card)); }
-.card.red    { border-left: 6px solid var(--red);    background: linear-gradient(180deg, #1e0f0f, var(--card)); }
+.card.green{
+  border-left: 6px solid var(--green);
+  background: linear-gradient(180deg, #F0F7F2, var(--card));
+}
+.card.yellow{
+  border-left: 6px solid var(--yellow);
+  background: linear-gradient(180deg, #FFF3E5, var(--card));
+}
+.card.red{
+  border-left: 6px solid var(--red);
+  background: linear-gradient(180deg, #FBEAEA, var(--card));
+}
 
 /* Inputs */
 .input, .select{
@@ -143,30 +191,32 @@ body{
   border-radius: 10px;
   padding: 10px 12px;
   outline: none;
-  transition: border-color .2s ease, box-shadow .2s ease;
+  transition: border-color .2s ease, box-shadow .2s ease, background .2s ease;
 }
+.input::placeholder{ color: #8aa0ad; }
 .input:focus, .select:focus{
   border-color: var(--secondary);
-  box-shadow: 0 0 0 3px rgba(26,163,255,.15);
+  box-shadow: 0 0 0 3px rgba(2,119,189,.18);
+  background: #FFFFFF;
 }
 
 /* Botões */
 .btn{
-  background: #1b2737;
+  background: #ffffff;
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 10px 12px;
   cursor: pointer;
-  font-weight: 600;
+  font-weight: 700;
   transition: transform .05s ease, background .2s ease, border-color .2s ease, box-shadow .2s ease;
 }
-.btn:hover{ border-color: var(--secondary); }
+.btn:hover{ border-color: var(--secondary); box-shadow: 0 4px 10px rgba(2,119,189,.12); }
 .btn:active{ transform: translateY(1px); }
 .btn.primary{
   background: linear-gradient(90deg, var(--primary), var(--secondary));
   border-color: transparent;
-  color: #0b0e14;
+  color: #FFFFFF;
 }
 .btn.ghost{
   background: transparent;
@@ -183,18 +233,28 @@ body{
   font-weight: 800;
   border-bottom: 1px solid var(--border);
   padding-bottom: 8px;
-  position: sticky; top: 0;
-  background: var(--bg);
+  position: sticky;
+  top: 0;
+  background: transparent;   /* REMOVE A FAIXA BRANCA */
   z-index: 1;
   letter-spacing:.3px;
+  color: var(--text);
 }
+
 .tableline{ padding: 8px 0; border-bottom: 1px dashed var(--border); }
 .badge{
-  display:inline-flex; align-items:center; justify-content:center;
-  min-width: 48px; padding: 4px 10px; border-radius: 999px;
-  background: #10192a;
-  border: 1px solid var(--border);
-  font-weight: 700;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  min-width: 54px;               /* um pouco maior */
+  padding: 6px 12px;             /* mais espaço interno */
+  border-radius: 12px;           /* menos “círculo”, mais pill */
+  background: var(--primary);;  /* cor azul da marca */
+  color: #fff;                   /* texto branco para contraste */
+  border: none;                  /* remove o contorno branco */
+  font-weight: 800;              /* deixa o texto mais forte */
+  font-size: 16px;               /* aumenta o tamanho da fonte */
+  box-shadow: 0 2px 4px rgba(2,119,189,.15); /* leve sombra */
 }
 
 /* Fila (drag) */
@@ -204,7 +264,7 @@ body{
 /* Modal */
 .modalbg{
   position: fixed; inset:0;
-  background: rgba(0,0,0,.55);
+  background: rgba(38,50,56,.35);
   display: grid; place-items: center; z-index: 999;
 }
 .modal{
@@ -214,14 +274,13 @@ body{
   width: min(720px, 92vw);
   padding: 18px;
   box-shadow: var(--shadow);
+  color: var(--text);
 }
 
 /* =======================
-   Tabela REGISTRO (fix contraste)
+   Tabela REGISTRO (contraste OK)
    ======================= */
-.card .table{
-  display:grid; gap: 8px;
-}
+.card .table{ display:grid; gap: 8px; }
 .thead, .row{
   display:grid;
   grid-template-columns: 140px 80px 1fr 1fr 100px 160px 180px;
@@ -230,7 +289,7 @@ body{
 .thead{
   font-weight: 800;
   color: var(--text);
-  background: linear-gradient(180deg, rgba(26,163,255,.12), rgba(0,0,0,0));
+  background: linear-gradient(180deg, rgba(2,119,189,.10), rgba(255,255,255,0));
   padding: 8px 10px;
   border: 1px solid var(--border);
   border-radius: 10px;
@@ -240,13 +299,12 @@ body{
   border: 1px dashed var(--border);
   border-radius: 10px;
   background: var(--card-2);
+  color: var(--text);
 }
-.tbody .row:nth-child(odd){
-  background: var(--card);
-}
+.tbody .row:nth-child(odd){ background: var(--card); }
 .tbody .row:hover{
   border-color: var(--secondary);
-  box-shadow: 0 0 0 3px rgba(26,163,255,.12);
+  box-shadow: 0 0 0 3px rgba(2,119,189,.12);
 }
 .tbody .row .muted{ color: var(--muted); }
 
