@@ -5,11 +5,11 @@ import { SortableContext, horizontalListSortingStrategy, arrayMove, useSortable 
 import { CSS } from '@dnd-kit/utilities'
 
 const MAQUINAS = ['P1','P2','P3','I1','I2','I3','I4','I5','I6']
-const STATUS = ['PRODUZINDO','FORA_DE_CICLO','PARADA']
+const STATUS = ['PRODUZINDO','BAIXA_EFICIÊNCIA','PARADA']
 
 function statusClass(s){
   if(s==='PRODUZINDO') return 'card green'
-  if(s==='FORA_DE_CICLO') return 'card yellow'
+  if(s==='BAIXA_EFICIÊNCIA') return 'card yellow'
   if(s==='PARADA') return 'card red'
   return 'card'
 }
