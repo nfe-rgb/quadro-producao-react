@@ -17,7 +17,7 @@ function statusClass(s){
 function Etiqueta({o}) {
   return (
     <div className="small">
-      <div><b>Código:</b> {o.code}</div>
+      <div><b>Número O.P:</b> {o.code}</div>
       {o.customer && <div><b>Cliente:</b> {o.customer}</div>}
       {o.product && <div><b>Produto:</b> {o.product}</div>}
       {o.color && <div><b>Cor:</b> {o.color}</div>}
@@ -65,11 +65,11 @@ export default function App(){
 
   // ======= Supabase =======
   async function fetchOrdens(){
-    const { data } = await supabase.from('orders')
+    const { data, error } = await supabase.from('orders')
       .select('*').eq('finalized', false)
       .order('pos', { ascending:true })
       .order('created_at', { ascending:true })
-    setOrdens(data || [])
+    if (!error) setOrdens(data || [])
   }
 
   useEffect(()=>{
@@ -80,43 +80,69 @@ export default function App(){
     return ()=> supabase.removeChannel(ch)
   },[])
 
+  // ======= CRUD
   async function criarOrdem(){
     if(!form.code.trim()) return
-    const count = ordens.filter(o=>o.machine_id===form.machine_id).length
-    await supabase.from('orders').insert([{
+    const count = ordens.filter(o=>o.machine_id===form.machine_id && !o.finalized).length
+    const novo = {
       machine_id: form.machine_id,
       code: form.code, customer: form.customer, product: form.product, color: form.color,
       qty: form.qty, boxes: form.boxes, standard: form.standard, due_date: form.due_date || null, notes: form.notes,
-      status: 'PRODUZINDO', pos: count
-    }])
+      status: 'PRODUZINDO', pos: count, finalized: false
+    }
+
+    // Otimista: aparece na hora
+    const tempId = `tmp-${crypto.randomUUID()}`
+    setOrdens(prev => [...prev, { id: tempId, ...novo }])
+
+    const { data, error } = await supabase
+      .from('orders')
+      .insert([novo])
+      .select('*')
+      .single()
+
+    if (error) {
+      // rollback
+      setOrdens(prev => prev.filter(o => o.id !== tempId))
+      alert('Erro ao criar ordem: ' + error.message)
+      return
+    }
+
+    // troca temp pelo real
+    setOrdens(prev => prev.map(o => o.id === tempId ? data : o))
+
     setForm({code:'', customer:'', product:'', color:'', qty:'', boxes:'', standard:'', due_date:'', notes:'', machine_id:'P1'})
     setTab('painel')
   }
 
   async function atualizar(ordemParcial){ // salvar edição
-    await supabase.from('orders').update({
+    const { error } = await supabase.from('orders').update({
       machine_id: ordemParcial.machine_id,
       code: ordemParcial.code, customer: ordemParcial.customer, product: ordemParcial.product, color: ordemParcial.color,
       qty: ordemParcial.qty, boxes: ordemParcial.boxes, standard: ordemParcial.standard, due_date: ordemParcial.due_date || null,
       notes: ordemParcial.notes, status: ordemParcial.status, pos: ordemParcial.pos ?? null
     }).eq('id', ordemParcial.id)
+    if (error) alert('Erro ao atualizar: ' + error.message)
   }
 
   async function setStatus(ordem, s){
-    await supabase.from('orders').update({ status:s }).eq('id', ordem.id)
+    const { error } = await supabase.from('orders').update({ status:s }).eq('id', ordem.id)
+    if (error) alert('Erro ao alterar status: ' + error.message)
   }
 
   async function finalizar(ordem, {por,data,hora}){
-    await supabase.from('orders').update({
+    const { error } = await supabase.from('orders').update({
       finalized:true, finalized_by: por, finalized_at: `${data}T${hora}:00`
     }).eq('id', ordem.id)
+    if (error) alert('Erro ao finalizar: ' + error.message)
   }
 
   async function moverNaFila(maquina, e){
     const {active, over} = e; if(!active || !over) return
     const aId = String(active.id); const oId = String(over.id); if(aId===oId) return
-    const lista = ordens.filter(o=>!o.finalized && o.machine_id===maquina)
-                        .sort((a,b)=>(a.pos ?? 999)-(b.pos ?? 999));
+    const lista = ordens
+      .filter(o=>!o.finalized && o.machine_id===maquina)
+      .sort((a,b)=>(a.pos ?? 999)-(b.pos ?? 999));
     if(!lista.length) return
     const ativa = lista[0]
     const fila = lista.slice(1)
@@ -125,17 +151,17 @@ export default function App(){
     if(oldIndex<0 || newIndex<0) return
     const novaFila = arrayMove(fila, oldIndex, newIndex)
     const nova = [ativa, ...novaFila].map((o,i)=>({ id:o.id, pos:i }))
-    await supabase.from('orders').upsert(nova)
+    const { error } = await supabase.from('orders').upsert(nova)
+    if (error) alert('Erro ao mover: ' + error.message)
   }
 
-  // ======= Derivados: ativos por máquina, painel e filas =======
+  // ======= Derivados: ativos por máquina e painel =======
   const ativosPorMaquina = useMemo(()=>{
     const map = Object.fromEntries(MAQUINAS.map(m=>[m,[]]))
-    ordens.forEach(o=>{ map[o.machine_id]?.push(o) })
-    Object.values(map).forEach(list=>{
-      list.sort((a,b)=>(a.pos ?? 999) - (b.pos ?? 999))
-      list.forEach((o,i)=> o.pos = i)
-    })
+    ordens.forEach(o => { if (!o.finalized) map[o.machine_id]?.push(o) })
+    for (const m of MAQUINAS) {
+      map[m] = [...map[m]].sort((a,b)=>(a.pos ?? 999)-(b.pos ?? 999))
+    }
     return map
   },[ordens])
 
@@ -167,42 +193,68 @@ export default function App(){
         <button className={`tabbtn ${tab==='nova'?'active':''}`} onClick={()=>setTab('nova')}>Nova Ordem</button>
       </div>
 
-      {/* ====================== PAINEL ====================== */}
-      {tab==='painel' && (
-        <div className="grid">
-          {MAQUINAS.map(m=>{
-            const ativa = painel[m]
-            return (
-              <div key={m} className="row">
-                <div className="rowhead">{m}</div>
-                {ativa ? (
-                  <div className={statusClass(ativa.status)}>
-                    <div className="flex" style={{justifyContent:'space-between'}}>
-                      <Etiqueta o={ativa}/>
-                      <div className="grid" style={{minWidth:240}}>
-                        <div className="label">Situação</div>
-                        <select
-                          className="select"
-                          value={ativa.status}
-                          onChange={e=>setStatus(ativa, e.target.value)}
-                        >
-                          <option value="PRODUZINDO">PRODUZINDO</option>
-                          <option value="FORA_DE_CICLO">FORA DE CICLO</option>
-                          <option value="PARADA">PARADA</option>
-                        </select>
-                        <div className="flex">
-                          <button className="btn" onClick={()=>setFinalizando(ativa)}>Finalizar</button>
-                          <button className="btn" onClick={()=>setEditando(ativa)}>Editar</button>
-                        </div>
-                      </div>
-                    </div>
+      {/* ====================== PAINEL (EM COLUNAS) ====================== */}
+{tab==='painel' && (
+  <div className="board">
+    {MAQUINAS.map(m=>{
+      const lista = (ativosPorMaquina[m] ?? []);
+      const ativa = lista[0] || null;
+      const fila  = lista.slice(1);
+
+      return (
+        <div key={m} className="column">
+          <div className="column-header">
+            {m}
+            <span style={{fontWeight:400, opacity:.8}}> • fila: {fila.length}</span>
+          </div>
+          <div className="column-body">
+            {/* card do painel da máquina */}
+            {ativa ? (
+              <div className={statusClass(ativa.status)}>
+                <Etiqueta o={ativa}/>
+                <div className="sep"></div>
+                <div className="grid2">
+                  <div>
+                    <div className="label">Situação</div>
+                    <select
+                      className="select"
+                      value={ativa.status}
+                      onChange={e=>setStatus(ativa,e.target.value)}
+                    >
+                      {STATUS.map(s=>(
+                        <option key={s} value={s}>{s.replace('_',' ')}</option>
+                      ))}
+                    </select>
                   </div>
-                ) : <div className="muted">Sem Programação</div>}
+                  <div className="flex" style={{justifyContent:'flex-end'}}>
+                    <button className="btn" onClick={()=>setFinalizando(ativa)}>Finalizar</button>
+                    <button className="btn" onClick={()=>setEditando(ativa)}>Editar</button>
+                  </div>
+                </div>
               </div>
-            )
-          })}
+            ) : (
+              <div className="muted">Sem Programação</div>
+            )}
+
+            {/* fila arrastável */}
+            <div className="sep"></div>
+            <div className="label">Fila</div>
+            <DndContext onDragEnd={(e)=>moverNaFila(m,e)} collisionDetection={closestCenter}>
+              <SortableContext items={fila.map(f=>f.id)} strategy={horizontalListSortingStrategy}>
+                <div className="fila">
+                  {fila.length===0 && <div className="muted">Sem itens na fila</div>}
+                  {fila.map(f=>(
+                    <FilaSortableItem key={f.id} ordem={f} onEdit={()=>setEditando(f)} />
+                  ))}
+                </div>
+              </SortableContext>
+            </DndContext>
+          </div>
         </div>
-      )}
+      );
+    })}
+  </div>
+)}
 
       {/* ====================== LISTA ====================== */}
       {tab==='lista' && (
@@ -267,7 +319,7 @@ export default function App(){
           <div className="card">
             <div className="grid2">
               <div>
-                <div className="label">Código</div>
+                <div className="label">Número O.P</div>
                 <input className="input" value={form.code} onChange={e=>setForm(f=>({...f, code:e.target.value}))}/>
               </div>
               <div>
@@ -324,13 +376,13 @@ export default function App(){
       <Modal
         open={!!editando}
         onClose={()=>setEditando(null)}
-        title={editando ? `Editar ordem ${editando.code}` : ''}
+        title={editando ? `Editar O.P ${editando.code}` : ''}
       >
         {editando && (
           <div className="grid">
             <div className="grid2">
               <div>
-                <div className="label">Código</div>
+                <div className="label">Número O.P</div>
                 <input className="input" value={editando.code} onChange={e=>setEditando(v=>({...v, code:e.target.value}))}/>
               </div>
               <div>
