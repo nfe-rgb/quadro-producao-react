@@ -3,6 +3,7 @@ import { supabase } from './lib/supabaseClient.js'
 import { DndContext, closestCenter, useSensor, useSensors, MouseSensor, TouchSensor } from '@dnd-kit/core'
 import { SortableContext, horizontalListSortingStrategy, arrayMove, useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
+import { createPortal } from 'react-dom';
 
 const MAQUINAS = ['P1','P2','P3','I1','I2','I3','I4','I5','I6']
 const STATUS = ['AGUARDANDO','PRODUZINDO','BAIXA_EFICIENCIA','PARADA']
@@ -54,16 +55,20 @@ function Etiqueta({o}) {
   )
 }
 
-function Modal({open,onClose,title,children}){
-  if(!open) return null
-  return (
-    <div className="modalbg" onClick={onClose}>
-      <div className="modal" onClick={e=>e.stopPropagation()}>
-        <h3 style={{marginTop:0}}>{title}</h3>
+function Modal({ open, onClose, title, children }) {
+  if (!open) return null;
+
+  const modalEl = (
+    <div className="modalbg" role="dialog" aria-modal="true" onClick={onClose}>
+      <div className="modal" onClick={(e)=>e.stopPropagation()}>
+        {title ? <h3 style={{marginTop:0}}>{title}</h3> : null}
         {children}
       </div>
     </div>
-  )
+  );
+
+  // renderiza fora da árvore (no body), evitando contexto de empilhamento
+  return createPortal(modalEl, document.body);
 }
 
 function FilaSortableItem({ordem, onEdit}) {
