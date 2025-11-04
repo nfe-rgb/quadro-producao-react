@@ -414,5 +414,72 @@ body{
   color: #C62828;
   font-size: 18px;
 }
+/* ===== Linha do Tempo (Registro) ===== */
+
+.timeline{
+  display: grid;
+  grid-auto-flow: column;                 /* PC: cartões na horizontal */
+  grid-auto-columns: minmax(260px, 1fr);  /* ocupam a linha toda de forma fluida */
+  gap: 12px;
+  overflow-x: auto;                       /* se tiver muitos eventos, rola para o lado */
+  padding: 8px 2px 10px;
+  scroll-snap-type: x proximity;
+  -webkit-overflow-scrolling: touch;
+}
+.timeline > * { scroll-snap-align: start; }
+
+.tl-card{
+  border: 1px solid var(--border);
+  background: var(--card);
+  border-radius: 12px;
+  padding: 12px;
+  box-shadow: var(--shadow);
+  color: var(--text);
+  display: grid;
+  gap: 6px;
+  min-width: 240px;                       /* garante legibilidade */
+}
+.tl-title{
+  font-weight: 800;
+  letter-spacing: .2px;
+}
+.tl-meta{
+  font-size: 14px;
+  line-height: 1.35;
+}
+.tl-notes{
+  font-size: 13px;
+  color: var(--muted);
+  border-top: 1px dashed var(--border);
+  padding-top: 6px;
+}
+
+/* Cores por tipo */
+.tl-start{
+  border-left: 6px solid #2E7D32;
+  background: linear-gradient(180deg, #A5D6A7 0%, #E8F5E9 100%);
+}
+.tl-stop{
+  border-left: 6px solid #C62828;
+  background: linear-gradient(180deg, #EF9A9A 0%, #FFEBEE 100%);
+}
+.tl-end{
+  border-left: 6px solid #455A64;
+  background: linear-gradient(180deg, #CFD8DC 0%, #ECEFF1 100%);
+}
+.tl-empty{
+  border-left: 6px solid var(--border);
+  background: var(--card-2);
+}
+
+/* Mobile: timeline vira coluna (sem esconder nada) */
+@media (max-width: 820px){
+  .timeline{
+    grid-auto-flow: row;
+    grid-auto-columns: unset;
+    grid-template-columns: 1fr;           /* cartões em coluna */
+    overflow-x: visible;
+  }
+}
 
 

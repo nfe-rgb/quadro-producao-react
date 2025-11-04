@@ -599,60 +599,157 @@ export default function App(){
       )}
 
       {/* ====================== REGISTRO (agrupado por O.P) ====================== */}
-      {tab==='registro' && (
-        <div className="card">
-          <div className="label" style={{marginBottom:8}}>Histórico por Ordem de Produção</div>
-          <div className="table">
-            <div className="thead" style={{gridTemplateColumns:'140px 1fr 120px 120px 100px'}}>
-              <div>O.P</div><div>Cliente / Produto / Cor / Qtd</div><div>Início</div><div>Fim</div><div>Abrir</div>
-            </div>
-            <div className="tbody">
-              {registroGrupos.length===0 && (
-                <div className="row muted" style={{gridColumn:'1 / -1', padding:'8px 0'}}>Sem registros ainda.</div>
-              )}
-              {registroGrupos.map(gr=>{
-                const o = gr.ordem
-                return (
-                  <div key={o.id} style={{display:'contents'}}>
-                    {/* Cabeçalho do grupo */}
-                    <div className="row" style={{gridTemplateColumns:'140px 1fr 120px 120px 100px', cursor:'pointer'}} onClick={()=>toggleOpen(o.id)}>
-                      <div>{o.code}</div>
-                      <div>{[o.customer,o.product,o.color,o.qty].filter(Boolean).join(' • ') || '-'}</div>
-                      <div>{o.started_at ? fmtDateTime(o.started_at) : '-'}</div>
-                      <div>{o.finalized_at ? fmtDateTime(o.finalized_at) : '-'}</div>
-                      <div>{openSet.has(o.id) ? '▲' : '▼'}</div>
-                    </div>
+{tab==='registro' && (
+  <div className="card">
+    <div className="label" style={{marginBottom:8}}>Histórico por Ordem de Produção</div>
 
-                    {/* Corpo expandido */}
-                    {openSet.has(o.id) && (
-                      <div className="row" style={{gridColumn:'1 / -1', background:'#fafafa'}}>
-                        <div className="grid" style={{width:'100%', gap:8}}>
-                          {/* Início */}
-                          <div className="small"><b>Início da produção:</b> {o.started_at ? `${fmtDateTime(o.started_at)} • ${o.started_by||'-'}` : '-'}</div>
-                          {/* Paradas */}
-                          {gr.stops.length===0 ? (
-                            <div className="small muted">Sem paradas registradas.</div>
-                          ) : gr.stops.map(st=>(
-                            <div key={st.id} className="small">
-                              <b>Parada:</b> {fmtDateTime(st.started_at)} {st.started_by?`• ${st.started_by}`:''}
-                              {' '}→ {st.resumed_at ? fmtDateTime(st.resumed_at) : '—'}
-                              {' '}<b>Duração:</b> {fmtDuracao(st.started_at, st.resumed_at)}
-                              {' '}<b>Motivo:</b> {st.reason || '-'}
-                              {st.notes ? ` — ${st.notes}` : ''}
-                            </div>
-                          ))}
-                          {/* Fim */}
-                          <div className="small"><b>Fim da produção:</b> {o.finalized_at ? `${fmtDateTime(o.finalized_at)} • ${o.finalized_by||'-'}` : '-'}</div>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )
-              })}
-            </div>
+    <div className="table">
+      {/* Cabeçalho compacto */}
+      <div className="thead" style={{gridTemplateColumns:'140px 1fr 140px 140px 80px'}}>
+        <div>O.P</div>
+        <div>Cliente / Produto / Cor / Qtd</div>
+        <div>Início</div>
+        <div>Fim</div>
+        <div>Abrir</div>
+      </div>
+
+      <div className="tbody">
+        {registroGrupos.length===0 && (
+          <div className="row muted" style={{gridColumn:'1 / -1', padding:'8px 0'}}>
+            Sem registros ainda.
           </div>
-        </div>
-      )}
+        )}
+
+        {registroGrupos.map(gr=>{
+          const o = gr.ordem
+
+          // ========== monta eventos da linha do tempo ==========
+          const events = []
+          if (o.started_at) {
+            events.push({
+              id: `start-${o.id}`,
+              type: 'start',
+              title: 'Início da produção',
+              when: o.started_at,
+              who:  o.started_by || '-'
+            })
+          }
+          if (gr.stops.length) {
+            gr.stops.forEach(st=>{
+              events.push({
+                id: `stop-${st.id}`,
+                type: 'stop',
+                title: 'Parada',
+                when: st.started_at,
+                end: st.resumed_at || null,
+                who: st.started_by || '-',
+                reason: st.reason || '-',
+                notes: st.notes || '',
+              })
+            })
+          }
+          if (o.finalized_at) {
+            events.push({
+              id: `end-${o.id}`,
+              type: 'end',
+              title: 'Fim da produção',
+              when: o.finalized_at,
+              who:  o.finalized_by || '-'
+            })
+          }
+          if (!events.length) {
+            // sem nada registrado: mostra placeholder
+            events.push({
+              id: `empty-${o.id}`,
+              type: 'empty',
+              title: 'Sem eventos',
+              when: null
+            })
+          }
+
+          return (
+            <div key={o.id} style={{display:'contents'}}>
+              {/* Linha “grupo” (clicável) */}
+              <div
+                className="row grupo-head"
+                style={{gridTemplateColumns:'140px 1fr 140px 140px 80px', cursor:'pointer'}}
+                onClick={()=>toggleOpen(o.id)}
+              >
+                <div>{o.code}</div>
+                <div>{[o.customer,o.product,o.color,o.qty].filter(Boolean).join(' • ') || '-'}</div>
+                <div>{o.started_at ? fmtDateTime(o.started_at) : '-'}</div>
+                <div>{o.finalized_at ? fmtDateTime(o.finalized_at) : '-'}</div>
+                <div>{openSet.has(o.id) ? '▲' : '▼'}</div>
+              </div>
+
+              {/* Linha do tempo expandida */}
+              {openSet.has(o.id) && (
+                <div className="row" style={{gridColumn:'1 / -1', background:'#fafafa'}}>
+                  <div className="timeline">
+                    {events.map(ev=>{
+                      if (ev.type==='empty') {
+                        return (
+                          <div key={ev.id} className="tl-card tl-empty">
+                            <div className="tl-title">Sem eventos</div>
+                            <div className="tl-meta muted">Esta O.P ainda não possui início, paradas ou fim registrados.</div>
+                          </div>
+                        )
+                      }
+
+                      if (ev.type==='start') {
+                        return (
+                          <div key={ev.id} className="tl-card tl-start">
+                            <div className="tl-title">🚀 {ev.title}</div>
+                            <div className="tl-meta"><b>Data/Hora:</b> {fmtDateTime(ev.when)}</div>
+                            <div className="tl-meta"><b>Operador:</b> {ev.who}</div>
+                          </div>
+                        )
+                      }
+
+                      if (ev.type==='stop') {
+                        // calcula duração se tiver retomada
+                        let dur = '-'
+                        if (ev.end) {
+                          const sec = Math.max(0, Math.floor((new Date(ev.end)-new Date(ev.when))/1000))
+                          const h = String(Math.floor(sec/3600)).padStart(2,'0')
+                          const m = String(Math.floor((sec%3600)/60)).padStart(2,'0')
+                          const s = String(sec%60).padStart(2,'0')
+                          dur = `${h}:${m}:${s}`
+                        }
+
+                        return (
+                          <div key={ev.id} className="tl-card tl-stop">
+                            <div className="tl-title">⛔ {ev.title}</div>
+                            <div className="tl-meta"><b>Início:</b> {fmtDateTime(ev.when)}</div>
+                            <div className="tl-meta"><b>Fim:</b> {ev.end ? fmtDateTime(ev.end) : '— (em aberto)'}</div>
+                            <div className="tl-meta"><b>Duração:</b> {dur}</div>
+                            <div className="tl-meta"><b>Operador:</b> {ev.who}</div>
+                            <div className="tl-meta"><b>Motivo:</b> {ev.reason}</div>
+                            {ev.notes ? <div className="tl-notes">{ev.notes}</div> : null}
+                          </div>
+                        )
+                      }
+
+                      // end
+                      return (
+                        <div key={ev.id} className="tl-card tl-end">
+                          <div className="tl-title">🏁 {ev.title}</div>
+                          <div className="tl-meta"><b>Data/Hora:</b> {fmtDateTime(ev.when)}</div>
+                          <div className="tl-meta"><b>Operador:</b> {ev.who}</div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  </div>
+)}
+
 
       {/* ====================== MODAIS ====================== */}
       {/* Editar */}
