@@ -34,7 +34,9 @@ body{
   background: var(--bg);
   color: var(--text);
   font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
-  font-size: 17px;          /* novo: aumenta base do app (era implícito ~16px) */
+  font-size: 17px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 /* Remover limites do template Vite */
@@ -47,14 +49,14 @@ body{
 .brand-bar{
   display: flex;
   align-items: center;
-  justify-content: center;   /* CENTRALIZA HORIZONTAL */
+  justify-content: center;
   gap: 14px;
   margin: 6px 0 18px;
-  text-align: center;        /* garante centralização do texto */
+  text-align: center;
 }
 
 .brand-logo{
-  height: 80px;       /* antes 56px — agora bem mais visível */
+  height: 80px;
   width: auto;
   display: block;
   filter: drop-shadow(0 4px 12px rgba(0,0,0,0.25));
@@ -63,18 +65,18 @@ body{
   display:flex;
   flex-direction:column;
   gap:4px;
-  align-items: center;        /* alinha os textos ao centro */
+  align-items: center;
 }
 .brand-title{
   margin:0;
-  font-size: 36px;            /* antes: 30px */
+  font-size: 36px;
   line-height: 1.15;
   font-weight: 800;
   letter-spacing:.2px;
   color: var(--text);
 }
 .brand-sub{
-  font-size: 15px;            /* antes: 13px */
+  font-size: 15px;
   color: var(--muted);
 }
 
@@ -106,25 +108,15 @@ body{
    Helpers
    ======================= */
 .grid { display:grid; gap: 12px; }
-.grid2{ 
-  display:grid; 
-  grid-template-columns: repeat(2, minmax(0,1fr)); 
-  gap: 12px; 
+.grid2{
+  display:grid;
+  grid-template-columns: repeat(2, minmax(0,1fr));
+  gap: 12px;
 }
 .grid2 .flex {
-  flex-wrap: wrap;                 /* permite quebra de linha */
+  flex-wrap: wrap;
   gap: 10px;
   justify-content: flex-end;
-}
-
-/* Em telas menores, empilha os botões abaixo do select */
-@media (max-width: 880px){
-  .grid2 {
-    grid-template-columns: 1fr;    /* força uma coluna só */
-  }
-  .grid2 .flex {
-    justify-content: center;       /* centraliza botões ao empilhar */
-  }
 }
 .flex { display:flex; gap:8px; align-items:center; }
 .sep  { height:1px; background: var(--border); margin: 10px 0; }
@@ -172,29 +164,24 @@ body{
 }
 /* ==== cores mais vibrantes nas situações ==== */
 .card.green {
-  border-left: 8px solid #2E7D32; /* verde mais forte */
+  border-left: 8px solid #2E7D32;
   background: linear-gradient(180deg, #A5D6A7 0%, #E8F5E9 100%);
   color: #1B5E20;
   box-shadow: 0 0 10px rgba(46,125,50,0.25);
 }
-
 .card.yellow {
-  border-left: 8px solid #F57C00; /* laranja forte */
+  border-left: 8px solid #F57C00;
   background: linear-gradient(180deg, #FFE082 0%, #FFF3E0 100%);
   color: #E65100;
   box-shadow: 0 0 10px rgba(245,124,0,0.25);
 }
-
 .card.red {
-  border-left: 8px solid #C62828; /* vermelho intenso */
+  border-left: 8px solid #C62828;
   background: linear-gradient(180deg, #EF9A9A 0%, #FFEBEE 100%);
   color: #B71C1C;
   box-shadow: 0 0 10px rgba(198,40,40,0.25);
-}
-.card.red {
   animation: pulse-card-red 1.2s ease-in-out infinite;
 }
-
 @keyframes pulse-card-red {
   0%   { box-shadow: 0 0 0 0 rgba(198,40,40,0.4); }
   50%  { box-shadow: 0 0 15px 4px rgba(198,40,40,0.25); }
@@ -243,10 +230,19 @@ body{
 }
 .btn:disabled{ opacity:.6; cursor:not-allowed; }
 
-/* Lista antiga (tab LISTA) */
-.tablehead, .tableline{
-  display: grid; grid-template-columns: 120px 1fr 1fr;
-  gap: 12px; align-items: start;
+/* =======================
+   LISTA (MÁQUINA | PAINEL | FILA)
+   ======================= */
+
+/* Cabeçalho e linhas: sempre 3 colunas.
+   No mobile, a linha ganha min-width e o contêiner rola lateralmente. */
+.tablehead,
+.tableline{
+  display: grid;
+  grid-template-columns: 70px minmax(340px,1fr) minmax(340px,1fr);
+  gap: 12px;
+  align-items: start;
+  min-width: 900px;          /* força largura mínima (ativa scroll no mobile) */
 }
 .tablehead{
   font-weight: 800;
@@ -254,50 +250,79 @@ body{
   padding-bottom: 8px;
   position: sticky;
   top: 0;
-  background: transparent;   /* REMOVE A FAIXA BRANCA */
+  background: transparent;
   z-index: 1;
   letter-spacing:.3px;
   color: var(--text);
 }
-
 .tableline{ padding: 8px 0; border-bottom: 1px dashed var(--border); }
+
+/* O wrapper padrão das páginas (grid) vira faixa rolável quando existir uma .tablehead/.tableline larga */
+.grid{
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+}
+
+/* Áreas nomeadas (opcional, mantém semântica usada no JSX) */
+.tableline{
+  grid-template-areas: "machine painel fila";
+}
+.cell-machine{ grid-area: machine; }
+.cell-painel { grid-area: painel; }
+.cell-fila   { grid-area: fila;   overflow: hidden; }
+
+/* Identificador da máquina (badge) */
 .badge{
   display:inline-flex;
   align-items:center;
   justify-content:center;
-  min-width: 54px;               /* um pouco maior */
-  padding: 6px 12px;             /* mais espaço interno */
-  border-radius: 12px;           /* menos “círculo”, mais pill */
-  background: var(--primary);;  /* cor azul da marca */
-  color: #fff;                   /* texto branco para contraste */
-  border: none;                  /* remove o contorno branco */
-  font-weight: 800;              /* deixa o texto mais forte */
-  font-size: 16px;               /* aumenta o tamanho da fonte */
-  box-shadow: 0 2px 4px rgba(2,119,189,.15); /* leve sombra */
+  min-width: 54px;
+  padding: 6px 12px;
+  border-radius: 12px;
+  background: var(--primary);
+  color: #fff;
+  border: none;
+  font-weight: 800;
+  font-size: 16px;
+  box-shadow: 0 2px 4px rgba(2,119,189,.15);
 }
 
-/* Fila (drag) */
-.fila{ display:flex; gap: 10px; overflow-x:auto; padding-bottom: 4px; }
-.fila .card{ min-width: 260px; }
-
-/* Modal */
-.modalbg{
-  position: fixed; inset:0;
-  background: rgba(38,50,56,.35);
-  display: grid; place-items: center; z-index: 999;
+/* FILA: cartões em linha rolável */
+.fila{
+  display: flex;
+  gap: 10px;
+  flex-wrap: nowrap;         /* nunca quebrar para baixo */
+  overflow-x: auto;
+  padding: 6px 2px 8px;
+  scroll-snap-type: x proximity;
+  -webkit-overflow-scrolling: touch;
 }
-.modal{
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  width: min(720px, 92vw);
-  padding: 18px;
-  box-shadow: var(--shadow);
-  color: var(--text);
+.fila .card{
+  min-width: 260px;
+  scroll-snap-align: start;
+}
+.drag-handle{
+  touch-action: pan-y;        /* arrastar não bloqueia o scroll vertical */
+  cursor: grab;
+  border:none;
+  background:transparent;
+  font-size:18px;
+  line-height:1;
+  padding:4px 6px;
+  margin-right:8px;
+}
+.fila-item{ display:flex; align-items:flex-start; gap:8px; }
+.fila-content{ flex:1; min-width:0; }
+
+/* Scrollbar discreta (opcional) */
+.fila::-webkit-scrollbar{ height: 6px; }
+.fila::-webkit-scrollbar-thumb{
+  background: rgba(0,0,0,.15);
+  border-radius: 999px;
 }
 
 /* =======================
-   Tabela REGISTRO (contraste OK)
+   Tabela REGISTRO
    ======================= */
 .card .table{ display:grid; gap: 8px; }
 .thead, .row{
@@ -327,20 +352,56 @@ body{
 }
 .tbody .row .muted{ color: var(--muted); }
 
-/* Responsivo */
+/* =======================
+   Responsivo
+   ======================= */
+
+/* Empilha controles onde faz sentido, mas preserva a Lista em 3 colunas com scroll */
 @media (max-width: 1100px){
   .thead, .row{ grid-template-columns: 120px 70px 1fr 1fr 90px 140px 160px; }
 }
 @media (max-width: 880px){
+  .grid2 { grid-template-columns: 1fr; }
+  .grid2 .flex { justify-content: center; }
   .thead, .row{ grid-template-columns: 120px 70px 1fr 120px 160px; }
   /* esconder Cliente/Produto/Qtd em telas pequenas */
   .thead > :nth-child(3), .row > :nth-child(3),
   .thead > :nth-child(4), .row > :nth-child(4),
   .thead > :nth-child(5), .row > :nth-child(5){ display:none; }
 }
-@media (max-width: 720px){
-  .brand-title{ font-size: 24px; }
-  .grid2{ grid-template-columns: 1fr; }
+@media (max-width: 768px){
+  .app { padding: 12px; }
+
+  /* topo */
+  .brand-bar{ flex-direction: column; gap: 10px; align-items: center; text-align: center; }
+  .brand-logo{ height: 80px; }
+  .brand-title{ font-size: 28px; }
+  .brand-sub{ font-size: 14px; }
+
+  /* inputs/botões maiores */
+  .input, .select { padding: 14px 12px; font-size: 16px; }
+  .btn{ padding: 12px 14px; font-size: 16px; }
+
+  .badge{ min-width: 56px; font-size: 16px; }
+
+  /* Painel (kanban) pode ficar 1 coluna no mobile */
+  .board{ grid-template-columns: 1fr; gap: 12px; }
+  .column{ border-radius: 12px; }
+  .column-header{ font-size: 16px; padding: 10px 12px; }
+  .column-body{ padding: 10px; gap: 8px; }
+
+  /* *** LISTA: mantém 3 colunas lado-a-lado com scroll horizontal *** */
+  .tablehead,
+  .tableline{
+    grid-template-columns: 90px minmax(320px,1fr) minmax(320px,1fr);
+    min-width: 820px;           /* um pouco mais compacto no mobile */
+  }
+  .cell-fila{ overflow-x: auto; }
+  .fila{ flex-wrap: nowrap; }
+  .fila .card{ min-width: 220px; }
+
+  /* cronômetro parado: fonte menor */
+  .parada-timer{ font-size: 13px; }
 }
 
 /* Cronômetro no cabeçalho (ao lado do nome da máquina) */
@@ -350,150 +411,8 @@ body{
   padding: 2px 8px;
   border-radius: 999px;
   background: rgba(198,40,40,.12);
-  color: #C62828; /* mesmo vermelho da paleta */
+  color: #C62828;
   font-size: 18px;
 }
-/* ====== MOBILE FIRST TWEAKS (ate 768px) ====== */
-@media (max-width: 768px){
-  /* layout geral */
-  .app { padding: 12px; }
 
-  /* topo: logo e títulos empilhados e centralizados */
-  .brand-bar{
-    flex-direction: column;
-    gap: 10px;
-    align-items: center;
-    text-align: center;
-  }
-  .brand-logo{ height: 80px; }          /* maior no mobile */
-  .brand-title{ font-size: 28px; }
-  .brand-sub{ font-size: 14px; }
-
-  /* tabs: fáceis de tocar */
-  .tabs{ gap:8px; justify-content:center; }
-  .tabbtn{ padding: 12px 16px; font-size: 16px; }
-
-  /* painel: 1 coluna (uma máquina por vez por linha) */
-  .board{
-    grid-template-columns: 1fr;          /* deita tudo em 1 coluna */
-    gap: 12px;
-  }
-
-  .column{ border-radius: 12px; }
-  .column-header{ font-size: 16px; padding: 10px 12px; }
-  .column-body{ padding: 10px; gap: 8px; }
-
-  /* inputs e botões maiores (alvo de toque) */
-  .input, .select { padding: 14px 12px; font-size: 16px; }
-  .btn{ padding: 12px 14px; font-size: 16px; }
-
-  /* grid de situação + botões: vira 1 coluna pra não sobrepor */
-  .grid2{ grid-template-columns: 1fr; gap: 12px; }
-  .grid2 .flex{ justify-content: center; gap: 10px; }
-
-  /* badge das máquinas maior e sem borda fina */
-  .badge{
-    min-width: 56px; padding: 6px 12px; font-size: 16px;
-    border: none;
-  }
-
-  /* LISTA: cabeçalho compacto e sem faixa */
-  .tablehead{
-    background: transparent;
-    font-size: 14px;
-    position: sticky; top: 0;
-  }
-
-  /* LISTA: quando faltar espaço, esconda campos menos críticos */
-  .tableline{
-    grid-template-columns: 90px 1fr;     /* Máquina + Painel; Fila embaixo */
-    gap: 8px;
-  }
-  .tableline > :nth-child(3){ grid-column: 1 / -1; } /* Fila quebra pra linha de baixo */
-
-  /* REGISTRO: menos colunas em telas estreitas */
-  .thead, .row{
-    grid-template-columns: 110px 70px 1fr 1fr; /* code, máquina, cliente, data/hora */
-    gap: 8px;
-  }
-  .thead > :nth-child(4){ display:none; } /* ex.: ocultar Produto */
-  .row  > :nth-child(4){ display:none; }
-
-  /* cronômetro parado: fonte um pouco menor pra caber bem */
-  .parada-timer{ font-size: 13px; }
-}
-/* ===== LISTA: layout de 3 áreas no desktop ===== */
-.tableline{
-  display: grid;
-  grid-template-columns: 120px 1fr 1fr;
-  grid-template-areas: "machine painel fila";
-  gap: 12px;
-  align-items: start;
-}
-.cell-machine{ grid-area: machine; }
-.cell-painel { grid-area: painel; }
-.cell-fila   { grid-area: fila;   overflow: hidden; }
-
-/* Fila como faixa rolável horizontal (funciona em desktop e mobile) */
-.fila{
-  display: flex;
-  gap: 10px;
-  overflow-x: auto;
-  padding: 6px 2px 8px;
-  scroll-snap-type: x proximity;
-  -webkit-overflow-scrolling: touch;
-}
-.fila .card{
-  min-width: 260px;               /* cada item ocupa largura “de cartão” */
-  scroll-snap-align: start;
-}
-
-/* Scrollbar discreta (opcional) */
-.fila::-webkit-scrollbar{ height: 6px; }
-.fila::-webkit-scrollbar-thumb{
-  background: rgba(0,0,0,.15);
-  border-radius: 999px;
-}
-
-/* ===== MOBILE: máquina + fila lado a lado; painel desce ===== */
-@media (max-width: 768px){
-  .tableline{
-    grid-template-columns: 90px 1fr;
-    grid-template-areas:
-      "machine fila"
-      "painel  painel";
-    gap: 8px;
-  }
-  .badge{
-    min-width: 56px;
-    font-size: 16px;
-  }
-  .cell-fila{
-    overflow-x: auto;             /* garante rolagem lateral */
-  }
-  .fila{
-    flex-wrap: nowrap;            /* tudo em uma linha rolável */
-  }
-  .fila .card{
-    min-width: 220px;             /* um pouco menor pra caber mais no mobile */
-  }
-}
-.drag-handle{
-  cursor: grab;
-  border:none;
-  background:transparent;
-  font-size:18px;
-  line-height:1;
-  padding:4px 6px;
-  margin-right:8px;
-}
-.fila-item{
-  display:flex;
-  align-items:flex-start;
-  gap:8px;
-}
-.fila-content{
-  flex:1;
-  min-width:0;
-}
 
