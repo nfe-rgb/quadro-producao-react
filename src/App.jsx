@@ -600,8 +600,9 @@ export default function App(){
 
       {/* ====================== REGISTRO (agrupado por O.P) ====================== */}
 {tab==='registro' && (
-  <div className="card">
-    <div className="label" style={{marginBottom:8}}>Histórico por Ordem de Produção</div>
+  <div className="card registro-wrap">
+    <div className="card">
+      <div className="label" style={{marginBottom:8}}>Histórico por Ordem de Produção</div>
 
     <div className="table">
       {/* Cabeçalho compacto */}
@@ -611,7 +612,8 @@ export default function App(){
         <div>Início</div>
         <div>Fim</div>
         <div>Abrir</div>
-      </div>
+    </div>
+  </div>
 
       <div className="tbody">
         {registroGrupos.length===0 && (
