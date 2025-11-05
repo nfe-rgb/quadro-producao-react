@@ -1,102 +1,24 @@
+// src/App.jsx
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from './lib/supabaseClient.js'
-import { DndContext, closestCenter, useSensor, useSensors, MouseSensor, TouchSensor } from '@dnd-kit/core'
-import { SortableContext, horizontalListSortingStrategy, arrayMove, useSortable } from '@dnd-kit/sortable'
-import { CSS } from '@dnd-kit/utilities'
-import { createPortal } from 'react-dom';
+import { DndContext, useSensor, useSensors, MouseSensor, TouchSensor } from '@dnd-kit/core'
+// DndContext aqui apenas para tipagem; o uso principal está em Lista
 
-const MAQUINAS = ['P1','P2','P3','I1','I2','I3','I4','I5','I6']
-const STATUS = ['AGUARDANDO','PRODUZINDO','BAIXA_EFICIENCIA','PARADA']
-const MOTIVOS_PARADA = [
-  'SET UP','TROCA DE COR','INÍCIO DE MÁQUINA','FALTA DE OPERADOR / PREPARADOR',
-  'TRY-OUT / TESTE','QUALIDADE / REGULAGEM','MANUTENÇÃO ELÉTRICA','MANUTENÇÃO MECÂNICA',
-  'FALTA DE PEDIDO','FIM OP','FALTA DE ABASTECIMENTO','FALTA DE INSUMOS','FALTA DE ENERGIA ELÉTRICA',
-]
+import { MAQUINAS, STATUS, MOTIVOS_PARADA } from './lib/constants'
+import { localDateTimeToISO, jaIniciou } from './lib/utils'
 
-function statusClass(s){
-  if(s==='AGUARDANDO') return 'card gray'
-  if(s==='PRODUZINDO') return 'card green'
-  if(s==='BAIXA_EFICIENCIA') return 'card yellow'
-  if(s==='PARADA') return 'card red'
-  return 'card'
-}
+import Modal from './components/Modal'
 
-function fmtDateTime(ts) {
-  if (!ts) return ''
-  try {
-    const d = new Date(ts)
-    const dia = d.toLocaleDateString('pt-BR')
-    const hora = d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
-    return `${dia} ${hora}`
-  } catch { return ts }
-}
-
-// Converte data/hora local digitada -> ISO UTC
-function localDateTimeToISO(dateStr, timeStr) {
-  const [Y,M,D] = dateStr.split('-').map(Number)
-  const [h,m] = timeStr.split(':').map(Number)
-  const local = new Date(Y, M-1, D, h, m, 0)
-  return local.toISOString()
-}
-
-function Etiqueta({o}) {
-  return (
-    <div className="small">
-      <div><b>Número O.P:</b> {o.code}</div>
-      {o.customer && <div><b>Cliente:</b> {o.customer}</div>}
-      {o.product && <div><b>Produto:</b> {o.product}</div>}
-      {o.color && <div><b>Cor:</b> {o.color}</div>}
-      {o.qty && <div><b>Qtd:</b> {o.qty}</div>}
-      {o.boxes && <div><b>Caixas:</b> {o.boxes}</div>}
-      {o.standard && <div><b>Padrão:</b> {o.standard}</div>}
-      {o.due_date && (<div><b>Prazo:</b> {new Date(o.due_date).toLocaleDateString('pt-BR')}</div>)}
-      {o.notes && <div className="muted">{o.notes}</div>}
-    </div>
-  )
-}
-
-function Modal({ open, onClose, title, children }) {
-  if (!open) return null;
-
-  const modalEl = (
-    <div className="modalbg" role="dialog" aria-modal="true" onClick={onClose}>
-      <div className="modal" onClick={(e)=>e.stopPropagation()}>
-        {title ? <h3 style={{marginTop:0}}>{title}</h3> : null}
-        {children}
-      </div>
-    </div>
-  );
-
-  // renderiza fora da árvore (no body), evitando contexto de empilhamento
-  return createPortal(modalEl, document.body);
-}
-
-function FilaSortableItem({ordem, onEdit}) {
-  const {attributes, listeners, setNodeRef, transform, transition, isDragging} =
-    useSortable({ id: ordem.id })
-  const style = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.4 : 1 }
-  return (
-    <div ref={setNodeRef} style={style} className="card fila-item">
-      <button className="drag-handle" {...attributes} {...listeners} title="Arrastar">⠿</button>
-      <div className="fila-content">
-        <Etiqueta o={ordem}/>
-        <div className="sep"></div>
-        <button className="btn" onClick={onEdit}>Editar</button>
-      </div>
-    </div>
-  )
-}
-
-// Util: a ordem JÁ iniciou produção?
-function jaIniciou(ordem) {
-  return Boolean(ordem?.started_at);
-}
+import Painel from './abas/Painel'
+import Lista from './abas/Lista'
+import NovaOrdem from './abas/NovaOrdem'
+import Registro from './abas/Registro'
 
 export default function App(){
   const [tab,setTab] = useState('painel')
-  const mouseSensor = useSensor(MouseSensor, { activationConstraint: { distance: 5 }});
-  const touchSensor = useSensor(TouchSensor, { pressDelay: 150, activationConstraint: { distance: 5 }});
-  const sensors = useSensors(mouseSensor, touchSensor);
+  const mouseSensor = useSensor(MouseSensor, { activationConstraint: { distance: 5 }})
+  const touchSensor = useSensor(TouchSensor, { pressDelay: 150, activationConstraint: { distance: 5 }})
+  const sensors = useSensors(mouseSensor, touchSensor)
 
   const [ordens,setOrdens] = useState([])
   const [finalizadas, setFinalizadas] = useState([])
@@ -105,12 +27,10 @@ export default function App(){
   const [editando,setEditando] = useState(null)
   const [finalizando,setFinalizando] = useState(null)
 
-  // Modais
-  const [startModal, setStartModal]   = useState(null) // {ordem, operador, data, hora}
-  const [stopModal, setStopModal]     = useState(null) // {ordem, operador, motivo, obs, data, hora}
-  const [resumeModal, setResumeModal] = useState(null) // {ordem, operador, data, hora, targetStatus}
+  const [startModal, setStartModal]   = useState(null)
+  const [stopModal, setStopModal]     = useState(null)
+  const [resumeModal, setResumeModal] = useState(null)
 
-  // Tick para cronômetro
   const [tick, setTick] = useState(0)
   useEffect(()=>{ const id=setInterval(()=>setTick(t=>t+1),1000); return ()=>clearInterval(id) },[])
 
@@ -198,16 +118,8 @@ export default function App(){
   // ========================= Fluxos: Iniciar, Parar, Retomar =========================
   function onStatusChange(ordem, targetStatus){
     const atual = ordem.status
-
-    // se já iniciou, não permitimos voltar a AGUARDANDO
-    if (jaIniciou(ordem) && targetStatus === 'AGUARDANDO') {
-      alert('Após iniciar a produção, não é permitido voltar para "Aguardando".')
-      return
-    }
-
-    // enquanto está AGUARDANDO, o select fica travado; inicia pelo botão
+    if (jaIniciou(ordem) && targetStatus === 'AGUARDANDO') { alert('Após iniciar a produção, não é permitido voltar para "Aguardando".'); return }
     if (atual === 'AGUARDANDO') return
-
     if (targetStatus === 'PARADA' && atual !== 'PARADA') {
       const now=new Date()
       setStopModal({ ordem, operador:'', motivo: MOTIVOS_PARADA[0], obs:'', data: now.toISOString().slice(0,10), hora: now.toTimeString().slice(0,5) })
@@ -231,7 +143,6 @@ export default function App(){
     if (res.data) patchOrdemLocal(ordem.id, res.data)
   }
 
-  // Iniciar Produção
   async function confirmarInicio() {
     const { ordem, operador, data, hora } = startModal
     if (!operador || !data || !hora) { alert('Preencha operador, data e hora.'); return }
@@ -244,20 +155,16 @@ export default function App(){
     setStartModal(null)
   }
 
-  // Confirmar Parada
   async function confirmarParada() {
     const { ordem, operador, motivo, obs, data, hora } = stopModal
     if (!operador || !data || !hora) { alert('Preencha operador, data e hora.'); return }
     const started_at = localDateTimeToISO(data, hora)
-    const ins = await supabase.from('machine_stops').insert([{
-      order_id: ordem.id, machine_id: ordem.machine_id, started_by: operador, started_at, reason: motivo, notes: obs
-    }]).select('*').maybeSingle()
+    const ins = await supabase.from('machine_stops').insert([{ order_id: ordem.id, machine_id: ordem.machine_id, started_by: operador, started_at, reason: motivo, notes: obs }]).select('*').maybeSingle()
     if (ins.error) { alert('Erro ao registrar parada: ' + ins.error.message); return }
     await setStatus(ordem, 'PARADA')
     setStopModal(null)
   }
 
-  // Confirmar Retomada (PARADA -> PRODUZINDO/BAIXA_EFICIENCIA)
   async function confirmarRetomada() {
     const { ordem, operador, data, hora, targetStatus } = resumeModal
     if (!operador || !data || !hora) { alert('Preencha operador, data e hora.'); return }
@@ -272,7 +179,7 @@ export default function App(){
     setResumeModal(null)
   }
 
-  // ========================= Finalizar O.P (usa UTC) =========================
+  // ========================= Finalizar O.P =========================
   const [confirmData, setConfirmData] = useState({por:'', data:'', hora:''})
   useEffect(()=>{
     const now = new Date()
@@ -298,7 +205,8 @@ export default function App(){
     if(!lista.length) return; const ativa=lista[0], fila=lista.slice(1)
     const oldIndex=fila.findIndex(x=>String(x.id)===aId), newIndex=fila.findIndex(x=>String(x.id)===oId)
     if(oldIndex<0||newIndex<0) return
-    const novaFila=arrayMove(fila,oldIndex,newIndex)
+    const novaFila=fila.toSpliced(newIndex, 0, ...fila.splice(oldIndex,1)) // arrayMove alternative if needed
+
     const nova=[ativa,...novaFila].filter(o=>o&&o.id&&!String(o.id).startsWith('tmp-')).map((o,i)=>({id:o.id,pos:i}))
     setOrdens(prev=>{ const map=new Map(prev.map(o=>[o.id,{...o}])); for(const r of nova){ const o=map.get(r.id); if(o) o.pos=r.pos } return Array.from(map.values()) })
     for(const r of nova){ const rr=await supabase.from('orders').update({pos:r.pos}).eq('id',r.id); if(rr.error){ alert('Erro ao mover: '+rr.error.message); fetchOrdensAbertas(); return } }
@@ -306,60 +214,43 @@ export default function App(){
 
   // === ENVIAR PARA FILA (só aparece na LISTA) =======================
   async function enviarParaFila(ordemAtiva) {
-    const maquina = ordemAtiva.machine_id;
+    const maquina = ordemAtiva.machine_id
+    const lista = [...ordens].filter(o => !o.finalized && o.machine_id === maquina).sort((a,b) => (a.pos ?? 999) - (b.pos ?? 999))
+    if (!lista.length) return
+    const ativa = lista[0]
+    const fila = lista.slice(1)
+    if (!fila.length) { alert('Não há itens na fila para promover.'); return }
 
-    const lista = [...ordens]
-      .filter(o => !o.finalized && o.machine_id === maquina)
-      .sort((a,b) => (a.pos ?? 999) - (b.pos ?? 999));
+    const novoPainel = fila[0]
+    const novaFilaRestante = fila.slice(1)
 
-    if (!lista.length) return;
-    const ativa = lista[0];
-    const fila = lista.slice(1);
-    if (!fila.length) {
-      alert('Não há itens na fila para promover.');
-      return;
-    }
-
-    const novoPainel = fila[0];
-    const novaFilaRestante = fila.slice(1);
-
-    // Fase 1: desloca todo mundo +1000 (evita colisão do índice único)
     for (const o of lista) {
-      const r = await supabase.from('orders').update({ pos: (o.pos ?? 0) + 1000 }).eq('id', o.id);
-      if (r.error) { alert('Erro ao preparar envio para fila: ' + r.error.message); return; }
+      const r = await supabase.from('orders').update({ pos: (o.pos ?? 0) + 1000 }).eq('id', o.id)
+      if (r.error) { alert('Erro ao preparar envio para fila: ' + r.error.message); return }
     }
 
-    // Fase 2:
-    // - novoPainel => pos 0, AGUARDANDO, sem started_at/by
     {
-      const r = await supabase.from('orders').update({
-        pos: 0, status: 'AGUARDANDO', started_at: null, started_by: null
-      }).eq('id', novoPainel.id);
-      if (r.error) { alert('Erro ao promover item para o painel: ' + r.error.message); return; }
+      const r = await supabase.from('orders').update({ pos: 0, status: 'AGUARDANDO', started_at: null, started_by: null }).eq('id', novoPainel.id)
+      if (r.error) { alert('Erro ao promover item para o painel: ' + r.error.message); return }
     }
-    // - restante da fila => pos 1..N-1
     for (let i = 0; i < novaFilaRestante.length; i++) {
-      const o = novaFilaRestante[i];
-      const r = await supabase.from('orders').update({ pos: i + 1 }).eq('id', o.id);
-      if (r.error) { alert('Erro ao reordenar fila: ' + r.error.message); return; }
+      const o = novaFilaRestante[i]
+      const r = await supabase.from('orders').update({ pos: i + 1 }).eq('id', o.id)
+      if (r.error) { alert('Erro ao reordenar fila: ' + r.error.message); return }
     }
-    // - ativa => fim da fila com AGUARDANDO
     {
-      const finalPos = novaFilaRestante.length + 1;
-      const r = await supabase.from('orders').update({
-        pos: finalPos, status: 'AGUARDANDO'
-      }).eq('id', ativa.id);
-      if (r.error) { alert('Erro ao enviar a atual para o fim da fila: ' + r.error.message); return; }
+      const finalPos = novaFilaRestante.length + 1
+      const r = await supabase.from('orders').update({ pos: finalPos, status: 'AGUARDANDO' }).eq('id', ativa.id)
+      if (r.error) { alert('Erro ao enviar a atual para o fim da fila: ' + r.error.message); return }
     }
 
-    // Otimista local
     setOrdens(prev => {
-      const map = new Map(prev.map(o => [o.id, { ...o }]));
-      const np = map.get(novoPainel.id); if (np) { np.pos = 0; np.status='AGUARDANDO'; np.started_at=null; np.started_by=null; }
-      novaFilaRestante.forEach((o, i) => { const it = map.get(o.id); if (it) it.pos = i + 1; });
-      const itAtiva = map.get(ativa.id); if (itAtiva) { itAtiva.pos = novaFilaRestante.length + 1; itAtiva.status = 'AGUARDANDO'; }
-      return Array.from(map.values());
-    });
+      const map = new Map(prev.map(o => [o.id, { ...o }]))
+      const np = map.get(novoPainel.id); if (np) { np.pos = 0; np.status='AGUARDANDO'; np.started_at=null; np.started_by=null }
+      novaFilaRestante.forEach((o, i) => { const it = map.get(o.id); if (it) it.pos = i + 1 })
+      const itAtiva = map.get(ativa.id); if (itAtiva) { itAtiva.pos = novaFilaRestante.length + 1; itAtiva.status = 'AGUARDANDO' }
+      return Array.from(map.values())
+    })
   }
 
   async function excluirRegistro(ordem) {
@@ -378,15 +269,12 @@ export default function App(){
     return map
   }, [ordens])
 
-  // Agrupamento para Registro (uma entrada por O.P com eventos)
   const registroGrupos = useMemo(()=>{
     const byId = new Map()
     const push = (o)=>{ if(!o) return; byId.set(o.id, { ...o }) }
     finalizadas.forEach(push)
     ordens.forEach(o=>{ if(o.started_at) push(o) })
-    const stopsByOrder = paradas.reduce((acc,st)=>{
-      (acc[st.order_id] ||= []).push(st); return acc
-    },{})
+    const stopsByOrder = paradas.reduce((acc,st)=>{ (acc[st.order_id] ||= []).push(st); return acc },{})
     const arr = Array.from(byId.values())
     arr.sort((a,b)=>{
       const ta = new Date(a.finalized_at || a.started_at || a.created_at || 0).getTime()
@@ -399,19 +287,9 @@ export default function App(){
   const [openSet, setOpenSet] = useState(()=>new Set())
   function toggleOpen(id){ setOpenSet(prev=>{ const n=new Set(prev); if(n.has(id)) n.delete(id); else n.add(id); return n }) }
 
-  function fmtDuracao(startIso, endIso){
-    if(!startIso || !endIso) return '-'
-    const sec = Math.max(0, Math.floor((new Date(endIso) - new Date(startIso))/1000))
-    const h = String(Math.floor(sec/3600)).padStart(2,'0')
-    const m = String(Math.floor((sec%3600)/60)).padStart(2,'0')
-    const s = String(sec%60).padStart(2,'0')
-    return `${h}:${m}:${s}`
-  }
-
   // ========================= Render =========================
   return (
     <div className="app">
-      {/* Brand */}
       <div className="brand-bar">
         <img src="/Logotipo Savanti.png" alt="Savanti Plásticos" className="brand-logo"
              onError={(e)=>{ e.currentTarget.src='/savanti-logo.png'; }}/>
@@ -421,7 +299,6 @@ export default function App(){
         </div>
       </div>
 
-      {/* Tabs */}
       <div className="tabs">
         <button className={`tabbtn ${tab==='painel'?'active':''}`} onClick={()=>setTab('painel')}>Painel</button>
         <button className={`tabbtn ${tab==='lista'?'active':''}`} onClick={()=>setTab('lista')}>Lista</button>
@@ -429,334 +306,37 @@ export default function App(){
         <button className={`tabbtn ${tab==='registro'?'active':''}`} onClick={()=>setTab('registro')}>Registro</button>
       </div>
 
-      {/* ====================== PAINEL ====================== */}
       {tab === 'painel' && (
-        <div className="board">
-          {MAQUINAS.map(m=>{
-            const lista = (ativosPorMaquina[m] ?? []);
-            const ativa = lista[0] || null;
-            // cronômetro: parada aberta dessa O.P
-            const openStop = ativa ? paradas.find(p=>p.order_id===ativa.id && !p.resumed_at) : null;
-            const sinceMs = openStop ? new Date(openStop.started_at).getTime() : null;
-            const durText = sinceMs ? (()=>{
-              // usa 'tick' para re-render
-              // eslint-disable-next-line no-unused-vars
-              const _ = tick;
-              const total = Math.max(0, Math.floor((Date.now() - sinceMs)/1000));
-              const h = String(Math.floor(total/3600)).padStart(2,'0');
-              const mn = String(Math.floor((total%3600)/60)).padStart(2,'0');
-              const s = String(total%60).padStart(2,'0');
-              return `${h}:${mn}:${s}`;
-            })() : null;
-
-            return (
-              <div key={m} className="column">
-                <div className={"column-header " + (ativa?.status === 'PARADA' ? "blink-red" : "")}>
-                  {m}
-                  {ativa?.status === 'PARADA' && durText && (
-                    <span className="parada-timer">{durText}</span>
-                  )}
-                </div>
-                <div className="column-body">
-                  {ativa ? (
-                    <div className={statusClass(ativa.status)}>
-                      <Etiqueta o={ativa}/>
-                      <div className="sep"></div>
-                      <div className="grid2">
-                        <div>
-                          <div className="label">Situação</div>
-                          <select
-                            className="select"
-                            value={ativa.status}
-                            onChange={e=>onStatusChange(ativa,e.target.value)}
-                            disabled={ativa.status==='AGUARDANDO'}
-                          >
-                            {STATUS
-                              .filter(s => jaIniciou(ativa) ? s !== 'AGUARDANDO' : true)
-                              .map(s=>(
-                                <option key={s} value={s}>
-                                  {s==='AGUARDANDO'?'Aguardando': s==='PRODUZINDO'?'Produzindo': s==='BAIXA_EFICIENCIA'?'Baixa Eficiência':'Parada'}
-                                </option>
-                              ))}
-                          </select>
-                        </div>
-                        <div className="flex" style={{justifyContent:'flex-end', gap:8}}>
-                          {ativa.status==='AGUARDANDO' ? (
-                            <button className="btn"
-                              onClick={()=>{
-                                const now=new Date()
-                                setStartModal({ ordem:ativa, operador:'', data: now.toISOString().slice(0,10), hora: now.toTimeString().slice(0,5) })
-                              }}>
-                              Iniciar Produção
-                            </button>
-                          ) : (
-                            <>
-                              {/* Painel NÃO mostra "Enviar para fila" */}
-                              <button className="btn" onClick={()=>setFinalizando(ativa)}>Finalizar</button>
-                            </>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  ) : (<div className="muted">Sem Programação</div>)}
-                </div>
-              </div>
-            )
-          })}
-        </div>
+        <Painel
+          ativosPorMaquina={ativosPorMaquina}
+          paradas={paradas}
+          tick={tick}
+          onStatusChange={onStatusChange}
+          setStartModal={setStartModal}
+          setFinalizando={setFinalizando}
+        />
       )}
 
-      {/* ====================== LISTA ====================== */}
-      {tab==='lista' && (
-        <div className="grid">
-          <div className="tablehead"><div>MÁQUINA</div><div>PAINEL</div><div>FILA</div></div>
-          {MAQUINAS.map(m=>{
-            const lista = ativosPorMaquina[m] || []
-            const ativa = lista[0] || null
-            const fila = lista.slice(1)
-            return (
-              <div className="tableline" key={m}>
-                <div className="cell-machine"><span className="badge">{m}</span></div>
-                <div className="cell-painel">
-                  {ativa ? (
-                    <div className={statusClass(ativa.status)}>
-                      <Etiqueta o={ativa}/>
-                      <div className="sep"></div>
-                      <div className="grid2">
-                        <div>
-                          <div className="label">Situação (só painel)</div>
-                          <select
-                            className="select"
-                            value={ativa.status}
-                            onChange={e=>onStatusChange(ativa,e.target.value)}
-                            disabled={ativa.status==='AGUARDANDO'}
-                          >
-                            {STATUS
-                              .filter(s => jaIniciou(ativa) ? s !== 'AGUARDANDO' : true)
-                              .map(s=>(
-                                <option key={s} value={s}>
-                                  {s==='AGUARDANDO'?'Aguardando': s==='PRODUZINDO'?'Produzindo': s==='BAIXA_EFICIENCIA'?'Baixa Eficiência':'Parada'}
-                                </option>
-                              ))}
-                          </select>
-                        </div>
-                        <div className="flex" style={{justifyContent:'flex-end', gap:8}}>
-                          {ativa.status==='AGUARDANDO' ? (
-                            <>
-                              <button className="btn" onClick={()=>{
-                                const now=new Date()
-                                setStartModal({ ordem:ativa, operador:'', data: now.toISOString().slice(0,10), hora: now.toTimeString().slice(0,5) })
-                              }}>Iniciar Produção</button>
-                              <button className="btn" onClick={()=>setEditando(ativa)}>Editar</button>
-                              <button className="btn" onClick={()=>enviarParaFila(ativa)}>Enviar para fila</button>
-                            </>
-                          ) : (
-                            <>
-                              <button className="btn" onClick={()=>setFinalizando(ativa)}>Finalizar</button>
-                              <button className="btn" onClick={()=>setEditando(ativa)}>Editar</button>
-                              <button className="btn" onClick={()=>enviarParaFila(ativa)}>Enviar para fila</button>
-                            </>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  ) : (<div className="muted">Sem Programação</div>)}
-                </div>
-                <div className="cell-fila">
-                  {fila.length === 0 ? (
-                    <div className="fila"><div className="muted">Sem itens na fila</div></div>
-                  ) : (
-                    <DndContext sensors={sensors} onDragEnd={(e)=>moverNaFila(m,e)} collisionDetection={closestCenter}>
-                      <SortableContext items={fila.map(f=>f.id)} strategy={horizontalListSortingStrategy}>
-                        <div className="fila">
-                          {fila.map(f => (<FilaSortableItem key={f.id} ordem={f} onEdit={()=>setEditando(f)} />))}
-                        </div>
-                      </SortableContext>
-                    </DndContext>
-                  )}
-                </div>
-              </div>
-            )
-          })}
-        </div>
+      {tab === 'lista' && (
+        <Lista
+          ativosPorMaquina={ativosPorMaquina}
+          sensors={sensors}
+          moverNaFila={moverNaFila}
+          onStatusChange={onStatusChange}
+          setStartModal={setStartModal}
+          setEditando={setEditando}
+          setFinalizando={setFinalizando}
+          enviarParaFila={enviarParaFila}
+        />
       )}
 
-      {/* ====================== NOVA ORDEM ====================== */}
-      {tab==='nova' && (
-        <div className="grid" style={{maxWidth:900}}>
-          <div className="card">
-            <div className="grid2">
-              <div><div className="label">Número O.P</div><input className="input" value={form.code} onChange={e=>setForm(f=>({...f, code:e.target.value}))}/></div>
-              <div><div className="label">Máquina</div><select className="select" value={form.machine_id} onChange={e=>setForm(f=>({...f, machine_id:e.target.value}))}>{MAQUINAS.map(m=><option key={m} value={m}>{m}</option>)}</select></div>
-              <div><div className="label">Cliente</div><input className="input" value={form.customer} onChange={e=>setForm(f=>({...f, customer:e.target.value}))}/></div>
-              <div><div className="label">Produto</div><input className="input" value={form.product} onChange={e=>setForm(f=>({...f, product:e.target.value}))}/></div>
-              <div><div className="label">Cor</div><input className="input" value={form.color} onChange={e=>setForm(f=>({...f, color:e.target.value}))}/></div>
-              <div><div className="label">Quantidade</div><input className="input" value={form.qty} onChange={e=>setForm(f=>({...f, qty:e.target.value}))}/></div>
-              <div><div className="label">Caixas</div><input className="input" value={form.boxes} onChange={e=>setForm(f=>({...f, boxes:e.target.value}))}/></div>
-              <div><div className="label">Padrão</div><input className="input" value={form.standard} onChange={e=>setForm(f=>({...f, standard:e.target.value}))}/></div>
-              <div><div className="label">Prazo de Entrega</div><input type="date" className="input" value={form.due_date} onChange={e=>setForm(f=>({...f, due_date:e.target.value}))}/></div>
-              <div><div className="label">Observações</div><input className="input" value={form.notes} onChange={e=>setForm(f=>({...f, notes:e.target.value}))}/></div>
-            </div>
-            <div className="sep"></div>
-            <button className="btn primary" onClick={criarOrdem}>Adicionar</button>
-          </div>
-        </div>
+      {tab === 'nova' && (
+        <NovaOrdem form={form} setForm={setForm} criarOrdem={criarOrdem} />
       )}
 
-      {/* ====================== REGISTRO (agrupado por O.P) ====================== */}
-{tab==='registro' && (
-  <div className="card registro-wrap">
-    <div className="card">
-      <div className="label" style={{marginBottom:8}}>Histórico por Ordem de Produção</div>
-
-    <div className="table">
-      {/* Cabeçalho compacto */}
-      <div className="thead" style={{gridTemplateColumns:'140px 1fr 140px 140px 80px'}}>
-        <div>O.P</div>
-        <div>Cliente / Produto / Cor / Qtd</div>
-        <div>Início</div>
-        <div>Fim</div>
-        <div>Abrir</div>
-    </div>
-  </div>
-
-      <div className="tbody">
-        {registroGrupos.length===0 && (
-          <div className="row muted" style={{gridColumn:'1 / -1', padding:'8px 0'}}>
-            Sem registros ainda.
-          </div>
-        )}
-
-        {registroGrupos.map(gr=>{
-          const o = gr.ordem
-
-          // ========== monta eventos da linha do tempo ==========
-          const events = []
-          if (o.started_at) {
-            events.push({
-              id: `start-${o.id}`,
-              type: 'start',
-              title: 'Início da produção',
-              when: o.started_at,
-              who:  o.started_by || '-'
-            })
-          }
-          if (gr.stops.length) {
-            gr.stops.forEach(st=>{
-              events.push({
-                id: `stop-${st.id}`,
-                type: 'stop',
-                title: 'Parada',
-                when: st.started_at,
-                end: st.resumed_at || null,
-                who: st.started_by || '-',
-                reason: st.reason || '-',
-                notes: st.notes || '',
-              })
-            })
-          }
-          if (o.finalized_at) {
-            events.push({
-              id: `end-${o.id}`,
-              type: 'end',
-              title: 'Fim da produção',
-              when: o.finalized_at,
-              who:  o.finalized_by || '-'
-            })
-          }
-          if (!events.length) {
-            // sem nada registrado: mostra placeholder
-            events.push({
-              id: `empty-${o.id}`,
-              type: 'empty',
-              title: 'Sem eventos',
-              when: null
-            })
-          }
-
-          return (
-            <div key={o.id} style={{display:'contents'}}>
-              {/* Linha “grupo” (clicável) */}
-              <div
-                className="row grupo-head"
-                style={{gridTemplateColumns:'140px 1fr 140px 140px 80px', cursor:'pointer'}}
-                onClick={()=>toggleOpen(o.id)}
-              >
-                <div>{o.code}</div>
-                <div>{[o.customer,o.product,o.color,o.qty].filter(Boolean).join(' • ') || '-'}</div>
-                <div>{o.started_at ? fmtDateTime(o.started_at) : '-'}</div>
-                <div>{o.finalized_at ? fmtDateTime(o.finalized_at) : '-'}</div>
-                <div>{openSet.has(o.id) ? '▲' : '▼'}</div>
-              </div>
-
-              {/* Linha do tempo expandida */}
-              {openSet.has(o.id) && (
-                <div className="row" style={{gridColumn:'1 / -1', background:'#fafafa'}}>
-                  <div className="timeline">
-                    {events.map(ev=>{
-                      if (ev.type==='empty') {
-                        return (
-                          <div key={ev.id} className="tl-card tl-empty">
-                            <div className="tl-title">Sem eventos</div>
-                            <div className="tl-meta muted">Esta O.P ainda não possui início, paradas ou fim registrados.</div>
-                          </div>
-                        )
-                      }
-
-                      if (ev.type==='start') {
-                        return (
-                          <div key={ev.id} className="tl-card tl-start">
-                            <div className="tl-title">🚀 {ev.title}</div>
-                            <div className="tl-meta"><b>Data/Hora:</b> {fmtDateTime(ev.when)}</div>
-                            <div className="tl-meta"><b>Operador:</b> {ev.who}</div>
-                          </div>
-                        )
-                      }
-
-                      if (ev.type==='stop') {
-                        // calcula duração se tiver retomada
-                        let dur = '-'
-                        if (ev.end) {
-                          const sec = Math.max(0, Math.floor((new Date(ev.end)-new Date(ev.when))/1000))
-                          const h = String(Math.floor(sec/3600)).padStart(2,'0')
-                          const m = String(Math.floor((sec%3600)/60)).padStart(2,'0')
-                          const s = String(sec%60).padStart(2,'0')
-                          dur = `${h}:${m}:${s}`
-                        }
-
-                        return (
-                          <div key={ev.id} className="tl-card tl-stop">
-                            <div className="tl-title">⛔ {ev.title}</div>
-                            <div className="tl-meta"><b>Início:</b> {fmtDateTime(ev.when)}</div>
-                            <div className="tl-meta"><b>Fim:</b> {ev.end ? fmtDateTime(ev.end) : '— (em aberto)'}</div>
-                            <div className="tl-meta"><b>Duração:</b> {dur}</div>
-                            <div className="tl-meta"><b>Operador:</b> {ev.who}</div>
-                            <div className="tl-meta"><b>Motivo:</b> {ev.reason}</div>
-                            {ev.notes ? <div className="tl-notes">{ev.notes}</div> : null}
-                          </div>
-                        )
-                      }
-
-                      // end
-                      return (
-                        <div key={ev.id} className="tl-card tl-end">
-                          <div className="tl-title">🏁 {ev.title}</div>
-                          <div className="tl-meta"><b>Data/Hora:</b> {fmtDateTime(ev.when)}</div>
-                          <div className="tl-meta"><b>Operador:</b> {ev.who}</div>
-                        </div>
-                      )
-                    })}
-                  </div>
-                </div>
-              )}
-            </div>
-          )
-        })}
-      </div>
-    </div>
-  </div>
-)}
-
+      {tab === 'registro' && (
+        <Registro registroGrupos={registroGrupos} openSet={openSet} toggleOpen={toggleOpen} />
+      )}
 
       {/* ====================== MODAIS ====================== */}
       {/* Editar */}
