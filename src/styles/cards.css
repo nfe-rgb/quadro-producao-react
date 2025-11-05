@@ -7,27 +7,32 @@
   box-shadow: var(--shadow);
   color: var(--text);
 }
+/* Fundo mais suave e texto escuro (sem perder o código de cor) */
 .card.green {
-  border-left: 8px solid #2E7D32;
-  background: linear-gradient(180deg, #A5D6A7 0%, #E8F5E9 100%);
-  color: #1B5E20;
-  box-shadow: 0 0 10px rgba(46,125,50,0.25);
+  border-left: 8px solid #1B5E20;
+  background: linear-gradient(180deg, #b7e1b9 0%, #eaf5eb 100%);
+  color: #0a2e0a; /* texto escuro */
 }
+
 .card.yellow {
-  border-left: 8px solid #F57C00;
-  background: linear-gradient(180deg, #FFE082 0%, #FFF3E0 100%);
-  color: #E65100;
-  box-shadow: 0 0 10px rgba(245,124,0,0.25);
+  border-left: 8px solid #E65100;
+  background: linear-gradient(180deg, #ffe6b3 0%, #fff8e1 100%);
+  color: #3a2500;
 }
+
 .card.red {
-  border-left: 8px solid #C62828;
-  background: linear-gradient(180deg, #EF9A9A 0%, #FFEBEE 100%);
-  color: #B71C1C;
-  box-shadow: 0 0 10px rgba(198,40,40,0.25);
+  border-left: 8px solid #B71C1C;
+  background: linear-gradient(180deg, #f5b5b5 0%, #ffebeb 100%);
+  color: #3a0a0a;
   animation: pulse-card-red 1.2s ease-in-out infinite;
 }
+
 @keyframes pulse-card-red {
   0%   { box-shadow: 0 0 0 0 rgba(198,40,40,0.4); }
   50%  { box-shadow: 0 0 15px 4px rgba(198,40,40,0.25); }
   100% { box-shadow: 0 0 0 0 rgba(198,40,40,0.4); }
+}
+/* borda mais visível em telas brilhantes */
+.card {
+  border: 2px solid rgba(0,0,0,.08);
 }

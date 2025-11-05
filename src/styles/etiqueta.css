@@ -1,9 +1,27 @@
-/* Card principal da etiqueta (se você usar esse visual em algum lugar) */
-.etiqueta-card {
-  position: relative;
-  background-color: #e0f3e0;
-  border-radius: 14px;
-  padding: 16px;
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.08);
-  max-width: 400px;
+/* ===== Etiqueta (dentro dos cards) – otimizada para TV ===== */
+
+.etiqueta {
+  font-size: clamp(19px, 1.9vw, 30px); /* um pouco maior que antes */
+  line-height: 1.35;
+  color: #0b1a26; /* texto bem escuro */
+  font-weight: 600;
+}
+
+.etiqueta > div {
+  margin: 8px 0;
+}
+
+/* rótulos (bolder, cor forte) */
+.etiqueta b {
+  color: #00334d; /* azul petróleo escuro */
+  font-weight: 900;
+  letter-spacing: .2px;
+  margin-right: 6px;
+}
+
+/* primeira linha (O.P) ainda mais destacada */
+.etiqueta > div:first-child {
+  font-size: clamp(20px, 2vw, 32px);
+  color: #00263a;
+  font-weight: 800;
 }
