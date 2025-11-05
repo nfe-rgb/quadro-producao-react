@@ -1,0 +1,47 @@
+/* =======================
+   Kanban (Painel)
+   ======================= */
+.board{
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 16px;
+}
+.column{
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  overflow: hidden;
+  display: flex; flex-direction: column;
+  box-shadow: var(--shadow);
+}
+.column-header{
+  padding: 12px 14px;
+  font-weight: 800;
+  background: linear-gradient(180deg, rgba(2,119,189,.06), rgba(255,255,255,0));
+  border-bottom: 1px solid var(--border);
+  letter-spacing:.4px;
+  color: var(--text);
+}
+.column-body{
+  padding: 12px;
+  display: flex; flex-direction: column; gap: 10px;
+}
+
+/* Cronômetro no cabeçalho (ao lado do nome da máquina) */
+.parada-timer{
+  font-weight: 800;
+  margin-left: 10px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(198,40,40,.12);
+  color: #C62828;
+  font-size: 18px;
+}
+
+/* Texto da O.P na faixa do header, tamanho normal */
+.op-inline{
+  font-weight: 800;
+  letter-spacing: .3px;
+  font-size: clamp(14px, 1.05vw, 18px); /* moderado, não gigante */
+  color: #0f172a;
+}

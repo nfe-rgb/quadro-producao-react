@@ -1,0 +1,44 @@
+/* =======================
+   TEMA SAVANTI (Light) + Base
+   ======================= */
+
+/* Fonte (pode remover se quiser só system-ui) */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+
+:root{
+  /* Paleta base (a partir do logo) */
+  --bg:            #b1e2e9;  /* fundo da página */
+  --panel:         #FFFFFF;  /* painéis/colunas */
+  --card:          #FFFFFF;  /* cartões */
+  --card-2:        #F7F9FC;  /* variação sutil */
+  --border:        #D6DEE6;  /* linhas/bordas */
+  --text:          #000000;  /* texto padrão */
+  --muted:         #607482;  /* texto secundário */
+
+  --primary:       #FF6F00;  /* laranja Savanti */
+  --primary-700:   #E65100;
+  --secondary:     #0277BD;  /* azul Savanti */
+  --secondary-700: #015F96;
+
+  --green:  #2E7D32;
+  --yellow: #EF6C00;
+  --red:    #C62828;
+
+  --shadow: 0 8px 18px rgba(31, 45, 61, .08);
+}
+
+* { box-sizing: border-box; }
+html, body, #root { height: 100%; }
+body{
+  margin:0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+  font-size: 17px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Remover limites do template Vite */
+#root { max-width: none; padding: 0; text-align: initial; }
+.app  { padding: 24px; }

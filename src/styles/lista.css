@@ -1,0 +1,79 @@
+/* =======================
+   LISTA (MÁQUINA | PAINEL | FILA)
+   ======================= */
+.tablehead,
+.tableline{
+  display: grid;
+  grid-template-columns: 70px minmax(340px,1fr) minmax(340px,1fr);
+  gap: 12px;
+  align-items: start;
+  min-width: 900px; /* ativa scroll horizontal em telas estreitas */
+}
+.tablehead{
+  font-weight: 800;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 8px;
+  position: sticky;
+  top: 0;
+  background: transparent;
+  z-index: 1;
+  letter-spacing:.3px;
+  color: var(--text);
+}
+.tableline{ padding: 8px 0; border-bottom: 1px dashed var(--border); }
+
+/* O wrapper padrão vira rolável quando a linha for larga */
+.grid{ overflow-x: auto; overscroll-behavior-x: contain; }
+
+/* Áreas nomeadas (mantém semântica JSX) */
+.tableline{ grid-template-areas: "machine painel fila"; }
+.cell-machine{ grid-area: machine; }
+.cell-painel { grid-area: painel; }
+.cell-fila   { grid-area: fila;   overflow: hidden; }
+
+/* Badge da máquina */
+.badge{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  min-width: 54px;
+  padding: 6px 12px;
+  border-radius: 12px;
+  background: var(--primary);
+  color: #fff;
+  border: none;
+  font-weight: 800;
+  font-size: 16px;
+  box-shadow: 0 2px 4px rgba(2,119,189,.15);
+}
+
+/* FILA: cartões em linha rolável */
+.fila{
+  display: flex;
+  gap: 10px;
+  flex-wrap: nowrap;         /* nunca quebra pra baixo */
+  overflow-x: auto;
+  padding: 6px 2px 8px;
+  scroll-snap-type: x proximity;
+  -webkit-overflow-scrolling: touch;
+}
+.fila .card{ min-width: 260px; scroll-snap-align: start; }
+.drag-handle{
+  touch-action: pan-y;        /* arrastar não bloqueia scroll vertical */
+  cursor: grab;
+  border:none;
+  background:transparent;
+  font-size:18px;
+  line-height:1;
+  padding:4px 6px;
+  margin-right:8px;
+}
+.fila-item{ display:flex; align-items:flex-start; gap:8px; }
+.fila-content{ flex:1; min-width:0; }
+
+/* Scrollbar discreta para fila */
+.fila::-webkit-scrollbar{ height: 6px; }
+.fila::-webkit-scrollbar-thumb{
+  background: rgba(0,0,0,.15);
+  border-radius: 999px;
+}

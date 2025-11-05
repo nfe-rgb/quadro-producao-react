@@ -7,6 +7,7 @@ import { DndContext, useSensor, useSensors, MouseSensor, TouchSensor } from '@dn
 import { MAQUINAS, STATUS, MOTIVOS_PARADA } from './lib/constants'
 import { localDateTimeToISO, jaIniciou } from './lib/utils'
 
+// Abas utilizadas
 import Modal from './components/Modal'
 
 import Painel from './abas/Painel'

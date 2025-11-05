@@ -1,0 +1,9 @@
+/* Card principal da etiqueta (se você usar esse visual em algum lugar) */
+.etiqueta-card {
+  position: relative;
+  background-color: #e0f3e0;
+  border-radius: 14px;
+  padding: 16px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.08);
+  max-width: 400px;
+}

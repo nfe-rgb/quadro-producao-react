@@ -1,0 +1,14 @@
+/* Ordem é importante para garantir overrides corretos */
+@import "./styles/theme.css";
+@import "./styles/brand.css";
+@import "./styles/tabs.css";
+@import "./styles/helpers.css";
+@import "./styles/painel.css";
+@import "./styles/cards.css";
+@import "./styles/forms.css";
+@import "./styles/buttons.css";
+@import "./styles/lista.css";
+@import "./styles/registro.css";
+@import "./styles/modal.css";
+@import "./styles/etiqueta.css";
+@import "./styles/responsive.css";

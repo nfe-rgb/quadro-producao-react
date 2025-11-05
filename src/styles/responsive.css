@@ -1,0 +1,97 @@
+/* =======================
+   Responsivo (centralizado)
+   ======================= */
+
+/* ----- Registro ----- */
+@media (max-width: 1100px){
+  .thead, .row{
+    grid-template-columns: 140px 1fr 120px 120px 70px;
+  }
+}
+
+/* ----- Grid + botões menores no mobile ----- */
+@media (max-width: 880px){
+  .grid2 { grid-template-columns: 1fr; }
+  .grid2 .flex { justify-content: center; }
+}
+
+/* ---- Mobile Registro ---- */
+@media (max-width: 820px){
+  /* some o cabeçalho de tabela no registro */
+  .registro-wrap .thead{ display:none; }
+
+  /* cabeçalho por O.P como “pill” compacto */
+  .registro-wrap .grupo-head{
+    display:flex !important;
+    align-items:center;
+    justify-content: space-between;
+    gap: 8px;
+    grid-template-columns: none !important;
+    background: linear-gradient(180deg, rgba(2,119,189,.06), rgba(255,255,255,0));
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 10px 12px;
+  }
+  .registro-wrap .grupo-head > :nth-child(1){ font-weight: 800; } /* O.P */
+  .registro-wrap .grupo-head > :nth-child(2){
+    flex: 1; text-align: right; color: var(--muted); font-size: 14px;
+  }
+  /* esconde Inicio/Fim/Abrir no head (ficam dentro da timeline) */
+  .registro-wrap .grupo-head > :nth-child(3),
+  .registro-wrap .grupo-head > :nth-child(4),
+  .registro-wrap .grupo-head > :nth-child(5){ display:none; }
+
+  /* timeline em coluna, com padding e sem scroll horizontal */
+  .registro-wrap .row .timeline{
+    grid-auto-flow: row;
+    grid-auto-columns: unset;
+    grid-template-columns: 1fr;
+    overflow-x: visible;
+    padding: 10px 12px 14px;
+  }
+
+  /* cards centralizados e sem ultrapassar a área útil */
+  .registro-wrap .tl-card{
+    max-width: calc(100% - 8px);
+    width: 100%;
+    margin: 0 auto 10px;
+    min-width: 0;
+  }
+
+  /* linha conectora mais curta (ou remova com display:none) */
+  .registro-wrap .timeline::before{
+    left: 16px; right: 16px;
+  }
+}
+
+/* ====== Mobile First Tweaks (gerais) ====== */
+@media (max-width: 768px){
+  .app { padding: 12px; }
+
+  .brand-bar{ flex-direction: column; gap: 10px; align-items: center; text-align: center; }
+  .brand-logo{ height: 80px; }
+  .brand-title{ font-size: 28px; }
+  .brand-sub{ font-size: 14px; }
+
+  .input, .select { padding: 14px 12px; font-size: 16px; }
+  .btn{ padding: 12px 14px; font-size: 16px; }
+
+  .badge{ min-width: 56px; font-size: 16px; }
+
+  .board{ grid-template-columns: 1fr; gap: 12px; }
+  .column{ border-radius: 12px; }
+  .column-header{ font-size: 16px; padding: 10px 12px; }
+  .column-body{ padding: 10px; gap: 8px; }
+
+  /* Lista mais compacta no mobile mas ainda com 3 colunas via scroll */
+  .tablehead, .tableline{
+    grid-template-columns: 90px minmax(320px,1fr) minmax(320px,1fr);
+    min-width: 820px;
+  }
+  .cell-fila{ overflow-x: auto; }
+  .fila{ flex-wrap: nowrap; }
+  .fila .card{ min-width: 220px; }
+
+  /* cronômetro no painel menor */
+  .parada-timer{ font-size: 13px; }
+}

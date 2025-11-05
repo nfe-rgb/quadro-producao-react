@@ -1,0 +1,93 @@
+/* =======================
+   Tabela REGISTRO (estrutura base)
+   ======================= */
+.card .table{ display:grid; gap: 8px; }
+.thead, .row{
+  display:grid;
+  grid-template-columns: 140px 1fr 140px 140px 80px; /* O.P | Info | Início | Fim | Abrir */
+  gap: 10px; align-items:center;
+}
+.thead{
+  font-weight: 800;
+  color: var(--text);
+  background: linear-gradient(180deg, rgba(2,119,189,.10), rgba(255,255,255,0));
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.tbody .row{
+  padding: 10px;
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+  background: var(--card-2);
+  color: var(--text);
+  overflow: visible; /* não cortar sombras da timeline */
+}
+.tbody .row:nth-child(odd){ background: var(--card); }
+.tbody .row:hover{
+  border-color: var(--secondary);
+  box-shadow: 0 0 0 3px rgba(2,119,189,.12);
+}
+.tbody .row .muted{ color: var(--muted); }
+
+/* ===== Linha do Tempo (Registro) ===== */
+.row .timeline{
+  grid-column: 1 / -1;              /* ocupa todas as colunas da tabela */
+  display: grid !important;
+  grid-auto-flow: column;            /* PC: cartões na horizontal */
+  grid-auto-columns: minmax(260px, 1fr);
+  gap: 12px;
+  overflow-x: auto;
+  padding: 10px 8px 14px;            /* respiro lateral */
+  scroll-snap-type: x proximity;
+  -webkit-overflow-scrolling: touch;
+}
+.timeline > * { scroll-snap-align: start; }
+
+.tl-card{
+  border: 1px solid var(--border);
+  background: var(--card);
+  border-radius: 12px;
+  padding: 12px;
+  box-shadow: 0 2px 6px rgba(0,0,0,.08);
+  color: var(--text);
+  display: grid;
+  gap: 6px;
+  min-width: 260px;
+}
+.tl-title{ font-weight: 800; letter-spacing: .2px; }
+.tl-meta { font-size: 14px; line-height: 1.35; }
+.tl-notes{
+  font-size: 13px;
+  color: var(--muted);
+  border-top: 1px dashed var(--border);
+  padding-top: 6px;
+}
+
+/* Cores por tipo */
+.tl-start{
+  border-left: 6px solid #2E7D32;
+  background: linear-gradient(180deg, #A5D6A7 0%, #E8F5E9 100%);
+}
+.tl-stop{
+  border-left: 6px solid #C62828;
+  background: linear-gradient(180deg, #EF9A9A 0%, #FFEBEE 100%);
+}
+.tl-end{
+  border-left: 6px solid #455A64;
+  background: linear-gradient(180deg, #CFD8DC 0%, #ECEFF1 100%);
+}
+.tl-empty{
+  border-left: 6px solid var(--border);
+  background: var(--card-2);
+}
+
+/* Linha conectora visual */
+.registro-wrap .timeline{ position: relative; }
+.registro-wrap .timeline::before{
+  content:"";
+  position:absolute; left: 8px; right: 8px; top:24px;
+  height:4px; background: rgba(2,119,189,.12);
+  border-radius: 4px; z-index:0;
+}
+.registro-wrap .tl-card{ position:relative; z-index:1; }
