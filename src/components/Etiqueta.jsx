@@ -1,11 +1,11 @@
 export default function Etiqueta({ o, variant = 'painel' }) {
-  if (!o) return null;
-
+  if (!o) return null
   const temObsLowEff = !!o.loweff_notes;
-  const fmtDate = (d) => (d ? new Date(d).toLocaleDateString('pt-BR') : '-');
+
+  const fmtDate = (d) => (d ? new Date(d).toLocaleDateString('pt-BR') : '-')
 
   if (variant === 'fila') {
-    // Etiqueta compacta para a FILA (O.P no mesmo estilo das outras infos)
+    // Etiqueta compacta para a FILA (com O.P no mesmo estilo das outras informações)
     return (
       <div className="small">
         {o.code && <div><b>O.P:</b> {o.code}</div>}
@@ -16,18 +16,15 @@ export default function Etiqueta({ o, variant = 'painel' }) {
         {o.boxes && <div><b>Caixas:</b> {o.boxes}</div>}
         {o.standard && <div><b>Padrão:</b> {o.standard}</div>}
         {o.due_date && <div><b>Prazo:</b> {fmtDate(o.due_date)}</div>}
-
-        {/* Observação de Baixa Eficiência */}
         {temObsLowEff && (
-          <div><b>Obs. (baixa eficiência):</b> {o.loweff_notes}</div>
+          <div><b>Baixa Eficiência:</b> {o.loweff_notes}</div>
         )}
-
         {o.notes && <div className="muted">{o.notes}</div>}
       </div>
-    );
+    )
   }
 
-  // variant === 'painel'
+  // variant === 'painel' — mantém o layout atual (sem O.P dentro)
   return (
     <div className="small">
       {o.customer && <div><b>Cliente:</b> {o.customer}</div>}
@@ -38,12 +35,12 @@ export default function Etiqueta({ o, variant = 'painel' }) {
       {o.standard && <div><b>Padrão:</b> {o.standard}</div>}
       {o.due_date && <div><b>Prazo:</b> {fmtDate(o.due_date)}</div>}
 
-      {/* Observação de Baixa Eficiência no Painel também */}
+      {/* 🟡 Mostra também as observações de baixa eficiência no PAINEL */}
       {temObsLowEff && (
-        <div><b>Obs. (baixa eficiência):</b> {o.loweff_notes}</div>
+        <div><b>Baixa Eficiência:</b> {o.loweff_notes}</div>
       )}
 
       {o.notes && <div className="muted">{o.notes}</div>}
     </div>
-  );
+  )
 }

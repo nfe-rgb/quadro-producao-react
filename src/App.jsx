@@ -28,7 +28,8 @@ export default function App(){
   const [startModal, setStartModal]   = useState(null)
   const [stopModal, setStopModal]     = useState(null)
   const [resumeModal, setResumeModal] = useState(null)
-  const [lowEffModal, setLowEffModal] = useState(null) // 🟡 modal de baixa eficiência
+  const [lowEffModal, setLowEffModal] = useState(null)     // 🟡 início baixa eficiência
+  const [lowEffEndModal, setLowEffEndModal] = useState(null) // 🟡 encerrar baixa eficiência
 
   const [tick, setTick] = useState(0)
   useEffect(()=>{ const id=setInterval(()=>setTick(t=>t+1),1000); return ()=>clearInterval(id) },[])
@@ -184,12 +185,8 @@ export default function App(){
       alert('Após iniciar a produção, não é permitido voltar para "Aguardando".')
       return
     }
-    if (atual === 'AGUARDANDO' && targetStatus !== 'PRODUZINDO') {
-      // Só permite sair de aguardando iniciando produção ou indo pra fila por outro fluxo
-      // (mantemos regra existente)
-    }
 
-    // ➜ Entrando em BAIXA_EFICIENCIA
+    // 🟡 Entrando em BAIXA_EFICIENCIA
     if (targetStatus === 'BAIXA_EFICIENCIA' && atual !== 'BAIXA_EFICIENCIA') {
       const now = new Date()
       setLowEffModal({
@@ -202,13 +199,34 @@ export default function App(){
       return
     }
 
-    // ➜ Saindo de BAIXA_EFICIENCIA
-    if (atual === 'BAIXA_EFICIENCIA' && targetStatus !== 'BAIXA_EFICIENCIA') {
-      encerrarBaixaEf(ordem, targetStatus)
+    // 🟡 Saindo de BAIXA_EFICIENCIA → PRODUZINDO: abrir modal para encerrar baixa ef. (limpa obs)
+    if (atual === 'BAIXA_EFICIENCIA' && targetStatus === 'PRODUZINDO') {
+      const now = new Date()
+      setLowEffEndModal({
+        ordem,
+        targetStatus: 'PRODUZINDO',
+        operador: '', // opcional registrar quem encerrou
+        data: now.toISOString().slice(0,10),
+        hora: now.toTimeString().slice(0,5),
+      })
       return
     }
 
-    // ➜ Entrando em PARADA
+    // 🟡 Saindo de BAIXA_EFICIENCIA → PARADA: abrir tela de parada normalmente
+    if (atual === 'BAIXA_EFICIENCIA' && targetStatus === 'PARADA') {
+      const now = new Date()
+      setStopModal({
+        ordem,
+        operador:'', motivo: MOTIVOS_PARADA[0], obs:'',
+        data: now.toISOString().slice(0,10),
+        hora: now.toTimeString().slice(0,5),
+        // sinaliza para encerrar a baixa eficiência no mesmo timestamp da parada
+        endLowEffAtStopStart: true,
+      })
+      return
+    }
+
+    // ➜ Entrando em PARADA (de qualquer outro estado que não BAIXA_EFICIENCIA)
     if (targetStatus === 'PARADA' && atual !== 'PARADA') {
       const now=new Date()
       setStopModal({ ordem, operador:'', motivo: MOTIVOS_PARADA[0], obs:'', data: now.toISOString().slice(0,10), hora: now.toTimeString().slice(0,5) })
@@ -232,7 +250,7 @@ export default function App(){
     patchOrdemLocal(ordem.id, patch)
     const res = await supabase.from('orders').update(patch).eq('id', ordem.id).select('*').maybeSingle()
     if (res.error) { alert('Erro ao alterar status: ' + res.error.message); patchOrdemLocal(ordem.id, before) }
-    if (res.data) patchOrdemLocal(ordem.id, res.data)
+    if (res.data) patchOrdemLocal(res.data.id, res.data)
   }
 
   async function confirmarInicio() {
@@ -255,13 +273,25 @@ export default function App(){
   }
 
   async function confirmarParada() {
-    const { ordem, operador, motivo, obs, data, hora } = stopModal
+    const { ordem, operador, motivo, obs, data, hora, endLowEffAtStopStart } = stopModal
     if (!operador || !data || !hora) { alert('Preencha operador, data e hora.'); return }
     const started_at = localDateTimeToISO(data, hora)
+
+    // 1) Se vier de baixa eficiência, encerra-a neste mesmo timestamp + limpa observação
+    if (endLowEffAtStopStart) {
+      const patchLow = { loweff_ended_at: started_at, loweff_notes: null }
+      patchOrdemLocal(ordem.id, patchLow)
+      const upLow = await supabase.from('orders').update(patchLow).eq('id', ordem.id)
+      if (upLow.error) { alert('Erro ao encerrar baixa eficiência: ' + upLow.error.message); return }
+    }
+
+    // 2) Registra parada
     const ins = await supabase.from('machine_stops')
       .insert([{ order_id: ordem.id, machine_id: ordem.machine_id, started_by: operador, started_at, reason: motivo, notes: obs }])
       .select('*').maybeSingle()
     if (ins.error) { alert('Erro ao registrar parada: ' + ins.error.message); return }
+
+    // 3) Muda status para PARADA
     await setStatus(ordem, 'PARADA')
     setStopModal(null)
   }
@@ -304,18 +334,23 @@ export default function App(){
     setLowEffModal(null)
   }
 
-  // 🟡 Baixa Eficiência: encerrar ao sair desse status
-  async function encerrarBaixaEf(ordem, proximoStatus = 'PRODUZINDO') {
-    const ended_at = new Date().toISOString()
+  // 🟡 Baixa Eficiência: confirmar encerramento (retomar produção normal)
+  async function confirmarEncerrarBaixaEf() {
+    const { ordem, targetStatus, data, hora } = lowEffEndModal
+    if (!data || !hora) { alert('Preencha data e hora.'); return }
+    const ended_at = localDateTimeToISO(data, hora)
+
     const patch = {
-      status: proximoStatus || 'PRODUZINDO',
-      loweff_ended_at: ended_at
+      status: targetStatus || 'PRODUZINDO',
+      loweff_ended_at: ended_at,
+      loweff_notes: null // limpa observações conforme solicitado
     }
     const before = ordens.find(o=>o.id===ordem.id)
     patchOrdemLocal(ordem.id, patch)
     const res = await supabase.from('orders').update(patch).eq('id', ordem.id).select('*').maybeSingle()
     if (res.error) { alert('Erro ao encerrar baixa eficiência: ' + res.error.message); if(before) patchOrdemLocal(before.id, before) }
     if (res.data) patchOrdemLocal(res.data.id, res.data)
+    setLowEffEndModal(null)
   }
 
   // ========================= Finalizar O.P =========================
@@ -586,7 +621,7 @@ export default function App(){
         )}
       </Modal>
 
-      {/* Retomada */}
+      {/* Retomada (de PARADA) */}
       <Modal open={!!resumeModal} onClose={()=>setResumeModal(null)} title={resumeModal ? `Retomar produção • ${resumeModal.ordem.machine_id} • O.P ${resumeModal.ordem.code}` : ''}>
         {resumeModal && (
           <div className="grid">
@@ -604,7 +639,7 @@ export default function App(){
         )}
       </Modal>
 
-      {/* Baixa Eficiência */}
+      {/* Baixa Eficiência — INÍCIO */}
       <Modal open={!!lowEffModal} onClose={()=>setLowEffModal(null)} title={lowEffModal ? `Baixa eficiência • ${lowEffModal.ordem.machine_id} • O.P ${lowEffModal.ordem.code}` : ''}>
         {lowEffModal && (
           <div className="grid">
@@ -624,6 +659,24 @@ export default function App(){
             <div className="flex" style={{justifyContent:'flex-end', gap:8}}>
               <button className="btn ghost" onClick={()=>setLowEffModal(null)}>Cancelar</button>
               <button className="btn primary" onClick={confirmarBaixaEf}>Confirmar</button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      {/* Baixa Eficiência — ENCERRAR / RETOMAR NORMAL */}
+      <Modal open={!!lowEffEndModal} onClose={()=>setLowEffEndModal(null)} title={lowEffEndModal ? `Encerrar baixa eficiência • ${lowEffEndModal.ordem.machine_id} • O.P ${lowEffEndModal.ordem.code}` : ''}>
+        {lowEffEndModal && (
+          <div className="grid">
+            <div className="grid2">
+              <div><div className="label">Data *</div><input type="date" className="input" value={lowEffEndModal.data} onChange={e=>setLowEffEndModal(v=>({...v, data:e.target.value}))}/></div>
+              <div><div className="label">Hora *</div><input type="time" className="input" value={lowEffEndModal.hora} onChange={e=>setLowEffEndModal(v=>({...v, hora:e.target.value}))}/></div>
+            </div>
+            <div className="muted" style={{marginTop:6}}>As observações de baixa eficiência serão limpas ao confirmar.</div>
+            <div className="sep"></div>
+            <div className="flex" style={{justifyContent:'flex-end', gap:8}}>
+              <button className="btn ghost" onClick={()=>setLowEffEndModal(null)}>Cancelar</button>
+              <button className="btn primary" onClick={confirmarEncerrarBaixaEf}>Confirmar</button>
             </div>
           </div>
         )}

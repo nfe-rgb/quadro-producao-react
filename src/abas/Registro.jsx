@@ -49,7 +49,13 @@ export default function Registro({ registroGrupos, openSet, toggleOpen }) {
         </div>
 
         {MAQUINAS.map(m => {
-          const grupos = gruposPorMaquina[m] || []
+          // 🔽 Ordena O.Ps desta máquina do mais recente → mais antigo
+          const grupos = (gruposPorMaquina[m] || []).slice().sort((a, b) => {
+            const ta = new Date(a.ordem.finalized_at || a.ordem.started_at || a.ordem.created_at || 0).getTime()
+            const tb = new Date(b.ordem.finalized_at || b.ordem.started_at || b.ordem.created_at || 0).getTime()
+            return tb - ta
+          })
+
           const aberto = openMachines.has(m)
           const totalH = totalParadas[m]?.toFixed(2) ?? '0.00'
 
@@ -89,26 +95,78 @@ export default function Registro({ registroGrupos, openSet, toggleOpen }) {
                       const o = gr.ordem
                       const events = []
 
+                      // Início
                       if (o.started_at) {
-                        events.push({ id: `start-${o.id}`, type: 'start', title: 'Início da produção', when: o.started_at, who: o.started_by || '-' })
+                        events.push({
+                          id: `start-${o.id}`,
+                          type: 'start',
+                          title: 'Início da produção',
+                          when: o.started_at,
+                          who: o.started_by || '-'
+                        })
                       }
+
+                      // Produção interrompida (envio pra fila)
                       if (o.interrupted_at) {
-                        events.push({ id: `interrupt-${o.id}`, type: 'interrupt', title: 'Produção interrompida', when: o.interrupted_at, who: o.interrupted_by || '-' })
+                        events.push({
+                          id: `interrupt-${o.id}`,
+                          type: 'interrupt',
+                          title: 'Produção interrompida',
+                          when: o.interrupted_at,
+                          who: o.interrupted_by || '-'
+                        })
                       }
+
+                      // Baixa eficiência (período) — cartão amarelo (usa visual tl-interrupt)
+                      if (o.loweff_started_at) {
+                        events.push({
+                          id: `loweff-${o.id}`,
+                          type: 'loweff',
+                          title: 'Baixa eficiência',
+                          when: o.loweff_started_at,
+                          end: o.loweff_ended_at || null,
+                          who: o.loweff_by || '-',
+                          notes: o.loweff_notes || ''
+                        })
+                      }
+
+                      // Paradas (podem existir várias)
                       if (gr.stops.length) {
                         gr.stops.forEach(st => {
                           events.push({
-                            id: `stop-${st.id}`, type: 'stop', title: 'Parada', when: st.started_at, end: st.resumed_at || null,
-                            who: st.started_by || '-', reason: st.reason || '-', notes: st.notes || ''
+                            id: `stop-${st.id}`,
+                            type: 'stop',
+                            title: 'Parada',
+                            when: st.started_at,
+                            end: st.resumed_at || null,
+                            who: st.started_by || '-',
+                            reason: st.reason || '-',
+                            notes: st.notes || ''
                           })
                         })
                       }
+
+                      // Fim
                       if (o.finalized_at) {
-                        events.push({ id: `end-${o.id}`, type: 'end', title: 'Fim da produção', when: o.finalized_at, who: o.finalized_by || '-' })
+                        events.push({
+                          id: `end-${o.id}`,
+                          type: 'end',
+                          title: 'Fim da produção',
+                          when: o.finalized_at,
+                          who: o.finalized_by || '-'
+                        })
                       }
+
                       if (!events.length) {
                         events.push({ id: `empty-${o.id}`, type: 'empty', title: 'Sem eventos', when: null })
                       }
+
+                      // 🔽 Ordena os cartões por data/hora (mais antigo → mais novo)
+                      events.sort((a, b) => {
+                        const ta = new Date(a.when || a.started_at || 0).getTime()
+                        const tb = new Date(b.when || b.started_at || 0).getTime()
+                        return ta - tb
+                      })
 
                       return (
                         <div key={o.id} style={{ display: 'contents' }}>
@@ -136,16 +194,7 @@ export default function Registro({ registroGrupos, openSet, toggleOpen }) {
                                       </div>
                                     )
                                   }
-                                  if (ev.type === 'interrupt') {
-                                    return (
-                                      <div key={ev.id} className="tl-card tl-interrupt">
-                                        <div className="tl-title">🟡 {ev.title}</div>
-                                        <div className="tl-meta"><b>Data/Hora:</b> {fmtDateTime(ev.when)}</div>
-                                        <div className="tl-meta"><b>Registrado por:</b> {ev.who}</div>
-                                        <div className="tl-meta muted">A O.P foi removida do painel e enviada ao fim da fila.</div>
-                                      </div>
-                                    )
-                                  }
+
                                   if (ev.type === 'start') {
                                     return (
                                       <div key={ev.id} className="tl-card tl-start">
@@ -155,6 +204,21 @@ export default function Registro({ registroGrupos, openSet, toggleOpen }) {
                                       </div>
                                     )
                                   }
+
+                                  if (ev.type === 'loweff') {
+                                    const dur = ev.end ? fmtDuracao(ev.when, ev.end) : '-'
+                                    return (
+                                      <div key={ev.id} className="tl-card tl-interrupt">
+                                        <div className="tl-title">🟡 {ev.title}</div>
+                                        <div className="tl-meta"><b>Início:</b> {fmtDateTime(ev.when)}</div>
+                                        <div className="tl-meta"><b>Fim:</b> {ev.end ? fmtDateTime(ev.end) : '— (em aberto)'}</div>
+                                        <div className="tl-meta"><b>Duração:</b> {dur}</div>
+                                        <div className="tl-meta"><b>Operador:</b> {ev.who}</div>
+                                        {ev.notes ? <div className="tl-notes">{ev.notes}</div> : null}
+                                      </div>
+                                    )
+                                  }
+
                                   if (ev.type === 'stop') {
                                     const dur = ev.end ? fmtDuracao(ev.when, ev.end) : '-'
                                     return (
@@ -169,6 +233,18 @@ export default function Registro({ registroGrupos, openSet, toggleOpen }) {
                                       </div>
                                     )
                                   }
+
+                                  if (ev.type === 'interrupt') {
+                                    return (
+                                      <div key={ev.id} className="tl-card tl-interrupt">
+                                        <div className="tl-title">🟡 {ev.title}</div>
+                                        <div className="tl-meta"><b>Data/Hora:</b> {fmtDateTime(ev.when)}</div>
+                                        <div className="tl-meta"><b>Registrado por:</b> {ev.who}</div>
+                                        <div className="tl-meta muted">A O.P foi removida do painel e enviada ao fim da fila.</div>
+                                      </div>
+                                    )
+                                  }
+
                                   return (
                                     <div key={ev.id} className="tl-card tl-end">
                                       <div className="tl-title">🏁 {ev.title}</div>
