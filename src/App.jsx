@@ -244,7 +244,7 @@ async function atualizar(ordemParcial){
     const res = await supabase.from('orders').update(payload).eq('id', ordem.id).select('*').maybeSingle()
     if (res.error) { alert('Erro ao finalizar: ' + res.error.message); if(before) setOrdens(prev=>[before,...prev]); setFinalizadas(prev=>prev.filter(o=>o.id!==ordem.id)); return }
     if (res.data) upsertFinalizadaLocal(res.data)
-  }g
+  }
 
   // === ENVIAR PARA FILA (só aparece na LISTA) =======================
 async function enviarParaFila(ordemAtiva) {
