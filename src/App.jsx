@@ -273,8 +273,6 @@ export default function App(){
           status: 'PRODUZINDO',
           restarted_by: operador,
           restarted_at: iso,
-          interrupted_at: null,
-          interrupted_by: null,
           // ao retomar normal, zera possíveis campos de baixa eficiência abertos
           loweff_started_at: null, loweff_ended_at: null, loweff_by: null, loweff_notes: null
         }
@@ -399,7 +397,10 @@ export default function App(){
   }
 
   // === ENVIAR PARA FILA (só aparece na LISTA) =======================
-  async function enviarParaFila(ordemAtiva) {
+  async function enviarParaFila(ordemAtiva, opts) {
+    const operador = opts?.operador?.trim()
+    const data = opts?.data
+    const hora = opts?.hora
     const maquina = ordemAtiva.machine_id
     const lista = [...ordens]
       .filter(o => !o.finalized && o.machine_id === maquina)
@@ -427,10 +428,11 @@ export default function App(){
       if (r.error) { alert('Erro ao preparar envio para fila: ' + r.error.message); return }
     }
 
-    // 2) promover primeiro da fila ao painel
+    // 2) promover primeiro da fila ao painel (SEM zerar started_* para não perder histórico)
     {
       const r = await supabase.from('orders').update({
-        pos: 0, status: 'AGUARDANDO', started_at: null, started_by: null
+        pos: 0,
+        status: 'AGUARDANDO'
       }).eq('id', novoPainel.id)
       if (r.error) { alert('Erro ao promover item para o painel: ' + r.error.message); return }
     }
@@ -445,12 +447,14 @@ export default function App(){
     // 4) enviar a atual para o fim e registrar interrupção
     {
       const finalPos = novaFilaRestante.length + 1
-      const agoraISO = new Date().toISOString()
+            const agoraISO = (data && hora)
+        ? localDateTimeToISO(data, hora)
+        : new Date().toISOString()
       const r = await supabase.from('orders').update({
         pos: finalPos,
         status: 'AGUARDANDO',
         interrupted_at: agoraISO,
-        interrupted_by: 'Sistema',
+        interrupted_by: operador || 'Sistema',
       }).eq('id', ativa.id)
       if (r.error) { alert('Erro ao enviar a atual para o fim da fila: ' + r.error.message); return }
     }
@@ -459,7 +463,11 @@ export default function App(){
     setOrdens(prev => {
       const map = new Map(prev.map(o => [o.id, { ...o }]))
       const np = map.get(novoPainel.id)
-      if (np) { np.pos = 0; np.status = 'AGUARDANDO'; np.started_at = null; np.started_by = null }
+      if (np) {
+        np.pos = 0;
+        np.status = 'AGUARDANDO';
+        // preserva started_at/started_by (não zera) para manter o histórico no Registro
+      }
 
       novaFilaRestante.forEach((o, i) => {
         const it = map.get(o.id); if (it) it.pos = i + 1
@@ -469,8 +477,8 @@ export default function App(){
       if (itAtiva) {
         itAtiva.pos = novaFilaRestante.length + 1
         itAtiva.status = 'AGUARDANDO'
-        itAtiva.interrupted_at = new Date().toISOString()
-        itAtiva.interrupted_by = 'Sistema'
+        itAtiva.interrupted_at = (data && hora) ? localDateTimeToISO(data, hora) : new Date().toISOString()
+        itAtiva.interrupted_by = operador || 'Sistema'
       }
       return Array.from(map.values())
     })

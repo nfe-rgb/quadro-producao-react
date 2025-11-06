@@ -3,17 +3,31 @@ import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import Etiqueta from './Etiqueta'
 
-export default function FilaSortableItem({ ordem, onEdit, etiquetaVariant = 'fila' }) {
-  const {attributes, listeners, setNodeRef, transform, transition, isDragging} =
+export default function FilaSortableItem({
+  ordem,
+  onEdit,
+  etiquetaVariant = 'fila',
+  // 🔶 nova prop para pintar amarelo quando for produção interrompida
+  highlightInterrompida = false,
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
     useSortable({ id: ordem.id })
 
-  const style = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.4 : 1 }
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.4 : 1,
+  }
+
+  // 🔶 aplica classe condicional para amarelar o card
+  const className = `card fila-item ${highlightInterrompida ? 'fila-interrompida' : ''}`
 
   return (
-    <div ref={setNodeRef} style={style} className="card fila-item">
+    <div ref={setNodeRef} style={style} className={className}>
       <button className="drag-handle" {...attributes} {...listeners} title="Arrastar">⠿</button>
       <div className="fila-content">
         <Etiqueta o={ordem} variant={etiquetaVariant} />
+
         <div className="sep"></div>
         <button className="btn" onClick={onEdit}>Editar</button>
       </div>

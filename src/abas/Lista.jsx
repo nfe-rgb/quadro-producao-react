@@ -1,8 +1,10 @@
 // src/abas/Lista.jsx
+import { useState } from 'react'
 import { DndContext, closestCenter } from '@dnd-kit/core'
 import { SortableContext, horizontalListSortingStrategy } from '@dnd-kit/sortable'
 import FilaSortableItem from '../components/FilaSortableItem'
 import Etiqueta from '../components/Etiqueta'
+import Modal from '../components/Modal'
 import { MAQUINAS, STATUS } from '../lib/constants'
 import { statusClass, jaIniciou } from '../lib/utils'
 import { supabase } from '../lib/supabaseClient.js' // ✅ ESM correto
@@ -14,9 +16,39 @@ export default function Lista({
   setStartModal,
   setEditando,
   setFinalizando,
-  enviarParaFila,
-  refreshOrdens, // opcional
+  enviarParaFila,     // agora vamos chamar com { operador, data, hora }
+  refreshOrdens,      // opcional
 }) {
+  // 🔶 Modal de confirmação "Enviar para fila / interromper"
+  const [confirmInt, setConfirmInt] = useState(null)
+  // confirmInt = { ordem, operador, data, hora }
+
+  const abrirModalInterromper = (ordem) => {
+    const now = new Date()
+    setConfirmInt({
+      ordem,
+      operador: '',
+      data: now.toISOString().slice(0,10),
+      hora: now.toTimeString().slice(0,5)
+    })
+  }
+
+  const confirmarInterromper = async () => {
+    const { ordem, operador, data, hora } = confirmInt || {}
+    if (!operador || !data || !hora) { alert('Preencha operador, data e hora.'); return }
+    try {
+      // 🔁 chama a função do App já com operador/data/hora
+      await enviarParaFila(ordem, { operador, data, hora })
+      setConfirmInt(null)
+      if (typeof refreshOrdens === 'function') {
+        setTimeout(() => refreshOrdens(), 400)
+      }
+    } catch (e) {
+      console.error(e)
+      alert('Falha ao interromper/mandar para fila.')
+    }
+  }
+
   const moverNaFila = async (machineCode, e) => {
     try {
       const activeId = e?.active?.id
@@ -52,104 +84,141 @@ export default function Lista({
   }
 
   return (
-    <div className="grid">
-      <div className="tablehead"><div>MÁQUINA</div><div>PAINEL</div><div>FILA</div></div>
+    <>
+      <div className="grid">
+        <div className="tablehead"><div>MÁQUINA</div><div>PAINEL</div><div>FILA</div></div>
 
-      {MAQUINAS.map(m => {
-        const lista = ativosPorMaquina[m] || []
-        const ativa = lista[0] || null
-        const fila  = lista.slice(1)
+        {MAQUINAS.map(m => {
+          const lista = ativosPorMaquina[m] || []
+          const ativa = lista[0] || null
+          const fila  = lista.slice(1)
 
-        return (
-          <div className="tableline" key={m}>
-            <div className="cell-machine"><span className="badge">{m}</span></div>
+          return (
+            <div className="tableline" key={m}>
+              <div className="cell-machine"><span className="badge">{m}</span></div>
 
-            <div className="cell-painel">
-              {ativa ? (
-                <div className={statusClass(ativa.status)}>
-                  <Etiqueta o={ativa} variant="painel" />
-                  <div className="sep"></div>
+              <div className="cell-painel">
+                {ativa ? (
+                  <div className={statusClass(ativa.status)}>
+                    <Etiqueta o={ativa} variant="painel" />
+                    <div className="sep"></div>
 
-                  <div className="grid2">
-                    <div>
-                      <div className="label">Situação (só painel)</div>
-                      <select
-                        className="select"
-                        value={ativa.status}
-                        onChange={e => onStatusChange(ativa, e.target.value)}
-                        disabled={ativa.status === 'AGUARDANDO'}
-                      >
-                        {STATUS
-                          .filter(s => (jaIniciou(ativa) ? s !== 'AGUARDANDO' : true))
-                          .map(s => (
-                            <option key={s} value={s}>
-                              {s==='AGUARDANDO'?'Aguardando'
-                                : s==='PRODUZINDO'?'Produzindo'
-                                : s==='BAIXA_EFICIENCIA'?'Baixa Eficiência'
-                                : 'Parada'}
-                            </option>
-                          ))}
-                      </select>
-                    </div>
+                    <div className="grid2">
+                      <div>
+                        <div className="label">Situação (só painel)</div>
+                        <select
+                          className="select"
+                          value={ativa.status}
+                          onChange={e => onStatusChange(ativa, e.target.value)}
+                          disabled={ativa.status === 'AGUARDANDO'}
+                        >
+                          {STATUS
+                            .filter(s => (jaIniciou(ativa) ? s !== 'AGUARDANDO' : true))
+                            .map(s => (
+                              <option key={s} value={s}>
+                                {s==='AGUARDANDO'?'Aguardando'
+                                  : s==='PRODUZINDO'?'Produzindo'
+                                  : s==='BAIXA_EFICIENCIA'?'Baixa Eficiência'
+                                  : 'Parada'}
+                              </option>
+                            ))}
+                        </select>
+                      </div>
 
-                    <div className="flex" style={{ justifyContent:'flex-end', gap:8 }}>
-                      {ativa.status === 'AGUARDANDO' ? (
-                        <>
-                          <button className="btn" onClick={()=>{
-                            const now = new Date()
-                            setStartModal({
-                              ordem: ativa,
-                              operador: '',
-                              data: now.toISOString().slice(0,10),
-                              hora: now.toTimeString().slice(0,5)
-                            })
-                          }}>Iniciar Produção</button>
-                          <button className="btn" onClick={() => setEditando(ativa)}>Editar</button>
-                          <button className="btn" onClick={() => enviarParaFila(ativa)}>Enviar para fila</button>
-                        </>
-                      ) : (
-                        <>
-                          <button className="btn" onClick={() => setFinalizando(ativa)}>Finalizar</button>
-                          <button className="btn" onClick={() => setEditando(ativa)}>Editar</button>
-                          <button className="btn" onClick={() => enviarParaFila(ativa)}>Enviar para fila</button>
-                        </>
-                      )}
+                      <div className="flex" style={{ justifyContent:'flex-end', gap:8 }}>
+                        {ativa.status === 'AGUARDANDO' ? (
+                          <>
+                            <button className="btn" onClick={()=>{
+                              const now = new Date()
+                              setStartModal({
+                                ordem: ativa,
+                                operador: '',
+                                data: now.toISOString().slice(0,10),
+                                hora: now.toTimeString().slice(0,5)
+                              })
+                            }}>Iniciar Produção</button>
+                            <button className="btn" onClick={() => setEditando(ativa)}>Editar</button>
+                            {/* 🚚 agora abre modal de confirmação */}
+                            <button className="btn" onClick={() => abrirModalInterromper(ativa)}>Enviar para fila</button>
+                          </>
+                        ) : (
+                          <>
+                            <button className="btn" onClick={() => setFinalizando(ativa)}>Finalizar</button>
+                            <button className="btn" onClick={() => setEditando(ativa)}>Editar</button>
+                            {/* 🚚 agora abre modal de confirmação */}
+                            <button className="btn" onClick={() => abrirModalInterromper(ativa)}>Enviar para fila</button>
+                          </>
+                        )}
+                      </div>
                     </div>
                   </div>
-                </div>
-              ) : (
-                <div className="muted">Sem Programação</div>
-              )}
+                ) : (
+                  <div className="muted">Sem Programação</div>
+                )}
+              </div>
+
+              <div className="cell-fila">
+                {fila.length === 0 ? (
+                  <div className="fila"><div className="muted">Sem itens na fila</div></div>
+                ) : (
+                  <DndContext
+                    sensors={sensors}
+                    onDragEnd={(e) => moverNaFila(m, e)}
+                    collisionDetection={closestCenter}
+                  >
+                    <SortableContext items={fila.map(f => f.id)} strategy={horizontalListSortingStrategy}>
+                      <div className="fila">
+                        {fila.map(f => (
+                          <FilaSortableItem
+                            key={f.id}
+                            ordem={f}
+                            onEdit={() => setEditando(f)}
+                            etiquetaVariant="fila"   // ✅ usa a etiqueta compacta com O.P dentro
+                            // 🔶 pinta amarelo se foi interrompida
+                            highlightInterrompida={f.status === 'AGUARDANDO' && !!f.interrupted_at}
+                          />
+                        ))}
+                      </div>
+                    </SortableContext>
+                  </DndContext>
+                )}
+              </div>
             </div>
+          )
+        })}
+      </div>
 
-            <div className="cell-fila">
-              {fila.length === 0 ? (
-                <div className="fila"><div className="muted">Sem itens na fila</div></div>
-              ) : (
-                <DndContext
-                  sensors={sensors}
-                  onDragEnd={(e) => moverNaFila(m, e)}
-                  collisionDetection={closestCenter}
-                >
-                  <SortableContext items={fila.map(f => f.id)} strategy={horizontalListSortingStrategy}>
-                    <div className="fila">
-{fila.map(f => (
-  <FilaSortableItem
-    key={f.id}
-    ordem={f}
-    onEdit={() => setEditando(f)}
-    etiquetaVariant="fila"   // ✅ usa a etiqueta compacta com O.P dentro
-  />
-))}
-
-                    </div>
-                  </SortableContext>
-                </DndContext>
-              )}
+      {/* 🔶 Modal de confirmação de interrupção */}
+      <Modal
+        open={!!confirmInt}
+        onClose={() => setConfirmInt(null)}
+        title={confirmInt ? `Tem certeza que deseja interromper a produção?` : ''}
+      >
+        {confirmInt && (
+          <div className="grid">
+            <div><div className="label">Operador *</div>
+              <input className="input" value={confirmInt.operador}
+                     onChange={e=>setConfirmInt(v=>({...v, operador:e.target.value}))}
+                     placeholder="Nome do operador"/>
+            </div>
+            <div className="grid2">
+              <div><div className="label">Data *</div>
+                <input type="date" className="input" value={confirmInt.data}
+                       onChange={e=>setConfirmInt(v=>({...v, data:e.target.value}))}/>
+              </div>
+              <div><div className="label">Hora *</div>
+                <input type="time" className="input" value={confirmInt.hora}
+                       onChange={e=>setConfirmInt(v=>({...v, hora:e.target.value}))}/>
+              </div>
+            </div>
+            <div className="sep"></div>
+            <div className="flex" style={{justifyContent:'flex-end', gap:8}}>
+              <button className="btn ghost" onClick={()=>setConfirmInt(null)}>Cancelar</button>
+              <button className="btn primary" onClick={confirmarInterromper}>Confirmar</button>
             </div>
           </div>
-        )
-      })}
-    </div>
+        )}
+      </Modal>
+    </>
   )
 }
