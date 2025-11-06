@@ -2,6 +2,15 @@ import Etiqueta from "../components/Etiqueta";
 import { MAQUINAS, STATUS } from "../lib/constants";
 import { statusClass, jaIniciou } from "../lib/utils";
 
+// Helper para formatar HH:MM:SS
+function formatHHMMSS(totalSeconds) {
+  const s = Math.max(0, Math.floor(totalSeconds || 0));
+  const hh = String(Math.floor(s / 3600)).padStart(2, "0");
+  const mm = String(Math.floor((s % 3600) / 60)).padStart(2, "0");
+  const ss = String(s % 60).padStart(2, "0");
+  return `${hh}:${mm}:${ss}`;
+}
+
 export default function Painel({
   ativosPorMaquina,
   paradas,
@@ -15,15 +24,16 @@ export default function Painel({
       {MAQUINAS.map((m) => {
         const lista = ativosPorMaquina[m] ?? [];
         const ativa = lista[0] || null;
+
+        // Parada aberta -> cronômetro vermelho no cabeçalho
         const openStop = ativa
           ? paradas.find((p) => p.order_id === ativa.id && !p.resumed_at)
           : null;
-        const sinceMs = openStop
-          ? new Date(openStop.started_at).getTime()
-          : null;
+        const sinceMs = openStop ? new Date(openStop.started_at).getTime() : null;
 
         const durText = sinceMs
           ? (() => {
+              // força re-render pelo tick
               // eslint-disable-next-line no-unused-vars
               const _ = tick;
               const total = Math.max(
@@ -37,7 +47,21 @@ export default function Painel({
             })()
           : null;
 
-        // ✅ obtém o número da O.P se existir
+        // Baixa eficiência -> cronômetro amarelo no cabeçalho (igual ao de parada)
+        const lowEffText =
+          ativa?.status === "BAIXA_EFICIENCIA" && ativa?.loweff_started_at
+            ? (() => {
+                // força re-render pelo tick
+                // eslint-disable-next-line no-unused-vars
+                const _ = tick;
+                const secs =
+                  (Date.now() -
+                    new Date(ativa.loweff_started_at).getTime()) / 1000;
+                return formatHHMMSS(secs);
+              })()
+            : null;
+
+        // O.P no cabeçalho (lado direito)
         const opCode =
           ativa?.o?.code ??
           ativa?.code ??
@@ -47,11 +71,10 @@ export default function Painel({
 
         return (
           <div key={m} className="column">
-            {/* ===== Cabeçalho: máquina, cronômetro e O.P ===== */}
+            {/* ===== Cabeçalho: máquina, cronômetros e O.P ===== */}
             <div
               className={
-                "column-header " +
-                (ativa?.status === "PARADA" ? "blink-red" : "")
+                "column-header " + (ativa?.status === "PARADA" ? "blink-red" : "")
               }
               style={{ display: "flex", alignItems: "center", gap: 8 }}
             >
@@ -60,17 +83,31 @@ export default function Painel({
                 style={{ display: "flex", alignItems: "center", gap: 8 }}
               >
                 {m}
+
+                {/* Cronômetro de PARADA (vermelho) */}
                 {ativa?.status === "PARADA" && durText && (
                   <span className="parada-timer">{durText}</span>
+                )}
+
+                {/* Cronômetro de BAIXA_EFICIENCIA (amarelo) — mesmo lugar e formato */}
+                {lowEffText && (
+                  <span
+                    className="parada-timer"
+                    style={{
+                      background: "rgba(255, 193, 7, 0.12)",
+                      borderColor: "rgba(255, 193, 7, 0.8)",
+                      color: "#7a5a00",
+                    }}
+                    title={ativa?.loweff_by ? `Operador: ${ativa.loweff_by}` : ""}
+                  >
+                    {lowEffText}
+                  </span>
                 )}
               </div>
 
               {/* lado direito: O.P */}
               {opCode && (
-                <div
-                  className="hdr-right op-inline"
-                  style={{ marginLeft: "auto" }}
-                >
+                <div className="hdr-right op-inline" style={{ marginLeft: "auto" }}>
                   O.P - {opCode}
                 </div>
               )}
@@ -80,19 +117,18 @@ export default function Painel({
             <div className="column-body">
               {ativa ? (
                 <div className={statusClass(ativa.status)}>
-                  {/* 🔹 passa o objeto da ordem corretamente */}
+                  {/* Detalhes da O.P */}
                   <Etiqueta o={ativa.o || ativa} variant="painel" />
 
                   <div className="sep"></div>
+
                   <div className="grid2">
                     <div>
                       <div className="label">Situação</div>
                       <select
                         className="select"
                         value={ativa.status}
-                        onChange={(e) =>
-                          onStatusChange(ativa, e.target.value)
-                        }
+                        onChange={(e) => onStatusChange(ativa, e.target.value)}
                         disabled={ativa.status === "AGUARDANDO"}
                       >
                         {STATUS.filter((s) =>
