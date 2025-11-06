@@ -28,7 +28,7 @@ export default function App(){
   const [startModal, setStartModal]   = useState(null)
   const [stopModal, setStopModal]     = useState(null)
   const [resumeModal, setResumeModal] = useState(null)
-  const [lowEffModal, setLowEffModal] = useState(null)     // 🟡 início baixa eficiência
+  const [lowEffModal, setLowEffModal] = useState(null)       // 🟡 início baixa eficiência
   const [lowEffEndModal, setLowEffEndModal] = useState(null) // 🟡 encerrar baixa eficiência
 
   const [tick, setTick] = useState(0)
@@ -116,7 +116,12 @@ export default function App(){
       machine_id: form.machine_id,
       code: form.code, customer: form.customer, product: form.product, color: form.color,
       qty: form.qty, boxes: form.boxes, standard: form.standard, due_date: form.due_date || null, notes: form.notes,
-      status: 'AGUARDANDO', pos: nextPos, finalized: false, started_at: null, started_by: null,
+      status: 'AGUARDANDO', pos: nextPos, finalized: false,
+      // linhas de produção
+      started_at: null, started_by: null,
+      restarted_at: null, restarted_by: null,
+      interrupted_at: null, interrupted_by: null,
+      // baixa eficiência
       loweff_started_at: null, loweff_ended_at: null, loweff_by: null, loweff_notes: null
     }
 
@@ -164,6 +169,8 @@ export default function App(){
       qty: ordemParcial.qty, boxes: ordemParcial.boxes, standard: ordemParcial.standard, due_date: ordemParcial.due_date || null,
       notes: ordemParcial.notes, status: ordemParcial.status, pos: ordemParcial.pos ?? null,
       started_at: ordemParcial.started_at ?? null, started_by: ordemParcial.started_by ?? null,
+      restarted_at: ordemParcial.restarted_at ?? null, restarted_by: ordemParcial.restarted_by ?? null,
+      interrupted_at: ordemParcial.interrupted_at ?? null, interrupted_by: ordemParcial.interrupted_by ?? null,
       loweff_started_at: ordemParcial.loweff_started_at ?? null,
       loweff_ended_at: ordemParcial.loweff_ended_at ?? null,
       loweff_by: ordemParcial.loweff_by ?? null,
@@ -205,14 +212,14 @@ export default function App(){
       setLowEffEndModal({
         ordem,
         targetStatus: 'PRODUZINDO',
-        operador: '', // opcional registrar quem encerrou
+        operador: '',
         data: now.toISOString().slice(0,10),
         hora: now.toTimeString().slice(0,5),
       })
       return
     }
 
-    // 🟡 Saindo de BAIXA_EFICIENCIA → PARADA: abrir tela de parada normalmente
+    // 🟡 Saindo de BAIXA_EFICIENCIA → PARADA: abrir tela de parada e encerrar baixa ef no mesmo instante
     if (atual === 'BAIXA_EFICIENCIA' && targetStatus === 'PARADA') {
       const now = new Date()
       setStopModal({
@@ -220,7 +227,6 @@ export default function App(){
         operador:'', motivo: MOTIVOS_PARADA[0], obs:'',
         data: now.toISOString().slice(0,10),
         hora: now.toTimeString().slice(0,5),
-        // sinaliza para encerrar a baixa eficiência no mesmo timestamp da parada
         endLowEffAtStopStart: true,
       })
       return
@@ -250,21 +256,37 @@ export default function App(){
     patchOrdemLocal(ordem.id, patch)
     const res = await supabase.from('orders').update(patch).eq('id', ordem.id).select('*').maybeSingle()
     if (res.error) { alert('Erro ao alterar status: ' + res.error.message); patchOrdemLocal(ordem.id, before) }
-    if (res.data) patchOrdemLocal(res.data.id, res.data)
+    if (res.data) patchOrdemLocal(ordem.id, res.data)
   }
 
   async function confirmarInicio() {
     const { ordem, operador, data, hora } = startModal
     if (!operador || !data || !hora) { alert('Preencha operador, data e hora.'); return }
-    const started_at = localDateTimeToISO(data, hora)
-    const payload = {
-      started_by: operador,
-      started_at,
-      status: 'PRODUZINDO',
-      interrupted_at: null, interrupted_by: null,
-      // ao iniciar, zera possíveis campos de baixa eficiência abertos
-      loweff_started_at: null, loweff_ended_at: null, loweff_by: null, loweff_notes: null
-    }
+    const iso = localDateTimeToISO(data, hora)
+
+    // Detecta reinício (já tinha started_at e foi interrompida)
+    const isRestart = !!ordem.started_at && !!ordem.interrupted_at
+
+    const payload = isRestart
+      ? {
+          // reinício após interrupção
+          status: 'PRODUZINDO',
+          restarted_by: operador,
+          restarted_at: iso,
+          interrupted_at: null,
+          interrupted_by: null,
+          // ao retomar normal, zera possíveis campos de baixa eficiência abertos
+          loweff_started_at: null, loweff_ended_at: null, loweff_by: null, loweff_notes: null
+        }
+      : {
+          // primeiro início
+          started_by: operador,
+          started_at: iso,
+          status: 'PRODUZINDO',
+          interrupted_at: null, interrupted_by: null,
+          loweff_started_at: null, loweff_ended_at: null, loweff_by: null, loweff_notes: null
+        }
+
     patchOrdemLocal(ordem.id, payload)
     const res = await supabase.from('orders').update(payload).eq('id', ordem.id).select('*').maybeSingle()
     if (res.error) { alert('Erro ao iniciar: '+res.error.message); return }
@@ -420,7 +442,7 @@ export default function App(){
       if (r.error) { alert('Erro ao reordenar fila: ' + r.error.message); return }
     }
 
-    // 4) enviar a atual para o fim
+    // 4) enviar a atual para o fim e registrar interrupção
     {
       const finalPos = novaFilaRestante.length + 1
       const agoraISO = new Date().toISOString()
@@ -466,15 +488,23 @@ export default function App(){
     const byId = new Map()
     const push = (o)=>{ if(!o) return; byId.set(o.id, { ...o }) }
     finalizadas.forEach(push)
+    // mantém ordens ativas que já iniciaram
     ordens.forEach(o=>{ if(o.started_at) push(o) })
+
     const stopsByOrder = paradas.reduce((acc,st)=>{ (acc[st.order_id] ||= []).push(st); return acc },{})
+
+    // ordenação por recência consistente com a aba Registro
     const arr = Array.from(byId.values())
     arr.sort((a,b)=>{
-      const ta = new Date(a.finalized_at || a.started_at || a.created_at || 0).getTime()
-      const tb = new Date(b.finalized_at || b.started_at || b.created_at || 0).getTime()
+      const ta = new Date(a.finalized_at || a.restarted_at || a.interrupted_at || a.started_at || a.created_at || 0).getTime()
+      const tb = new Date(b.finalized_at || b.restarted_at || b.interrupted_at || b.started_at || b.created_at || 0).getTime()
       return tb - ta
     })
-    return arr.map(o=>({ ordem:o, stops:(stopsByOrder[o.id]||[]).sort((a,b)=>new Date(a.started_at)-new Date(b.started_at)) }))
+
+    return arr.map(o=>({
+      ordem:o,
+      stops:(stopsByOrder[o.id]||[]).sort((a,b)=>new Date(a.started_at)-new Date(b.started_at))
+    }))
   },[finalizadas, ordens, paradas])
 
   const [openSet, setOpenSet] = useState(()=>new Set())

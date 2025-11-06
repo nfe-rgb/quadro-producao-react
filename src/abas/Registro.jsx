@@ -41,6 +41,18 @@ export default function Registro({ registroGrupos, openSet, toggleOpen }) {
     })
   }
 
+  // Helper para timestamp de "recência" da O.P. (ordenação das linhas)
+  function tsOP(o) {
+    return new Date(
+      o.finalized_at ||
+      o.restarted_at ||      // reinício conta como atividade recente
+      o.interrupted_at ||    // envio para fila também conta
+      o.started_at ||
+      o.created_at ||
+      0
+    ).getTime()
+  }
+
   return (
     <div className="card registro-wrap">
       <div className="card">
@@ -49,12 +61,8 @@ export default function Registro({ registroGrupos, openSet, toggleOpen }) {
         </div>
 
         {MAQUINAS.map(m => {
-          // 🔽 Ordena O.Ps desta máquina do mais recente → mais antigo
-          const grupos = (gruposPorMaquina[m] || []).slice().sort((a, b) => {
-            const ta = new Date(a.ordem.finalized_at || a.ordem.started_at || a.ordem.created_at || 0).getTime()
-            const tb = new Date(b.ordem.finalized_at || b.ordem.started_at || b.ordem.created_at || 0).getTime()
-            return tb - ta
-          })
+          // 🔽 O.P.s desta máquina do mais recente → mais antigo
+          const grupos = (gruposPorMaquina[m] || []).slice().sort((a, b) => tsOP(b.ordem) - tsOP(a.ordem))
 
           const aberto = openMachines.has(m)
           const totalH = totalParadas[m]?.toFixed(2) ?? '0.00'
@@ -95,7 +103,7 @@ export default function Registro({ registroGrupos, openSet, toggleOpen }) {
                       const o = gr.ordem
                       const events = []
 
-                      // Início
+                      // 1) Início
                       if (o.started_at) {
                         events.push({
                           id: `start-${o.id}`,
@@ -106,7 +114,7 @@ export default function Registro({ registroGrupos, openSet, toggleOpen }) {
                         })
                       }
 
-                      // Produção interrompida (envio pra fila)
+                      // 2) Produção interrompida (envio pra fila)
                       if (o.interrupted_at) {
                         events.push({
                           id: `interrupt-${o.id}`,
@@ -117,7 +125,18 @@ export default function Registro({ registroGrupos, openSet, toggleOpen }) {
                         })
                       }
 
-                      // Baixa eficiência (período) — cartão amarelo (usa visual tl-interrupt)
+                      // 3) Reinício (após interrupção)
+                      if (o.restarted_at) {
+                        events.push({
+                          id: `restart-${o.id}`,
+                          type: 'restart',
+                          title: 'Reinício da produção',
+                          when: o.restarted_at,
+                          who: o.restarted_by || '-'
+                        })
+                      }
+
+                      // 4) Baixa eficiência (período) — amarelo (usa visual tl-interrupt)
                       if (o.loweff_started_at) {
                         events.push({
                           id: `loweff-${o.id}`,
@@ -130,7 +149,7 @@ export default function Registro({ registroGrupos, openSet, toggleOpen }) {
                         })
                       }
 
-                      // Paradas (podem existir várias)
+                      // 5) Paradas (podem existir várias)
                       if (gr.stops.length) {
                         gr.stops.forEach(st => {
                           events.push({
@@ -146,7 +165,7 @@ export default function Registro({ registroGrupos, openSet, toggleOpen }) {
                         })
                       }
 
-                      // Fim
+                      // 6) Fim
                       if (o.finalized_at) {
                         events.push({
                           id: `end-${o.id}`,
@@ -161,10 +180,10 @@ export default function Registro({ registroGrupos, openSet, toggleOpen }) {
                         events.push({ id: `empty-${o.id}`, type: 'empty', title: 'Sem eventos', when: null })
                       }
 
-                      // 🔽 Ordena os cartões por data/hora (mais antigo → mais novo)
+                      // 🔽 Ordena cartões por data/hora (mais antigo → mais novo)
                       events.sort((a, b) => {
-                        const ta = new Date(a.when || a.started_at || 0).getTime()
-                        const tb = new Date(b.when || b.started_at || 0).getTime()
+                        const ta = new Date(a.when || 0).getTime()
+                        const tb = new Date(b.when || 0).getTime()
                         return ta - tb
                       })
 
@@ -199,6 +218,16 @@ export default function Registro({ registroGrupos, openSet, toggleOpen }) {
                                     return (
                                       <div key={ev.id} className="tl-card tl-start">
                                         <div className="tl-title">🚀 {ev.title}</div>
+                                        <div className="tl-meta"><b>Data/Hora:</b> {fmtDateTime(ev.when)}</div>
+                                        <div className="tl-meta"><b>Operador:</b> {ev.who}</div>
+                                      </div>
+                                    )
+                                  }
+
+                                  if (ev.type === 'restart') {
+                                    return (
+                                      <div key={ev.id} className="tl-card tl-start">
+                                        <div className="tl-title">🔁 {ev.title}</div>
                                         <div className="tl-meta"><b>Data/Hora:</b> {fmtDateTime(ev.when)}</div>
                                         <div className="tl-meta"><b>Operador:</b> {ev.who}</div>
                                       </div>
@@ -245,6 +274,7 @@ export default function Registro({ registroGrupos, openSet, toggleOpen }) {
                                     )
                                   }
 
+                                  // end
                                   return (
                                     <div key={ev.id} className="tl-card tl-end">
                                       <div className="tl-title">🏁 {ev.title}</div>
