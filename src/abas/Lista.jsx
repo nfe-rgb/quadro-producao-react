@@ -5,7 +5,26 @@ import FilaSortableItem from '../components/FilaSortableItem'
 import Etiqueta from '../components/Etiqueta'
 import { MAQUINAS, STATUS } from '../lib/constants'
 import { statusClass, jaIniciou } from '../lib/utils'
-import { supabase } from '../lib/supabaseClient.js' // ✅ MESMO PADRÃO DO App.jsx
+
+// 🔒 Import do supabase com tolerância a ambientes (default / named / sem supabase)
+let supabase
+try {
+  // tente com .js (igual ao App.jsx)
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const mod = require('../lib/supabaseClient.js')
+  supabase = mod.supabase ?? mod.default ?? mod
+} catch (e1) {
+  try {
+    // fallback sem extensão (às vezes o bundler resolve diferente no build)
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const mod2 = require('../lib/supabaseClient')
+    supabase = mod2.supabase ?? mod2.default ?? mod2
+  } catch (e2) {
+    // último recurso: loga e mantém undefined (vamos tratar no moverNaFila)
+    console.error('Falha ao importar supabaseClient:', e1, e2)
+    supabase = undefined
+  }
+}
 
 export default function Lista({
   ativosPorMaquina,
@@ -38,16 +57,22 @@ export default function Lista({
       nova.splice(overIndex, 0, moved)
       const ids = nova.map(i => i.id)
 
-      // Chama a RPC que faz a troca de posições no servidor (com posições temporárias)
+      // ✅ Segurança: se o supabase não carregou, não quebra a tela
+      if (!supabase || typeof supabase.rpc !== 'function') {
+        console.error('Supabase não disponível em Lista.jsx; verifique o caminho do import de supabaseClient.')
+        alert('Falha ao reordenar: Supabase não carregou (veja o console).')
+        return
+      }
+
       const { error } = await supabase.rpc('reorder_machine_queue', {
         p_machine: machineCode,
         p_ids: ids,
       })
       if (error) throw error
 
-      // Refaz o fetch para refletir a ordem nova (se o Realtime não chegar)
+      // Refetch para refletir a nova ordem (se Realtime atrasar)
       if (typeof refreshOrdens === 'function') {
-        await refreshOrdens()
+        setTimeout(() => refreshOrdens(), 500)
       }
     } catch (err) {
       console.error('Reordenação falhou:', err)

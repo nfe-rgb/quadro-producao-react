@@ -433,6 +433,7 @@ async function enviarParaFila(ordemAtiva) {
           setEditando={setEditando}
           setFinalizando={setFinalizando}
           enviarParaFila={enviarParaFila}
+          refreshOrdens={fetchOrdensAbertas}
         />
       )}
 
