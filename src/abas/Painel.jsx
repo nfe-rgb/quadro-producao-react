@@ -81,7 +81,7 @@ export default function Painel({
               {ativa ? (
                 <div className={statusClass(ativa.status)}>
                   {/* 🔹 passa o objeto da ordem corretamente */}
-                  <Etiqueta o={ativa.o || ativa} />
+                  <Etiqueta o={ativa.o || ativa} variant="painel" />
 
                   <div className="sep"></div>
                   <div className="grid2">

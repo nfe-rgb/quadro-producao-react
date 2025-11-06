@@ -67,7 +67,7 @@ export default function Lista({
             <div className="cell-painel">
               {ativa ? (
                 <div className={statusClass(ativa.status)}>
-                  <Etiqueta o={ativa}/>
+                  <Etiqueta o={ativa} variant="painel" />
                   <div className="sep"></div>
 
                   <div className="grid2">
@@ -133,9 +133,15 @@ export default function Lista({
                 >
                   <SortableContext items={fila.map(f => f.id)} strategy={horizontalListSortingStrategy}>
                     <div className="fila">
-                      {fila.map(f => (
-                        <FilaSortableItem key={f.id} ordem={f} onEdit={() => setEditando(f)} />
-                      ))}
+{fila.map(f => (
+  <FilaSortableItem
+    key={f.id}
+    ordem={f}
+    onEdit={() => setEditando(f)}
+    etiquetaVariant="fila"   // ✅ usa a etiqueta compacta com O.P dentro
+  />
+))}
+
                     </div>
                   </SortableContext>
                 </DndContext>
