@@ -265,4 +265,73 @@
     min-width: 190px;
   }
 }
+/* =========================
+   Linha do Tempo Vertical no Mobile
+   ========================= */
+@media (max-width: 768px) {
+  /* timeline vertical */
+  .timeline {
+    display: flex;
+    flex-direction: column;
+    overflow-x: hidden;
+    overflow-y: auto;
+    max-height: 60vh; /* impede crescer demais */
+    gap: 12px;
+    padding: 10px 0;
+    border-left: 4px solid rgba(2,119,189,0.15);
+    border-top: none;
+    scroll-snap-type: none;
+  }
+
+  /* conector vertical entre cards */
+  .timeline::before {
+    content: "";
+    position: absolute;
+    top: 0; left: 16px;
+    width: 2px;
+    height: 100%;
+    background: rgba(2,119,189,0.15);
+  }
+
+  /* cartões verticais */
+  .tl-card {
+    min-width: auto;
+    width: 100%;
+    margin-left: 20px;
+    padding: 12px 14px;
+    border-left: 4px solid var(--border);
+    border-radius: 10px;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.06);
+  }
+
+  .tl-card::before {
+    content: "";
+    position: absolute;
+    left: -12px;
+    top: 16px;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--secondary);
+    border: 2px solid white;
+  }
+
+  /* tipagem das cores permanece */
+  .tl-start { border-left-color: #2E7D32; }
+  .tl-stop { border-left-color: #C62828; }
+  .tl-end { border-left-color: #455A64; }
+  .tl-interrupt { border-left-color: #FBC02D; }
+  .tl-empty { border-left-color: var(--border); }
+
+  /* título e meta menores no mobile */
+  .tl-title { font-size: 15px; }
+  .tl-meta { font-size: 13px; }
+  .tl-notes { font-size: 12px; }
+
+  /* evita corte lateral */
+  .row .timeline {
+    position: relative;
+    padding-left: 16px;
+  }
+}
 
