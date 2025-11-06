@@ -87,34 +87,82 @@ export default function App(){
   async function criarOrdem(){
     if(!form.code.trim()) return
     const count = ordens.filter(o=>o.machine_id===form.machine_id && !o.finalized).length
-    const novo = {
-      machine_id: form.machine_id,
-      code: form.code, customer: form.customer, product: form.product, color: form.color,
-      qty: form.qty, boxes: form.boxes, standard: form.standard, due_date: form.due_date || null, notes: form.notes,
-      status: 'AGUARDANDO', pos: count, finalized: false, started_at: null, started_by: null
-    }
-    const tempId = `tmp-${crypto.randomUUID()}`
-    setOrdens(prev => [...prev, { id: tempId, ...novo }])
-    const res = await supabase.from('orders').insert([novo]).select('*').maybeSingle()
-    if (res.error) { setOrdens(prev => prev.filter(o => o.id !== tempId)); alert('Erro ao criar ordem: ' + res.error.message); return }
-    if (res.data) setOrdens(prev => prev.map(o => o.id === tempId ? res.data : o))
-    setForm({code:'', customer:'', product:'', color:'', qty:'', boxes:'', standard:'', due_date:'', notes:'', machine_id:'P1'})
-    setTab('painel')
+// pega o maior pos no banco (não no estado)
+const { data: last, error: maxErr } = await supabase
+  .from('orders')
+  .select('pos')
+  .eq('machine_id', form.machine_id)
+  .eq('finalized', false)
+  .order('pos', { ascending: false })
+  .limit(1)
+  .maybeSingle();
+
+if (maxErr) { alert('Erro ao obter posição: ' + maxErr.message); return; }
+
+const nextPos = (last?.pos ?? -1) + 1;
+
+const novo = {
+  machine_id: form.machine_id,
+  code: form.code, customer: form.customer, product: form.product, color: form.color,
+  qty: form.qty, boxes: form.boxes, standard: form.standard, due_date: form.due_date || null, notes: form.notes,
+  status: 'AGUARDANDO', pos: nextPos, finalized: false, started_at: null, started_by: null
+};
+
+const tempId = `tmp-${crypto.randomUUID()}`;
+setOrdens(prev => [...prev, { id: tempId, ...novo }]);
+const res = await supabase.from('orders').insert([novo]).select('*').maybeSingle();
   }
 
-  async function atualizar(ordemParcial){
-    const before = ordens.find(o => o.id === ordemParcial.id)
-    patchOrdemLocal(ordemParcial.id, { ...ordemParcial })
-    const res = await supabase.from('orders').update({
-      machine_id: ordemParcial.machine_id,
-      code: ordemParcial.code, customer: ordemParcial.customer, product: ordemParcial.product, color: ordemParcial.color,
-      qty: ordemParcial.qty, boxes: ordemParcial.boxes, standard: ordemParcial.standard, due_date: ordemParcial.due_date || null,
-      notes: ordemParcial.notes, status: ordemParcial.status, pos: ordemParcial.pos ?? null,
-      started_at: ordemParcial.started_at ?? null, started_by: ordemParcial.started_by ?? null
-    }).eq('id', ordemParcial.id).select('*').maybeSingle()
-    if (res.error) { alert('Erro ao atualizar: ' + res.error.message); if (before) patchOrdemLocal(before.id, before); return }
-    if (res.data) patchOrdemLocal(res.data.id, res.data)
+async function atualizar(ordemParcial){
+  const before = ordens.find(o => o.id === ordemParcial.id);
+  if (!before) return;
+
+  // Se a máquina mudou, use a RPC para evitar colisão de (machine_id, pos)
+  if (before.machine_id !== ordemParcial.machine_id) {
+    // Atualiza localmente só os campos "não-posicionais"
+    patchOrdemLocal(ordemParcial.id, {
+      ...before,
+      ...ordemParcial, // code, cliente, etc.
+    });
+
+    const { data, error } = await supabase.rpc('orders_move_to_machine', {
+      p_order_id: ordemParcial.id,
+      p_target_machine: ordemParcial.machine_id,
+      // p_insert_at: null -> manda para o fim; se quiser inserir em posição específica, passe um número aqui.
+      p_insert_at: null,
+    });
+
+    if (error) {
+      alert('Erro ao mover ordem de máquina: ' + error.message);
+      // volta o local
+      patchOrdemLocal(before.id, before);
+      return;
+    }
+
+    if (data && data[0]) {
+      // data[0] é a ordem já atualizada no banco (machine_id/pos/status)
+      patchOrdemLocal(data[0].id, data[0]);
+    }
+    return;
   }
+
+  // Máquina NÃO mudou: mantém seu update normal
+  patchOrdemLocal(ordemParcial.id, { ...ordemParcial });
+  const res = await supabase.from('orders').update({
+    machine_id: ordemParcial.machine_id,
+    code: ordemParcial.code, customer: ordemParcial.customer, product: ordemParcial.product, color: ordemParcial.color,
+    qty: ordemParcial.qty, boxes: ordemParcial.boxes, standard: ordemParcial.standard, due_date: ordemParcial.due_date || null,
+    notes: ordemParcial.notes, status: ordemParcial.status, pos: ordemParcial.pos ?? null,
+    started_at: ordemParcial.started_at ?? null, started_by: ordemParcial.started_by ?? null
+  }).eq('id', ordemParcial.id).select('*').maybeSingle();
+
+  if (res.error) {
+    alert('Erro ao atualizar: ' + res.error.message);
+    if (before) patchOrdemLocal(before.id, before);
+    return;
+  }
+  if (res.data) patchOrdemLocal(res.data.id, res.data);
+}
 
   // ========================= Fluxos: Iniciar, Parar, Retomar =========================
   function onStatusChange(ordem, targetStatus){
@@ -148,7 +196,7 @@ export default function App(){
     const { ordem, operador, data, hora } = startModal
     if (!operador || !data || !hora) { alert('Preencha operador, data e hora.'); return }
     const started_at = localDateTimeToISO(data, hora)
-    const payload = { started_by: operador, started_at, status: 'PRODUZINDO' }
+    const payload = {started_by: operador,started_at,status: 'PRODUZINDO',interrupted_at: null, interrupted_by: null,}
     patchOrdemLocal(ordem.id, payload)
     const res = await supabase.from('orders').update(payload).eq('id', ordem.id).select('*').maybeSingle()
     if (res.error) { alert('Erro ao iniciar: '+res.error.message); return }
@@ -214,53 +262,126 @@ export default function App(){
   }
 
   // === ENVIAR PARA FILA (só aparece na LISTA) =======================
-  async function enviarParaFila(ordemAtiva) {
-    const maquina = ordemAtiva.machine_id
-    const lista = [...ordens].filter(o => !o.finalized && o.machine_id === maquina).sort((a,b) => (a.pos ?? 999) - (b.pos ?? 999))
-    if (!lista.length) return
-    const ativa = lista[0]
-    const fila = lista.slice(1)
-    if (!fila.length) { alert('Não há itens na fila para promover.'); return }
+async function enviarParaFila(ordemAtiva) {
+  const maquina = ordemAtiva.machine_id;
 
-    const novoPainel = fila[0]
-    const novaFilaRestante = fila.slice(1)
+  // lista = somente ordens abertas da máquina, ordenadas pela pos (ativo + fila)
+  const lista = [...ordens]
+    .filter(o => !o.finalized && o.machine_id === maquina)
+    .sort((a, b) => (a.pos ?? 999) - (b.pos ?? 999));
 
-    for (const o of lista) {
-      const r = await supabase.from('orders').update({ pos: (o.pos ?? 0) + 1000 }).eq('id', o.id)
-      if (r.error) { alert('Erro ao preparar envio para fila: ' + r.error.message); return }
-    }
+  if (!lista.length) return;
 
-    {
-      const r = await supabase.from('orders').update({ pos: 0, status: 'AGUARDANDO', started_at: null, started_by: null }).eq('id', novoPainel.id)
-      if (r.error) { alert('Erro ao promover item para o painel: ' + r.error.message); return }
-    }
-    for (let i = 0; i < novaFilaRestante.length; i++) {
-      const o = novaFilaRestante[i]
-      const r = await supabase.from('orders').update({ pos: i + 1 }).eq('id', o.id)
-      if (r.error) { alert('Erro ao reordenar fila: ' + r.error.message); return }
-    }
-    {
-      const finalPos = novaFilaRestante.length + 1
-      const r = await supabase.from('orders').update({ pos: finalPos, status: 'AGUARDANDO' }).eq('id', ativa.id)
-      if (r.error) { alert('Erro ao enviar a atual para o fim da fila: ' + r.error.message); return }
-    }
+  const ativa = lista[0];
+  const fila = lista.slice(1);
 
-    setOrdens(prev => {
-      const map = new Map(prev.map(o => [o.id, { ...o }]))
-      const np = map.get(novoPainel.id); if (np) { np.pos = 0; np.status='AGUARDANDO'; np.started_at=null; np.started_by=null }
-      novaFilaRestante.forEach((o, i) => { const it = map.get(o.id); if (it) it.pos = i + 1 })
-      const itAtiva = map.get(ativa.id); if (itAtiva) { itAtiva.pos = novaFilaRestante.length + 1; itAtiva.status = 'AGUARDANDO' }
-      return Array.from(map.values())
+  if (!fila.length) {
+    alert('Não há itens na fila para promover.');
+    return;
+  }
+
+  const novoPainel = fila[0];
+  const novaFilaRestante = fila.slice(1);
+
+  // 1) PREPARO: dar posições TEMPORÁRIAS ÚNICAS para TODOS (evita UNIQUE)
+  //    base alta + índice garante que nunca haverá colisão, mesmo com pos nulas/iguais
+  const BASE = 1_000_000;
+  for (let i = 0; i < lista.length; i++) {
+    const o = lista[i];
+    const tempPos = BASE + i + 1; // 1_000_001, 1_000_002, ...
+    const r = await supabase
+      .from('orders')
+      .update({ pos: tempPos })
+      .eq('id', o.id);
+
+    if (r.error) {
+      alert('Erro ao preparar envio para fila: ' + r.error.message);
+      return;
+    }
+  }
+
+  // 2) PROMOVER primeiro da fila para o painel (pos=0) e resetar início
+  {
+    const r = await supabase
+      .from('orders')
+      .update({
+        pos: 0,
+        status: 'AGUARDANDO',
+        started_at: null,
+        started_by: null,
+      })
+      .eq('id', novoPainel.id);
+
+    if (r.error) {
+      alert('Erro ao promover item para o painel: ' + r.error.message);
+      return;
+    }
+  }
+
+  // 3) Reindexar o resto da fila (pos 1..N)
+  for (let i = 0; i < novaFilaRestante.length; i++) {
+    const o = novaFilaRestante[i];
+    const r = await supabase
+      .from('orders')
+      .update({ pos: i + 1 })
+      .eq('id', o.id);
+    if (r.error) {
+      alert('Erro ao reordenar fila: ' + r.error.message);
+      return;
+    }
+  }
+
+// 4) Enviar a ATUAL (que estava no painel) para o FIM da fila
+{
+  const finalPos = novaFilaRestante.length + 1; // depois de todos da fila
+  const agoraISO = new Date().toISOString();
+  const r = await supabase
+    .from('orders')
+    .update({
+      pos: finalPos,
+      status: 'AGUARDANDO',
+      // 🔶 marca como “produção interrompida”
+      interrupted_at: agoraISO,
+      interrupted_by: 'Sistema', // troque por operador se quiser capturar quem clicou
     })
-  }
+    .eq('id', ativa.id);
 
-  async function excluirRegistro(ordem) {
-    const ok = confirm(`Excluir o registro da O.P ${ordem.code}? Esta ação é permanente.`)
-    if (!ok) return
-    setFinalizadas(prev => prev.filter(o => o.id !== ordem.id))
-    const res = await supabase.from('orders').delete().eq('id', ordem.id)
-    if (res.error) { alert('Erro ao excluir: ' + res.error.message); fetchOrdensFinalizadas() }
+  if (r.error) {
+    alert('Erro ao enviar a atual para o fim da fila: ' + r.error.message);
+    return;
   }
+}
+
+  // 5) Atualiza o estado local (UI)
+  setOrdens(prev => {
+    const map = new Map(prev.map(o => [o.id, { ...o }]));
+
+    const np = map.get(novoPainel.id);
+    if (np) {
+      np.pos = 0;
+      np.status = 'AGUARDANDO';
+      np.started_at = null;
+      np.started_by = null;
+    }
+
+    novaFilaRestante.forEach((o, i) => {
+      const it = map.get(o.id);
+      if (it) it.pos = i + 1;
+    });
+
+    const itAtiva = map.get(ativa.id);
+    if (itAtiva) {
+     itAtiva.pos = novaFilaRestante.length + 1;
+     itAtiva.status = 'AGUARDANDO';
+     // 🔶 marcação local para destacar em amarelo na FILA
+     itAtiva.interrupted_at = new Date().toISOString();
+     itAtiva.interrupted_by = 'Sistema';
+    }
+    return Array.from(map.values());
+  });
+}
+
+
 
   // ========================= Derivados =========================
   const ativosPorMaquina = useMemo(() => {
@@ -322,7 +443,6 @@ export default function App(){
         <Lista
           ativosPorMaquina={ativosPorMaquina}
           sensors={sensors}
-          moverNaFila={moverNaFila}
           onStatusChange={onStatusChange}
           setStartModal={setStartModal}
           setEditando={setEditando}

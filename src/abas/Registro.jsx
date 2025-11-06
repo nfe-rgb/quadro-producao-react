@@ -31,6 +31,16 @@ export default function Registro({ registroGrupos, openSet, toggleOpen }) {
             if (o.started_at) {
               events.push({ id:`start-${o.id}`, type:'start', title:'Início da produção', when:o.started_at, who:o.started_by||'-' })
             }
+            // 🔶 novo evento: Produção interrompida
+            if (o.interrupted_at) {
+              events.push({
+              id: `interrupt-${o.id}`,
+              type: 'interrupt',
+              title: 'Produção interrompida',
+              when: o.interrupted_at,
+              who: o.interrupted_by || '-',
+              })
+            }
             if (gr.stops.length) {
               gr.stops.forEach(st=>{
                 events.push({
@@ -69,6 +79,16 @@ export default function Registro({ registroGrupos, openSet, toggleOpen }) {
                               <div className="tl-meta muted">Esta O.P ainda não possui início, paradas ou fim registrados.</div>
                             </div>
                           )
+                        }
+                        if (ev.type === 'interrupt') {
+                        return (
+                         <div key={ev.id} className="tl-card tl-interrupt">
+                            <div className="tl-title">🟡 {ev.title}</div>
+                            <div className="tl-meta"><b>Data/Hora:</b> {fmtDateTime(ev.when)}</div>
+                            <div className="tl-meta"><b>Registrado por:</b> {ev.who}</div>
+                            <div className="tl-meta muted">A O.P foi removida do painel e enviada ao fim da fila.</div>
+                         </div>
+                         )
                         }
                         if (ev.type==='start') {
                           return (

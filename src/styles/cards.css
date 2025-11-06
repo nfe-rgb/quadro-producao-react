@@ -36,3 +36,18 @@
 .card {
   border: 2px solid rgba(0,0,0,.08);
 }
+/* 🔶 FILA: destaque amarelo quando produção foi cortada */
+.fila-item-interrupted {
+  background: #fff7cc;       /* amarelo claro */
+  border: 1px solid #f2c200; /* borda amarelo */
+  box-shadow: 0 0 0 2px rgba(242,194,0,0.2);
+}
+
+/* 🔶 REGISTRO: cartão amarelo do evento “Produção interrompida” */
+.tl-card.tl-interrupt {
+  background: #fff7cc;
+  border-left: 4px solid #f2c200;
+}
+.tl-card.tl-interrupt .tl-title {
+  font-weight: 700;
+}

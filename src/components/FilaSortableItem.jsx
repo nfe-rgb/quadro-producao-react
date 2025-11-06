@@ -8,7 +8,7 @@ export default function FilaSortableItem({ordem, onEdit}) {
     useSortable({ id: ordem.id })
   const style = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.4 : 1 }
   return (
-    <div ref={setNodeRef} style={style} className="card fila-item">
+    <div ref={setNodeRef}style={style}className={`card fila-item ${ordem?.interrupted_at ? 'fila-item-interrupted' : ''}`}>
       <button className="drag-handle" {...attributes} {...listeners} title="Arrastar">⠿</button>
       <div className="fila-content">
         <Etiqueta o={ordem}/>
