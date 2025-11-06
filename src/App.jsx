@@ -246,21 +246,6 @@ async function atualizar(ordemParcial){
     if (res.data) upsertFinalizadaLocal(res.data)
   }
 
-  // ========================= Drag fila =========================
-  async function moverNaFila(maquina, e){
-    const {active, over} = e; if(!active || !over) return;
-    const aId=String(active.id), oId=String(over.id); if(aId===oId) return;
-    const lista=[...ordens].filter(o=>!o.finalized && o.machine_id===maquina).sort((a,b)=>(a.pos??999)-(b.pos??999))
-    if(!lista.length) return; const ativa=lista[0], fila=lista.slice(1)
-    const oldIndex=fila.findIndex(x=>String(x.id)===aId), newIndex=fila.findIndex(x=>String(x.id)===oId)
-    if(oldIndex<0||newIndex<0) return
-    const novaFila=fila.toSpliced(newIndex, 0, ...fila.splice(oldIndex,1)) // arrayMove alternative if needed
-
-    const nova=[ativa,...novaFila].filter(o=>o&&o.id&&!String(o.id).startsWith('tmp-')).map((o,i)=>({id:o.id,pos:i}))
-    setOrdens(prev=>{ const map=new Map(prev.map(o=>[o.id,{...o}])); for(const r of nova){ const o=map.get(r.id); if(o) o.pos=r.pos } return Array.from(map.values()) })
-    for(const r of nova){ const rr=await supabase.from('orders').update({pos:r.pos}).eq('id',r.id); if(rr.error){ alert('Erro ao mover: '+rr.error.message); fetchOrdensAbertas(); return } }
-  }
-
   // === ENVIAR PARA FILA (só aparece na LISTA) =======================
 async function enviarParaFila(ordemAtiva) {
   const maquina = ordemAtiva.machine_id;
