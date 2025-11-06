@@ -165,3 +165,104 @@
 .row, .maquina-head, .tl-card {
   animation: fadeInUp 0.3s ease both;
 }
+/* =========================
+   RESPONSIVO (tablet/mobile)
+   ========================= */
+
+/* Tablet (≤ 1024px): encolhe um pouco as colunas e fontes */
+@media (max-width: 1024px) {
+  .thead,
+  .row {
+    grid-template-columns: 120px 1fr 120px 120px 64px; /* O.P | Info | Início | Fim | Abrir */
+  }
+
+  .maquina-head {
+    padding: 10px 14px;
+    font-size: 15px;
+  }
+
+  .thead {
+    padding: 8px 10px;
+  }
+  .row {
+    padding: 8px 10px;
+  }
+
+  .timeline {
+    gap: 10px;
+    padding: 10px;
+  }
+  .tl-card {
+    min-width: 230px;
+    padding: 10px;
+  }
+}
+
+/* Mobile (≤ 768px): mantém a tabela íntegra, mas com rolagem horizontal suave */
+@media (max-width: 768px) {
+  /* evita scroll lateral global “feio” */
+  html, body {
+    overflow-x: hidden;
+  }
+
+  /* cabeçalho da máquina mais “tocável” */
+  .maquina-head {
+    padding: 12px 14px;
+    border-radius: 12px;
+    font-size: 15px;
+  }
+  .maquina-head div:last-child {
+    font-size: 12px;
+  }
+
+  /* a tabela passa a ser rolável na horizontal
+     (não quebra layout nem some colunas) */
+  .tbody {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* garante largura mínima de cada linha para caber as 5 colunas;
+     o contêiner acima rola na horizontal quando faltar espaço */
+  .row,
+  .thead {
+    min-width: 680px;        /* ajuste se quiser mais compacto */
+  }
+
+  /* “respira” um pouco mais para o toque */
+  .row {
+    padding: 10px 12px;
+    border-radius: 12px;
+  }
+
+  /* timeline mais compacta e suave no mobile */
+  .timeline {
+    gap: 10px;
+    padding: 10px 6px 12px;
+    margin-top: 8px;
+  }
+  .tl-card {
+    min-width: 210px;        /* cards menores no celular */
+    padding: 10px;
+  }
+  .tl-meta { font-size: 13px; }
+  .tl-notes { font-size: 12px; }
+}
+
+/* Mobile “apertado” (≤ 420px): ainda mais compacto */
+@media (max-width: 420px) {
+  .thead,
+  .row {
+    min-width: 600px;        /* rola um pouco menos */
+  }
+
+  .maquina-head {
+    font-size: 14px;
+    padding: 10px 12px;
+  }
+
+  .tl-card {
+    min-width: 190px;
+  }
+}
+
