@@ -1,93 +1,167 @@
-/* =======================
-   Tabela REGISTRO (estrutura base)
-   ======================= */
-.card .table{ display:grid; gap: 8px; }
-.thead, .row{
-  display:grid;
-  grid-template-columns: 140px 1fr 140px 140px 80px; /* O.P | Info | Início | Fim | Abrir */
-  gap: 10px; align-items:center;
+/* =============================
+   ABA REGISTRO — VISUAL MODERNO
+   ============================= */
+
+/* Contêiner principal */
+.registro-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
 }
-.thead{
-  font-weight: 800;
+
+/* Cabeçalho principal */
+.registro-wrap .label {
+  font-size: 18px;
+  font-weight: 700;
   color: var(--text);
-  background: linear-gradient(180deg, rgba(2,119,189,.10), rgba(255,255,255,0));
-  padding: 8px 10px;
+  margin-bottom: 6px;
+  letter-spacing: 0.3px;
+}
+
+/* ----- Cabeçalho de Máquina ----- */
+.maquina-head {
+  background: linear-gradient(135deg, rgba(2,119,189,0.15), rgba(2,119,189,0.05));
+  border: 1px solid rgba(2,119,189,0.3);
+  border-radius: 12px;
+  padding: 12px 16px;
+  font-size: 16px;
+  font-weight: 700;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  color: var(--text);
+  cursor: pointer;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+  transition: all 0.25s ease;
+}
+.maquina-head:hover {
+  background: linear-gradient(135deg, rgba(2,119,189,0.25), rgba(2,119,189,0.08));
+  transform: translateY(-1px);
+}
+
+/* Informação de horas paradas */
+.maquina-head div:last-child {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--muted);
+}
+
+/* ----- Tabela da Máquina ----- */
+.table {
+  display: grid;
+  margin-top: 10px;
+}
+.thead {
+  display: grid;
+  grid-template-columns: 140px 1fr 140px 140px 80px;
+  padding: 10px 12px;
+  background: var(--card-2);
+  border-radius: 8px;
+  font-weight: 600;
+  color: var(--text);
+}
+.tbody {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+/* ----- Linha da O.P. ----- */
+.row {
+  display: grid;
+  grid-template-columns: 140px 1fr 140px 140px 80px;
+  align-items: center;
+  background: var(--card);
   border: 1px solid var(--border);
   border-radius: 10px;
-}
-.tbody .row{
-  padding: 10px;
-  border: 1px dashed var(--border);
-  border-radius: 10px;
-  background: var(--card-2);
+  padding: 10px 12px;
   color: var(--text);
-  overflow: visible; /* não cortar sombras da timeline */
+  transition: all 0.2s ease;
 }
-.tbody .row:nth-child(odd){ background: var(--card); }
-.tbody .row:hover{
+.row:hover {
   border-color: var(--secondary);
-  box-shadow: 0 0 0 3px rgba(2,119,189,.12);
+  background: var(--card-2);
+  box-shadow: 0 2px 6px rgba(0,0,0,0.08);
 }
-.tbody .row .muted{ color: var(--muted); }
 
-/* ===== Linha do Tempo (Registro) ===== */
-.row .timeline{
-  grid-column: 1 / -1;              /* ocupa todas as colunas da tabela */
-  display: grid !important;
-  grid-auto-flow: column;            /* PC: cartões na horizontal */
-  grid-auto-columns: minmax(260px, 1fr);
+/* ----- Timeline dos eventos ----- */
+.timeline {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: nowrap;
   gap: 12px;
   overflow-x: auto;
-  padding: 10px 8px 14px;            /* respiro lateral */
+  padding: 12px;
   scroll-snap-type: x proximity;
   -webkit-overflow-scrolling: touch;
+  border-top: 1px dashed var(--border);
+  margin-top: 10px;
 }
-.timeline > * { scroll-snap-align: start; }
 
-.tl-card{
-  border: 1px solid var(--border);
+/* Cartões individuais da timeline */
+.tl-card {
+  flex: 0 0 auto;
+  min-width: 260px;
   background: var(--card);
+  border: 1px solid var(--border);
   border-radius: 12px;
   padding: 12px;
-  box-shadow: 0 2px 6px rgba(0,0,0,.08);
-  color: var(--text);
+  box-shadow: 0 2px 6px rgba(0,0,0,0.08);
   display: grid;
   gap: 6px;
-  min-width: 260px;
+  scroll-snap-align: start;
+  transition: all 0.25s ease;
 }
-.tl-title{ font-weight: 800; letter-spacing: .2px; }
-.tl-meta { font-size: 14px; line-height: 1.35; }
-.tl-notes{
+.tl-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+}
+
+/* Títulos e metadados */
+.tl-title {
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  margin-bottom: 4px;
+}
+.tl-meta {
+  font-size: 14px;
+  line-height: 1.35;
+}
+.tl-notes {
   font-size: 13px;
   color: var(--muted);
   border-top: 1px dashed var(--border);
   padding-top: 6px;
 }
 
-/* Cores por tipo */
-.tl-start{
+/* ----- Cores por tipo de evento ----- */
+.tl-start {
   border-left: 6px solid #2E7D32;
   background: linear-gradient(180deg, #A5D6A7 0%, #E8F5E9 100%);
 }
-.tl-stop{
+.tl-stop {
   border-left: 6px solid #C62828;
   background: linear-gradient(180deg, #EF9A9A 0%, #FFEBEE 100%);
 }
-.tl-end{
+.tl-end {
   border-left: 6px solid #455A64;
   background: linear-gradient(180deg, #CFD8DC 0%, #ECEFF1 100%);
 }
-.tl-empty{
+.tl-interrupt {
+  border-left: 6px solid #FBC02D;
+  background: linear-gradient(180deg, #FFF59D 0%, #FFFDE7 100%);
+}
+.tl-empty {
   border-left: 6px solid var(--border);
   background: var(--card-2);
 }
 
-/* Linha conectora visual */
-.registro-wrap .timeline{ position: relative; }
-.registro-wrap .timeline::before{
-  content:"";
-  position:absolute; left: 8px; right: 8px; top:24px;
-  height:4px; background: rgba(2,119,189,.12);
-  border-radius: 4px; z-index:0;
+/* Animações sutis */
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
 }
-.registro-wrap .tl-card{ position:relative; z-index:1; }
+.row, .maquina-head, .tl-card {
+  animation: fadeInUp 0.3s ease both;
+}
