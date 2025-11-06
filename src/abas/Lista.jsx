@@ -5,26 +5,7 @@ import FilaSortableItem from '../components/FilaSortableItem'
 import Etiqueta from '../components/Etiqueta'
 import { MAQUINAS, STATUS } from '../lib/constants'
 import { statusClass, jaIniciou } from '../lib/utils'
-
-// 🔒 Import do supabase com tolerância a ambientes (default / named / sem supabase)
-let supabase
-try {
-  // tente com .js (igual ao App.jsx)
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const mod = require('../lib/supabaseClient.js')
-  supabase = mod.supabase ?? mod.default ?? mod
-} catch (e1) {
-  try {
-    // fallback sem extensão (às vezes o bundler resolve diferente no build)
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const mod2 = require('../lib/supabaseClient')
-    supabase = mod2.supabase ?? mod2.default ?? mod2
-  } catch (e2) {
-    // último recurso: loga e mantém undefined (vamos tratar no moverNaFila)
-    console.error('Falha ao importar supabaseClient:', e1, e2)
-    supabase = undefined
-  }
-}
+import { supabase } from '../lib/supabaseClient.js' // ✅ ESM correto
 
 export default function Lista({
   ativosPorMaquina,
@@ -36,14 +17,12 @@ export default function Lista({
   enviarParaFila,
   refreshOrdens, // opcional
 }) {
-  // Reordena a FILA dentro da MESMA máquina (sem tocar no ativo)
   const moverNaFila = async (machineCode, e) => {
     try {
       const activeId = e?.active?.id
       const overId   = e?.over?.id
       if (!activeId || !overId || activeId === overId) return
 
-      // A fila é a lista sem o primeiro (painel)
       const lista = ativosPorMaquina[machineCode] || []
       const fila  = lista.slice(1)
 
@@ -51,18 +30,11 @@ export default function Lista({
       const overIndex = fila.findIndex(i => i.id === overId)
       if (curIndex < 0 || overIndex < 0) return
 
-      // Monta array de IDs na nova ordem
       const nova = [...fila]
       const [moved] = nova.splice(curIndex, 1)
       nova.splice(overIndex, 0, moved)
-      const ids = nova.map(i => i.id)
 
-      // ✅ Segurança: se o supabase não carregou, não quebra a tela
-      if (!supabase || typeof supabase.rpc !== 'function') {
-        console.error('Supabase não disponível em Lista.jsx; verifique o caminho do import de supabaseClient.')
-        alert('Falha ao reordenar: Supabase não carregou (veja o console).')
-        return
-      }
+      const ids = nova.map(i => i.id)
 
       const { error } = await supabase.rpc('reorder_machine_queue', {
         p_machine: machineCode,
@@ -70,9 +42,8 @@ export default function Lista({
       })
       if (error) throw error
 
-      // Refetch para refletir a nova ordem (se Realtime atrasar)
       if (typeof refreshOrdens === 'function') {
-        setTimeout(() => refreshOrdens(), 500)
+        setTimeout(() => refreshOrdens(), 500) // dá tempo do Realtime chegar
       }
     } catch (err) {
       console.error('Reordenação falhou:', err)
@@ -157,7 +128,7 @@ export default function Lista({
               ) : (
                 <DndContext
                   sensors={sensors}
-                  onDragEnd={(e) => moverNaFila(m, e)} // usa a função local
+                  onDragEnd={(e) => moverNaFila(m, e)}
                   collisionDetection={closestCenter}
                 >
                   <SortableContext items={fila.map(f => f.id)} strategy={horizontalListSortingStrategy}>
