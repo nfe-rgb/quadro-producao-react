@@ -492,6 +492,18 @@ export default function App(){
     return map
   }, [ordens])
 
+  // ⬇️ NOVO: último finalized_at por máquina
+const lastFinalizadoPorMaquina = useMemo(() => {
+  const map = Object.fromEntries(MAQUINAS.map(m => [m, null]))
+  for (const o of finalizadas) {
+    if (!o.machine_id || !o.finalized_at) continue
+    const prev = map[o.machine_id] ? new Date(map[o.machine_id]).getTime() : 0
+    const cur  = new Date(o.finalized_at).getTime()
+    if (cur > prev) map[o.machine_id] = o.finalized_at
+  }
+  return map
+}, [finalizadas])
+
   const registroGrupos = useMemo(()=>{
     const byId = new Map()
     const push = (o)=>{ if(!o) return; byId.set(o.id, { ...o }) }
@@ -545,6 +557,7 @@ export default function App(){
           onStatusChange={onStatusChange}
           setStartModal={setStartModal}
           setFinalizando={setFinalizando}
+          lastFinalizadoPorMaquina={lastFinalizadoPorMaquina}  // ⬅️ NOVO
         />
       )}
 

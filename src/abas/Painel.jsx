@@ -18,6 +18,7 @@ export default function Painel({
   onStatusChange,
   setStartModal,
   setFinalizando,
+  lastFinalizadoPorMaquina,
 }) {
   return (
     <div className="board">
@@ -60,6 +61,19 @@ export default function Painel({
                 return formatHHMMSS(secs);
               })()
             : null;
+        // ⬇️ NOVO: cronômetro “Sem programação” (azul) no cabeçalho
+        let semProgText = null;
+        if (!ativa) {
+          const lastFinISO = lastFinalizadoPorMaquina?.[m] || null;
+          if (lastFinISO) {
+        // força re-render pelo tick
+        // eslint-disable-next-line no-unused-vars
+    const _ = tick;
+    const sinceMs = new Date(lastFinISO).getTime();
+    const total = Math.max(0, Math.floor((Date.now() - sinceMs) / 1000));
+    semProgText = formatHHMMSS(total);
+  }
+}
 
         // O.P no cabeçalho (lado direito)
         const opCode =
@@ -103,6 +117,12 @@ export default function Painel({
                     {lowEffText}
                   </span>
                 )}
+                    {/* ⬇️ NOVO: Cronômetro SEM PROGRAMAÇÃO (azul) */}
+    {!ativa && semProgText && (
+      <span className="semprog-timer" title="Sem programação desde a última finalização">
+        {semProgText}
+      </span>
+    )}
               </div>
 
               {/* lado direito: O.P */}
