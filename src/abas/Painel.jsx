@@ -31,7 +31,8 @@ export default function Painel({
           ? paradas.find((p) => p.order_id === ativa.id && !p.resumed_at)
           : null;
         const sinceMs = openStop ? new Date(openStop.started_at).getTime() : null;
-
+        const stopReason = openStop?.reason || null;
+        const stopNotes  = openStop?.notes  || null;
         const durText = sinceMs
           ? (() => {
               // força re-render pelo tick
@@ -138,10 +139,12 @@ export default function Painel({
               {ativa ? (
                 <div className={statusClass(ativa.status)}>
                   {/* Detalhes da O.P */}
-                  <Etiqueta o={ativa.o || ativa} variant="painel" />
-
+                  <Etiqueta o={ativa.o || ativa} variant="painel" paradaNotes={stopNotes} />
+                  {/* Motivo da PARADA, centralizado, sem cronômetro */}
+                  {ativa?.status === "PARADA" && stopReason && (
+                  <div className="stop-reason-below">{stopReason}</div>
+                  )}
                   <div className="sep"></div>
-
                   <div className="grid2">
                     <div>
                       <div className="label">Situação</div>
