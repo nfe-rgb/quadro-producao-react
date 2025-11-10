@@ -67,6 +67,7 @@ export default function Lista({
       nova.splice(overIndex, 0, moved)
 
       const ids = nova.map(i => i.id)
+      await supabase.rpc('reorder_machine_queue', { p_machine: machineCode, p_ids: ids });
 
       const { error } = await supabase.rpc('reorder_machine_queue', {
         p_machine: machineCode,

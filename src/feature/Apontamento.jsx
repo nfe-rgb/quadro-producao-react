@@ -135,6 +135,12 @@ export default function Apontamento({ tab, ordens, ativosPorMaquina, finalizar }
         return;
       }
 
+      if (fresh.status === "PARADA") {
+        alert("Máquina parada — não é permitido apontar caixas enquanto estiver em PARADA.");
+        setBarcode("");
+        return;
+      }
+
       const totalBoxes = parseInt(fresh.boxes || 0, 10) || 0;
       const already    = parseInt(fresh.boxes_read || 0, 10) || 0;
 
