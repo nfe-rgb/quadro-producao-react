@@ -3,9 +3,10 @@ import { useEffect, useMemo, useState } from 'react'
 import { supabase } from './lib/supabaseClient.js'
 import { DndContext, useSensor, useSensors, MouseSensor, TouchSensor } from '@dnd-kit/core'
 
-import { MAQUINAS, STATUS, MOTIVOS_PARADA } from './lib/constants'
+import { MAQUINAS, STATUS, MOTIVOS_PARADA, ADMIN_EMAILS } from './lib/constants'
+import CadastroItens from './abas/CadastroItens'
 import { localDateTimeToISO, jaIniciou } from './lib/utils'
-
+import Login from './abas/Login'
 import Modal from './components/Modal'
 import Painel from './abas/Painel'
 import Lista from './abas/Lista'
@@ -37,6 +38,79 @@ export default function App(){
   const [form,setForm] = useState({
     code:'', customer:'', product:'', color:'', qty:'', boxes:'', standard:'', due_date:'', notes:'', machine_id:'P1'
   })
+
+  // ===== Auth/Admin (aba oculta) =====
+const [authUser, setAuthUser] = useState(null)
+const [authChecked, setAuthChecked] = useState(false)
+
+useEffect(() => {
+  let active = true
+  ;(async () => {
+    const { data } = await supabase.auth.getUser()
+    if (!active) return
+    setAuthUser(data?.user ?? null)
+    setAuthChecked(true)
+  })()
+  return () => { active = false }
+}, [])
+
+const isAdmin = useMemo(() => {
+  const email = authUser?.email?.toLowerCase()
+  return !!email && Array.isArray(ADMIN_EMAILS) && ADMIN_EMAILS.map(e => e.toLowerCase()).includes(email)
+}, [authUser])
+
+// rota oculta via URL: /admin/itens
+useEffect(() => {
+  const syncFromLocation = () => {
+    if (location.pathname === '/admin/itens') setTab('admin-itens')
+  }
+  syncFromLocation()
+  window.addEventListener('popstate', syncFromLocation)
+  return () => window.removeEventListener('popstate', syncFromLocation)
+}, [])
+
+// rota de login: /login
+useEffect(() => {
+  const syncLogin = () => {
+    if (location.pathname === '/login') setTab('login')
+  }
+  syncLogin()
+  window.addEventListener('popstate', syncLogin)
+  return () => window.removeEventListener('popstate', syncLogin)
+}, [])
+
+
+function openAdminItens() {
+  // não mostrar para não-admin
+  if (!isAdmin) return
+  history.replaceState(null, '', '/admin/itens')
+  setTab('admin-itens')
+}
+
+// atalho opcional: Ctrl+Alt+I abre a aba oculta (apenas admin)
+useEffect(() => {
+  const onKey = (e) => {
+    if (e.ctrlKey && e.altKey && (e.key === 'i' || e.key === 'I')) {
+      e.preventDefault()
+      openAdminItens()
+    }
+  }
+  window.addEventListener('keydown', onKey)
+  return () => window.removeEventListener('keydown', onKey)
+}, [isAdmin])
+
+// atalho: Ctrl+Alt+L abre /login
+useEffect(() => {
+  const onKey = (e) => {
+    if (e.ctrlKey && e.altKey && (e.key === 'l' || e.key === 'L')) {
+      e.preventDefault()
+      history.replaceState(null, '', '/login')
+      setTab('login')
+    }
+  }
+  window.addEventListener('keydown', onKey)
+  return () => window.removeEventListener('keydown', onKey)
+}, [])
 
   // ========================= Fetch =========================
   async function fetchOrdensAbertas(){
@@ -548,6 +622,28 @@ const lastFinalizadoPorMaquina = useMemo(() => {
         <button className={`tabbtn ${tab==='nova'?'active':''}`} onClick={()=>setTab('nova')}>Nova Ordem</button>
         <button className={`tabbtn ${tab==='registro'?'active':''}`} onClick={()=>setTab('registro')}>Registro</button>
       </div>
+
+
+{/* ABA OCULTA: Login (rota: /login) */}
+{tab === 'login' && <Login />}
+
+      {/* ABA OCULTA: Cadastro de Itens (rota: /admin/itens) */}
+{tab === 'admin-itens' && (
+  authChecked ? (
+    isAdmin ? (
+      <CadastroItens />
+    ) : (
+      <div style={{ padding: 24 }}>
+        <h3>Não encontrado</h3>
+        <p>Esta página não está disponível.</p>
+      </div>
+    )
+  ) : (
+    <div style={{ padding: 16 }}>
+      <small>Verificando permissões…</small>
+    </div>
+  )
+)}
 
       {tab === 'painel' && (
         <Painel

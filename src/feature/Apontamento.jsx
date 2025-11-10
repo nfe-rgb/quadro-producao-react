@@ -3,13 +3,13 @@ export default function Etiqueta({ o, variant = 'painel' }) {
   if (!o) return null
   const temObsLowEff = !!o.loweff_notes
   const interrompida = o.status === 'AGUARDANDO' && !!o.interrupted_at
-  const isWeekendStop = o.status === 'PARADA' && o.reason === 'FIM DE SEMANA'
+
   const fmtDate = (d) => (d ? new Date(d).toLocaleDateString('pt-BR') : '-')
 
   if (variant === 'fila') {
     // Etiqueta compacta para a FILA (com O.P e aviso de interrupção)
     return (
-      <div className={`small ${isWeekendStop ? 'etiqueta-weekend' : ''}`}>
+      <div className="small">
         {interrompida && <div className="badge-interrompida">⚠️ Produção Interrompida</div>}
 
         {o.code && <div><b>O.P:</b> {o.code}</div>}
@@ -28,7 +28,7 @@ export default function Etiqueta({ o, variant = 'painel' }) {
 
   // variant === 'painel'
   return (
-    <div className={`small ${isWeekendStop ? 'etiqueta-weekend' : ''}`}>
+    <div className="small">
       {interrompida && <div className="badge-interrompida">⚠️ Produção Interrompida</div>}
 
       {o.customer && <div><b>Cliente:</b> {o.customer}</div>}

@@ -89,7 +89,7 @@ export default function Painel({
             {/* ===== Cabeçalho: máquina, cronômetros e O.P ===== */}
             <div
               className={
-                "column-header " + (ativa?.status === "PARADA" ? "blink-red" : "")
+                "column-header " + (ativa?.status === "PARADA" && stopReason !== "FIM DE SEMANA" ? "blink-red" : "")
               }
               style={{ display: "flex", alignItems: "center", gap: 8 }}
             >
@@ -139,7 +139,7 @@ export default function Painel({
               {ativa ? (
                 <div className={statusClass(ativa.status)}>
                   {/* Detalhes da O.P */}
-                  <Etiqueta o={ativa.o || ativa} variant="painel" paradaNotes={stopNotes} />
+                  + <Etiqueta o={ativa.o || ativa} variant="painel" paradaReason={stopReason} paradaNotes={stopNotes} />
                   {/* Motivo da PARADA, centralizado, sem cronômetro */}
                   {ativa?.status === "PARADA" && stopReason && (
                   <div className="stop-reason-below">{stopReason}</div>

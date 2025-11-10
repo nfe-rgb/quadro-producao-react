@@ -334,4 +334,11 @@
     padding-left: 16px;
   }
 }
-
+/* cartão azul no Registro */
+.tl-card.tl-weekend {
+  border-left: 4px solid #1e90ff;
+  background: #f3f9ff;
+}
+.tl-card.tl-weekend .tl-title {
+  color: #0b3b66;
+}

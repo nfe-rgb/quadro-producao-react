@@ -36,3 +36,14 @@
   line-height: 1.35;
   font-weight: 600;
 }
+.etiqueta-weekend {
+  background: #e6f2ff;
+  border: 2px solid #1e90ff;
+}
+
+.weekend-motivo {
+  color: #0b3b66;
+  text-align: center;
+  font-weight: 600;
+  margin-top: 4px;
+}
