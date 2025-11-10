@@ -139,7 +139,7 @@ export default function Painel({
               {ativa ? (
                 <div className={statusClass(ativa.status)}>
                   {/* Detalhes da O.P */}
-                  + <Etiqueta o={ativa.o || ativa} variant="painel" paradaReason={stopReason} paradaNotes={stopNotes} />
+                  <Etiqueta o={ativa.o || ativa} variant="painel" paradaReason={stopReason} paradaNotes={stopNotes} />
                   {/* Motivo da PARADA, centralizado, sem cronômetro */}
                   {ativa?.status === "PARADA" && stopReason && (
                   <div className="stop-reason-below">{stopReason}</div>

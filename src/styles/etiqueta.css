@@ -47,3 +47,52 @@
   font-weight: 600;
   margin-top: 4px;
 }
+/* === PÍLULAS DE LIDAS / SALDO NAS ETIQUETAS === */
+.pill-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-size: 12px;
+  padding: 4px 8px;
+  border: 1px solid #ddd;
+  border-radius: 999px;
+  background: #fafafa;
+  color: #333;
+  white-space: nowrap;
+  line-height: 1.2;
+  font-weight: 600;
+  transition: all 0.2s ease;
+}
+
+/* Estados visuais das pílulas */
+.pill.ok {
+  border-color: #0a7;
+  background: rgba(0,170,119,0.12);
+  color: #0a7;
+}
+
+.pill.warn {
+  border-color: #0a7;
+  background: rgba(0, 170, 119, 0.12);
+  color: #000000;
+}
+
+.pill.danger {
+  border-color: #c62828;
+  background: rgba(244,67,54,0.12);
+  color: #7a0000;
+}
+
+/* Efeito de destaque leve ao passar o mouse */
+.pill:hover {
+  transform: scale(1.05);
+  filter: brightness(1.05);
+}
