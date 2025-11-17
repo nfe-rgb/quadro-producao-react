@@ -85,3 +85,29 @@
   font-size: 13px;
   color: #666;
 }
+
+@media (max-width: 600px) {
+  .piechart-wrapper {
+    padding: 8px;
+    gap: 8px;
+  }
+  .piechart-container {
+    width: 100%;
+    min-width: 0;
+    justify-content: center;
+    align-items: center;
+  }
+  .piechart-svg {
+    width: 100vw;
+    max-width: 98vw;
+    height: auto;
+    min-width: 220px;
+    max-height: 220px;
+  }
+  .center-title {
+    font-size: 14px;
+  }
+  .hover-info {
+    font-size: 13px;
+  }
+}
