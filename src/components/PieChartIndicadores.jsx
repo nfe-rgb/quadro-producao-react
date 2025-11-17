@@ -11,19 +11,30 @@ export default function PieChartIndicadores({ data }) {
   const cy = 100;
 
   const slices = data.map((d, i) => {
+    // Se o valor for 100% do total, desenha um círculo completo
+    if (d.value === total && total > 0) {
+      return (
+        <circle
+          key={d.label}
+          cx={cx}
+          cy={cy}
+          r={radius}
+          fill={d.color}
+          className={`slice ${hoveredIndex === i ? 'hovered' : ''}`}
+          onMouseEnter={() => setHoveredIndex(i)}
+          onMouseLeave={() => setHoveredIndex(null)}
+        />
+      );
+    }
     const startAngle = (acc / total) * 2 * Math.PI;
     acc += d.value;
     const endAngle = (acc / total) * 2 * Math.PI;
-
     const largeArc = endAngle - startAngle > Math.PI ? 1 : 0;
-
     const x1 = cx + radius * Math.cos(startAngle);
     const y1 = cy + radius * Math.sin(startAngle);
     const x2 = cx + radius * Math.cos(endAngle);
     const y2 = cy + radius * Math.sin(endAngle);
-
     const path = `M${cx},${cy} L${x1},${y1} A${radius},${radius} 0 ${largeArc},1 ${x2},${y2} Z`;
-
     return (
       <path
         key={d.label}

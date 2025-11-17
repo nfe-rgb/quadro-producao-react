@@ -32,18 +32,21 @@ export default function Registro({ registroGrupos = [], openSet, toggleOpen }) {
     const now = new Date()
     let start = null, end = null
     if (p === 'hoje') {
-      start = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-      end = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1)
+      start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0)
+      end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), now.getHours(), now.getMinutes(), now.getSeconds(), now.getMilliseconds())
     } else if (p === 'semana') {
-      const day = now.getDay()
-      start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - day)
-      end = new Date(now.getFullYear(), now.getMonth(), now.getDate() + (7 - day))
+      // Segunda-feira 00:00 até domingo 00:00
+      const day = now.getDay() === 0 ? 7 : now.getDay() // domingo = 7
+      const monday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - (day - 1), 0, 0, 0, 0)
+      const sunday = new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + 7, 0, 0, 0, 0)
+      start = monday
+      end = now < sunday ? now : sunday // até agora ou domingo 00:00, o que vier primeiro
     } else if (p === 'mes') {
-      start = new Date(now.getFullYear(), now.getMonth(), 1)
-      end = new Date(now.getFullYear(), now.getMonth() + 1, 1)
+      start = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0)
+      end = now // até o horário atual
     } else if (p === 'mespassado') {
-      start = new Date(now.getFullYear(), now.getMonth() - 1, 1)
-      end = new Date(now.getFullYear(), now.getMonth(), 1)
+      start = new Date(now.getFullYear(), now.getMonth() - 1, 1, 0, 0, 0, 0)
+      end = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0)
     } else if (p === 'custom') {
       start = customStart ? new Date(customStart) : null
       end = customEnd ? new Date(customEnd) : null
@@ -110,32 +113,46 @@ export default function Registro({ registroGrupos = [], openSet, toggleOpen }) {
     gruposPorMaquina[m].forEach(g => {
       const o = g.ordem || {}
       // inicio e fim (se não finalizada, usa now)
-      const iniMs = toTime(o.started_at)
-      const fimMs = toTime(o.finalized_at) || Date.now()
-
-      if (iniMs && fimMs && fimMs > iniMs) {
-        let prodMs = fimMs - iniMs
-        // Desconta paradas
-        ;(g.stops || []).forEach(st => {
-          const stIni = toTime(st.started_at)
-          const stFim = toTime(st.resumed_at) || fimMs
-          if (stIni) {
-            const delta = Math.max(0, (stFim || fimMs) - stIni)
-            prodMs -= delta
-            totalParadaMs += delta
+      let iniMs = toTime(o.started_at)
+      let fimMs = toTime(o.finalized_at) || Date.now()
+      // Limita intervalo ao filtro
+      if (iniMs && fimMs) {
+        const iniCalc = Math.max(iniMs, filtroStart.getTime())
+        const fimCalc = Math.min(fimMs, filtroEnd.getTime())
+        // Só calcula se a O.P. está realmente produzindo dentro do intervalo e não foi interrompida
+        const interrompida = safe(o.interrupted_at) && toTime(o.interrupted_at) <= fimCalc;
+        if (fimCalc > iniCalc && fimCalc > filtroStart.getTime() && !interrompida) {
+          let prodMs = fimCalc - iniCalc
+          // LOG DE DEBUG
+          console.log(`[DEBUG] Máquina: ${m} | O.P.: ${o.code} | iniCalc: ${new Date(iniCalc).toLocaleString()} | fimCalc: ${new Date(fimCalc).toLocaleString()} | prodMs: ${(prodMs/1000/60/60).toFixed(2)}h`)
+          // Desconta paradas
+          ;(g.stops || []).forEach(st => {
+            const stIni = toTime(st.started_at)
+            const stFim = toTime(st.resumed_at) || fimMs
+            const stIniCalc = Math.max(stIni || iniCalc, iniCalc)
+            const stFimCalc = Math.min(stFim || fimCalc, fimCalc)
+            if (stIniCalc < stFimCalc) {
+              const delta = Math.max(0, stFimCalc - stIniCalc)
+              prodMs -= delta
+              totalParadaMs += delta
+              // LOG DE DEBUG PARADA
+              console.log(`[DEBUG] Parada O.P.: ${o.code} | stIniCalc: ${new Date(stIniCalc).toLocaleString()} | stFimCalc: ${new Date(stFimCalc).toLocaleString()} | delta: ${(delta/1000/60/60).toFixed(2)}h`)
+            }
+          })
+          // Desconta baixa eficiência
+          if (safe(o.loweff_started_at)) {
+            const leIni = toTime(o.loweff_started_at)
+            const leFim = toTime(o.loweff_ended_at) || fimMs
+            const leIniCalc = Math.max(leIni || iniCalc, iniCalc)
+            const leFimCalc = Math.min(leFim || fimCalc, fimCalc)
+            if (leIniCalc < leFimCalc) {
+              const delta = Math.max(0, leFimCalc - leIniCalc)
+              prodMs -= delta
+              totalLowEffMs += delta
+            }
           }
-        })
-        // Desconta baixa eficiência
-        if (safe(o.loweff_started_at)) {
-          const leIni = toTime(o.loweff_started_at)
-          const leFim = toTime(o.loweff_ended_at) || fimMs
-          if (leIni) {
-            const delta = Math.max(0, (leFim || fimMs) - leIni)
-            prodMs -= delta
-            totalLowEffMs += delta
-          }
+          totalProdMs += Math.max(0, prodMs)
         }
-        totalProdMs += Math.max(0, prodMs)
       }
 
       // Tempo sem programação: entre finalized_at (se existir) e próxima started_at (ou fim do período)
