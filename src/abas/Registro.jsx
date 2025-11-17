@@ -109,6 +109,46 @@ export default function Registro({ registroGrupos = [], openSet, toggleOpen }) {
     return sorted.length ? sorted[0].g : null
   }
 
+  // Função para verificar se um horário está dentro do intervalo de fim de semana
+  function isWeekendTime(timestamp) {
+    const date = new Date(timestamp);
+    const day = date.getDay(); // 0 = Domingo, 6 = Sábado
+    const hours = date.getHours();
+
+    // Sábado após 13:00
+    if (day === 6 && hours >= 13) {
+      return true;
+    }
+
+    // Domingo até 23:00
+    if (day === 0 && hours < 23) {
+      return true;
+    }
+
+    return false;
+  }
+
+  // Função para descontar o tempo de fim de semana
+  function descontarFimDeSemana(iniCalc, fimCalc) {
+    let desconto = 0;
+    let current = iniCalc;
+
+    while (current < fimCalc) {
+      if (isWeekendTime(current)) {
+        const nextHour = new Date(current);
+        nextHour.setHours(nextHour.getHours() + 1, 0, 0, 0);
+        desconto += Math.min(nextHour.getTime(), fimCalc) - current;
+        current = nextHour.getTime();
+      } else {
+        const nextCheck = new Date(current);
+        nextCheck.setHours(nextCheck.getHours() + 1, 0, 0, 0);
+        current = Math.min(nextCheck.getTime(), fimCalc);
+      }
+    }
+
+    return desconto;
+  }
+
   for (const m of Object.keys(gruposPorMaquina)) {
     gruposPorMaquina[m].forEach(g => {
       const o = g.ordem || {}
@@ -123,8 +163,6 @@ export default function Registro({ registroGrupos = [], openSet, toggleOpen }) {
         const interrompida = safe(o.interrupted_at) && toTime(o.interrupted_at) <= fimCalc;
         if (fimCalc > iniCalc && fimCalc > filtroStart.getTime() && !interrompida) {
           let prodMs = fimCalc - iniCalc
-          // LOG DE DEBUG
-          console.log(`[DEBUG] Máquina: ${m} | O.P.: ${o.code} | iniCalc: ${new Date(iniCalc).toLocaleString()} | fimCalc: ${new Date(fimCalc).toLocaleString()} | prodMs: ${(prodMs/1000/60/60).toFixed(2)}h`)
           // Desconta paradas
           ;(g.stops || []).forEach(st => {
             const stIni = toTime(st.started_at)
@@ -151,6 +189,12 @@ export default function Registro({ registroGrupos = [], openSet, toggleOpen }) {
               totalLowEffMs += delta
             }
           }
+          // Desconta o tempo de fim de semana
+          // LOG DE DEBUG PARA ENTRADA E SAÍDA DA FUNÇÃO descontarFimDeSemana
+          console.log(`[DEBUG] Máquina: ${m} | O.P.: ${o.code} | iniCalc: ${new Date(iniCalc).toLocaleString()} | fimCalc: ${new Date(fimCalc).toLocaleString()}`);
+          const descontoFimDeSemana = descontarFimDeSemana(iniCalc, fimCalc);
+          console.log(`[DEBUG] Máquina: ${m} | O.P.: ${o.code} | Desconto Fim de Semana: ${(descontoFimDeSemana / 1000 / 60 / 60).toFixed(2)}h`);
+          prodMs -= descontoFimDeSemana;
           totalProdMs += Math.max(0, prodMs)
         }
       }

@@ -833,3 +833,41 @@ const lastFinalizadoPorMaquina = useMemo(() => {
     </div>
   )
 }
+
+// Função para gerenciar o estado das máquinas durante o fim de semana
+function gerenciarFimDeSemana() {
+  const agora = new Date();
+  const dia = agora.getDay(); // 0 = Domingo, 6 = Sábado
+  const hora = agora.getHours();
+
+  // Verifica se é sábado após 13:00 ou domingo antes das 23:00
+  if ((dia === 6 && hora >= 13) || (dia === 0 && hora < 23)) {
+    MAQUINAS.forEach(maquina => {
+      const ordemParada = paradas.find(p => p.machine_id === maquina && p.status === 'PARADA');
+
+      if (ordemParada) {
+        // Atualiza o status para "produzindo" com operador "SISTEMA"
+        setOrdens(prevOrdens => prevOrdens.map(o =>
+          o.machine_id === maquina ? { ...o, status: 'PRODUZINDO', operador: 'SISTEMA' } : o
+        ));
+
+        // Cria uma parada com o motivo "FIM DE SEMANA"
+        setParadas(prevParadas => [
+          ...prevParadas,
+          {
+            machine_id: maquina,
+            motivo: 'FIM DE SEMANA',
+            inicio: agora,
+            fim: dia === 6 ? new Date(agora.getFullYear(), agora.getMonth(), agora.getDate(), 23, 0, 0) : null
+          }
+        ]);
+      }
+    });
+  }
+}
+
+// Adiciona um efeito para verificar o fim de semana periodicamente
+useEffect(() => {
+  const interval = setInterval(gerenciarFimDeSemana, 60000); // Verifica a cada minuto
+  return () => clearInterval(interval);
+}, []);
