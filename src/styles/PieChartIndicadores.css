@@ -1,0 +1,87 @@
+/* CONTEINER GERAL */
+.piechart-wrapper {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+  width: 100%;
+}
+
+/* BOTÃO DE FILTRO BONITO */
+.filtro-btn {
+  background: linear-gradient(135deg, #0056d6, #0099ff);
+  border: none;
+  padding: 8px 16px;
+  border-radius: 10px;
+  cursor: pointer;
+  color: #fff;
+  font-weight: 600;
+  font-size: 14px;
+  transition: 0.25s ease;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+}
+
+.filtro-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.25);
+}
+
+/* GRÁFICO */
+.piechart-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.piechart-svg {
+  overflow: visible;
+}
+
+/* SLICES */
+.slice {
+  cursor: pointer;
+  transition: transform 0.25s ease, filter 0.25s ease;
+}
+
+.slice:hover {
+  transform: scale(1.04);
+  filter: brightness(1.12);
+}
+
+.hovered {
+  stroke: #333;
+  stroke-width: 2.5;
+}
+
+/* BURACO DO CENTRO */
+.center-hole {
+  fill: #ffffff;
+  filter: drop-shadow(0 0 4px rgba(0,0,0,0.15));
+}
+
+/* TEXTO CENTRAL */
+.center-title {
+  font-size: 16px;
+  font-weight: 700;
+  fill: #333;
+  pointer-events: none;
+  text-anchor: middle;
+}
+
+/* TEXTO DE HOVER FORA DO GRAFICO */
+.hover-info-container {
+  margin-top: 6px;
+  min-height: 20px;
+}
+
+.hover-info {
+  font-size: 14px;
+  font-weight: 600;
+  color: #222;
+}
+
+.hover-placeholder {
+  font-size: 13px;
+  color: #666;
+}

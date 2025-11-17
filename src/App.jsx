@@ -13,6 +13,7 @@ import Lista from './abas/Lista'
 import NovaOrdem from './abas/NovaOrdem'
 import Registro from './abas/Registro'
 import Apontamento from './feature/Apontamento.jsx'
+import PainelTV from "./routes/PainelTV";
 
 export default function App(){
   const [tab,setTab] = useState('painel')
