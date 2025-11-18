@@ -188,7 +188,9 @@ export default function Registro({ registroGrupos = [], openSet, toggleOpen }) {
           const stIni = toTime(st.started_at);
           const emAberto = !safe(st.resumed_at);
           if (emAberto && stIni < filtroEnd.getTime()) {
-            const ini = Math.max(stIni, filtroStart.getTime());
+            // Se a parada começou antes do filtro, considera do início do filtro
+            // Se começou dentro do filtro, considera do início da parada
+            const ini = stIni < filtroStart.getTime() ? filtroStart.getTime() : stIni;
             const fim = filtroEnd.getTime();
             return ini < fim ? [ini, fim] : null;
           }
@@ -334,9 +336,16 @@ export default function Registro({ registroGrupos = [], openSet, toggleOpen }) {
           }
         }
       });
-      // Limita o total de paradas ao tempo disponível do período
+      // Limita o total de produção + parada ao tempo disponível do período
       const horasPeriodoMs = (filtroEnd.getTime() - filtroStart.getTime());
-      if (paradaMsMaquina > horasPeriodoMs) paradaMsMaquina = horasPeriodoMs;
+      let somaMs = 0;
+      // Soma produção já calculada para esta máquina
+      const prodMsMaquina = totalProdMs; // já acumulado
+      somaMs = prodMsMaquina + paradaMsMaquina;
+      if (somaMs > horasPeriodoMs) {
+        // Ajusta parada para não ultrapassar o limite
+        paradaMsMaquina = Math.max(0, horasPeriodoMs - prodMsMaquina);
+      }
       totalParadaMs += paradaMsMaquina;
       machineParadaMs[m] = paradaMsMaquina;
     }
