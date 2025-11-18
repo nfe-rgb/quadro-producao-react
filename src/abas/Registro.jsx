@@ -1,10 +1,19 @@
 // src/abas/Registro.jsx
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import PieChartIndicadores from '../components/PieChartIndicadores'
 import { fmtDateTime, fmtDuracao } from '../lib/utils'
 import { MAQUINAS } from '../lib/constants'
 
 export default function Registro({ registroGrupos = [], openSet, toggleOpen }) {
+    // Timer para atualização automática dos tempos em aberto
+    const [tick, setTick] = useState(0);
+    useEffect(() => {
+      const interval = setInterval(() => {
+        setTick(t => t + 1);
+      }, 1000); // 1 segundo
+      return () => clearInterval(interval);
+    }, []);
+  const [hoveredIndicador, setHoveredIndicador] = useState(null);
   const [openMachines, setOpenMachines] = useState(new Set())
   const [periodo, setPeriodo] = useState('hoje')
   const [customStart, setCustomStart] = useState('')
@@ -55,7 +64,7 @@ export default function Registro({ registroGrupos = [], openSet, toggleOpen }) {
   }
 
   // memoiza range do período
-  const periodoRange = useMemo(() => getPeriodoRange(periodo), [periodo, customStart, customEnd])
+  const periodoRange = useMemo(() => getPeriodoRange(periodo), [periodo, customStart, customEnd, tick])
   const filtroStart = periodoRange.start
   const filtroEnd = periodoRange.end
 
@@ -76,7 +85,7 @@ export default function Registro({ registroGrupos = [], openSet, toggleOpen }) {
         (!fimMs || fimMs >= filtroStart.getTime())
       )
     })
-  }, [registroGrupos, filtroStart, filtroEnd])
+  }, [registroGrupos, filtroStart, filtroEnd, tick])
 
   // === Filtrar por máquina ===
   const gruposFiltradosMaquina = useMemo(() => {
@@ -85,7 +94,7 @@ export default function Registro({ registroGrupos = [], openSet, toggleOpen }) {
       const m = g?.ordem?.machine_id || 'SEM MÁQ.'
       return String(m) === String(filtroMaquina)
     })
-  }, [gruposFiltrados, filtroMaquina])
+  }, [gruposFiltrados, filtroMaquina, tick])
 
   // === Agrupar por máquina ===
   const gruposPorMaquina = {}
@@ -96,148 +105,168 @@ export default function Registro({ registroGrupos = [], openSet, toggleOpen }) {
   }
 
   // === Calcular totais gerais para o período filtrado ===
-  let totalProdMs = 0, totalParadaMs = 0, totalLowEffMs = 0, totalSemProgMs = 0
-  // mapa para contabilizar tempo de parada por máquina
-  const machineParadaMs = {}
+  const {
+    totalProdH,
+    totalParadaH,
+    totalLowEffH,
+    totalSemProgH,
+    totalH,
+    totalDisponivelH,
+    pct,
+    totalMaquinasParadas,
+    machineParadaMs
+  } = useMemo(() => {
+    let totalProdMs = 0, totalParadaMs = 0, totalLowEffMs = 0, totalSemProgMs = 0;
+    const machineParadaMs = {};
 
-  // helper para encontrar próxima ordem por started_at ordenada (garante próxima cronológica)
-  const nextStartForMachine = (machineGroups, refTime) => {
-    if (!Array.isArray(machineGroups) || machineGroups.length === 0) return null
-    // cria lista ordenada por started_at asc
-    const sorted = machineGroups
-      .map(g => ({ g, t: toTime(g?.ordem?.started_at) || 0 }))
-      .filter(x => x.t > refTime)
-      .sort((a, b) => a.t - b.t)
-    return sorted.length ? sorted[0].g : null
-  }
+    const nextStartForMachine = (machineGroups, refTime) => {
+      if (!Array.isArray(machineGroups) || machineGroups.length === 0) return null;
+      const sorted = machineGroups
+        .map(g => ({ g, t: toTime(g?.ordem?.started_at) || 0 }))
+        .filter(x => x.t > refTime)
+        .sort((a, b) => a.t - b.t);
+      return sorted.length ? sorted[0].g : null;
+    };
 
-  // Função para verificar se um horário está dentro do intervalo de fim de semana
-  function isWeekendTime(timestamp) {
-    const date = new Date(timestamp);
-    const day = date.getDay(); // 0 = Domingo, 6 = Sábado
-    const hours = date.getHours();
-
-    // Sábado após 13:00
-    if (day === 6 && hours >= 13) {
-      return true;
+    function isWeekendTime(timestamp) {
+      const date = new Date(timestamp);
+      const day = date.getDay();
+      const hours = date.getHours();
+      if (day === 6 && hours >= 13) return true;
+      if (day === 0 && hours < 23) return true;
+      return false;
     }
 
-    // Domingo até 23:00
-    if (day === 0 && hours < 23) {
-      return true;
-    }
-
-    return false;
-  }
-
-  // Função para descontar o tempo de fim de semana
-  function descontarFimDeSemana(iniCalc, fimCalc) {
-    let desconto = 0;
-    let current = iniCalc;
-
-    while (current < fimCalc) {
-      if (isWeekendTime(current)) {
-        const nextHour = new Date(current);
-        nextHour.setHours(nextHour.getHours() + 1, 0, 0, 0);
-        desconto += Math.min(nextHour.getTime(), fimCalc) - current;
-        current = nextHour.getTime();
-      } else {
-        const nextCheck = new Date(current);
-        nextCheck.setHours(nextCheck.getHours() + 1, 0, 0, 0);
-        current = Math.min(nextCheck.getTime(), fimCalc);
-      }
-    }
-
-    return desconto;
-  }
-
-  for (const m of Object.keys(gruposPorMaquina)) {
-    gruposPorMaquina[m].forEach(g => {
-      const o = g.ordem || {}
-      // inicio e fim (se não finalizada, usa now)
-      let iniMs = toTime(o.started_at)
-      let fimMs = toTime(o.finalized_at) || Date.now()
-      // Limita intervalo ao filtro
-      if (iniMs && fimMs) {
-        const iniCalc = Math.max(iniMs, filtroStart.getTime())
-        const fimCalc = Math.min(fimMs, filtroEnd.getTime())
-        // Só calcula se a O.P. está realmente produzindo dentro do intervalo e não foi interrompida
-        const interrompida = safe(o.interrupted_at) && toTime(o.interrupted_at) <= fimCalc;
-        if (fimCalc > iniCalc && fimCalc > filtroStart.getTime() && !interrompida) {
-          let prodMs = fimCalc - iniCalc
-          // Desconta paradas
-          ;(g.stops || []).forEach(st => {
-            const stIni = toTime(st.started_at)
-            const stFim = toTime(st.resumed_at) || fimMs
-            const stIniCalc = Math.max(stIni || iniCalc, iniCalc)
-            const stFimCalc = Math.min(stFim || fimCalc, fimCalc)
-            if (stIniCalc < stFimCalc) {
-              const delta = Math.max(0, stFimCalc - stIniCalc)
-              prodMs -= delta
-              totalParadaMs += delta
-              machineParadaMs[m] = (machineParadaMs[m] || 0) + delta
-              // LOG DE DEBUG PARADA
-              console.log(`[DEBUG] Parada O.P.: ${o.code} | stIniCalc: ${new Date(stIniCalc).toLocaleString()} | stFimCalc: ${new Date(stFimCalc).toLocaleString()} | delta: ${(delta/1000/60/60).toFixed(2)}h`)
-            }
-          })
-          // Desconta baixa eficiência
-          if (safe(o.loweff_started_at)) {
-            const leIni = toTime(o.loweff_started_at)
-            const leFim = toTime(o.loweff_ended_at) || fimMs
-            const leIniCalc = Math.max(leIni || iniCalc, iniCalc)
-            const leFimCalc = Math.min(leFim || fimCalc, fimCalc)
-            if (leIniCalc < leFimCalc) {
-              const delta = Math.max(0, leFimCalc - leIniCalc)
-              prodMs -= delta
-              totalLowEffMs += delta
-            }
-          }
-          // Desconta o tempo de fim de semana
-          const descontoFimDeSemana = descontarFimDeSemana(iniCalc, fimCalc);
-          prodMs -= descontoFimDeSemana;
-          totalProdMs += Math.max(0, prodMs)
+    function descontarFimDeSemana(iniCalc, fimCalc) {
+      let desconto = 0;
+      let current = iniCalc;
+      while (current < fimCalc) {
+        if (isWeekendTime(current)) {
+          const nextHour = new Date(current);
+          nextHour.setHours(nextHour.getHours() + 1, 0, 0, 0);
+          desconto += Math.min(nextHour.getTime(), fimCalc) - current;
+          current = nextHour.getTime();
+        } else {
+          const nextCheck = new Date(current);
+          nextCheck.setHours(nextCheck.getHours() + 1, 0, 0, 0);
+          current = Math.min(nextCheck.getTime(), fimCalc);
         }
       }
+      return desconto;
+    }
 
-      // Tempo sem programação: entre finalized_at (se existir) e próxima started_at (ou fim do período)
-      const finalizedMs = toTime(o.finalized_at)
-      if (finalizedMs) {
-        // busca próxima ordem na mesma máquina (cronologicamente depois de finalizedMs)
-        const prox = nextStartForMachine(gruposPorMaquina[m], finalizedMs)
-        const semProgFim = prox ? (toTime(prox.ordem.started_at) || filtroEnd?.getTime() || Date.now()) : (filtroEnd?.getTime() || Date.now())
-        const delta = Math.max(0, semProgFim - finalizedMs)
-        totalSemProgMs += delta
-      }
-    })
-  }
+    for (const m of Object.keys(gruposPorMaquina)) {
+      const gruposOrdenados = gruposPorMaquina[m].slice().sort((a, b) => {
+        const ta = toTime(a?.ordem?.started_at) || 0;
+        const tb = toTime(b?.ordem?.started_at) || 0;
+        return ta - tb;
+      });
+      gruposOrdenados.forEach((g, idx) => {
+        const o = g.ordem || {};
+        let iniMs = toTime(o.started_at);
+        let fimMs = toTime(o.finalized_at) || Date.now();
+        if (iniMs && fimMs) {
+          const iniCalc = Math.max(iniMs, filtroStart.getTime());
+          const fimCalc = Math.min(fimMs, filtroEnd.getTime());
+          const interrompida = safe(o.interrupted_at) && toTime(o.interrupted_at) <= fimCalc;
+          if (fimCalc > iniCalc && fimCalc > filtroStart.getTime() && !interrompida) {
+            let prodMs = fimCalc - iniCalc;
+            (g.stops || []).forEach(st => {
+              const stIni = toTime(st.started_at);
+              const stFim = toTime(st.resumed_at) || fimMs;
+              const stIniCalc = Math.max(stIni || iniCalc, iniCalc);
+              const stFimCalc = Math.min(stFim || fimCalc, fimCalc);
+              if (stIniCalc < stFimCalc) {
+                const delta = Math.max(0, stFimCalc - stIniCalc);
+                prodMs -= delta;
+                totalParadaMs += delta;
+                machineParadaMs[m] = (machineParadaMs[m] || 0) + delta;
+              }
+            });
+            if (safe(o.loweff_started_at)) {
+              const leIni = toTime(o.loweff_started_at);
+              const leFim = toTime(o.loweff_ended_at) || fimMs;
+              const leIniCalc = Math.max(leIni || iniCalc, iniCalc);
+              const leFimCalc = Math.min(leFim || fimCalc, fimCalc);
+              if (leIniCalc < leFimCalc) {
+                const delta = Math.max(0, leFimCalc - leIniCalc);
+                prodMs -= delta;
+                totalLowEffMs += delta;
+              }
+            }
+            const descontoFimDeSemana = descontarFimDeSemana(iniCalc, fimCalc);
+            prodMs -= descontoFimDeSemana;
+            totalProdMs += Math.max(0, prodMs);
+          }
+        }
 
-  // Conversão para horas
-  const totalProdH = totalProdMs / 1000 / 60 / 60
-  const totalParadaH = totalParadaMs / 1000 / 60 / 60
-  const totalLowEffH = totalLowEffMs / 1000 / 60 / 60
-  const totalSemProgH = totalSemProgMs / 1000 / 60 / 60
-  const totalH = totalProdH + totalParadaH + totalLowEffH + totalSemProgH
+        // Tempo sem programação: entre finalized_at (se existir) e próxima started_at
+        const finalizedMs = toTime(o.finalized_at);
+        if (finalizedMs) {
+          const prox = nextStartForMachine(gruposPorMaquina[m], finalizedMs);
+          if (prox) {
+            const proxIni = toTime(prox.ordem.started_at) || filtroEnd?.getTime() || Date.now();
+            if (proxIni > finalizedMs && proxIni <= filtroEnd.getTime()) {
+              const delta = Math.max(0, proxIni - finalizedMs);
+              totalSemProgMs += delta;
+            }
+          }
+        }
+      });
+    }
 
-  // Percentuais
-  const pct = v => totalH ? ((v / totalH) * 100).toFixed(1) : '0.0'
+    const totalProdH = totalProdMs / 1000 / 60 / 60;
+    const totalParadaH = totalParadaMs / 1000 / 60 / 60;
+    const totalLowEffH = totalLowEffMs / 1000 / 60 / 60;
+    const totalSemProgH = totalSemProgMs / 1000 / 60 / 60;
+    const totalH = totalProdH + totalParadaH + totalLowEffH + totalSemProgH;
 
-  // Total de máquinas que tiveram parada (>0ms) no período
-  const totalMaquinasParadas = Object.keys(gruposPorMaquina).filter(m => (machineParadaMs[m] || 0) > 0).length
+    let maquinasConsideradas = filtroMaquina === 'todas' ? MAQUINAS : [filtroMaquina];
+    maquinasConsideradas = maquinasConsideradas.filter(m => MAQUINAS.includes(m));
+    let horasPeriodo = 0;
+    if (filtroStart && filtroEnd) {
+      horasPeriodo = (filtroEnd.getTime() - filtroStart.getTime()) / 1000 / 60 / 60;
+    }
+    const totalDisponivelH = maquinasConsideradas.length * horasPeriodo;
+
+    const pct = v => totalH ? ((v / totalH) * 100).toFixed(1) : '0.0';
+    const totalMaquinasParadas = Object.keys(gruposPorMaquina).filter(m => (machineParadaMs[m] || 0) > 0).length;
+
+    return {
+      totalProdH,
+      totalParadaH,
+      totalLowEffH,
+      totalSemProgH,
+      totalH,
+      totalDisponivelH,
+      pct,
+      totalMaquinasParadas,
+      machineParadaMs
+    };
+  }, [gruposPorMaquina, filtroStart, filtroEnd, filtroMaquina, tick]);
 
   // formata horas decimais para HH:MM:SS
   function formatHoursToHMS(hoursDecimal) {
-    const totalSec = Math.round((Number(hoursDecimal) || 0) * 3600)
-    const h = Math.floor(totalSec / 3600)
-    const m = Math.floor((totalSec % 3600) / 60)
-    const s = totalSec % 60
-    const pad = n => String(n).padStart(2, '0')
-    return `${pad(h)}:${pad(m)}:${pad(s)}`
+    const totalSec = Math.round((Number(hoursDecimal) || 0) * 3600);
+    const h = Math.floor(totalSec / 3600);
+    const m = Math.floor((totalSec % 3600) / 60);
+    const s = totalSec % 60;
+    const pad = n => String(n).padStart(2, '0');
+    return `${pad(h)}:${pad(m)}:${pad(s)}`;
   }
 
-  function formatPctComma(v) {
-    const p = totalH ? (Number(v) / totalH) * 100 : 0
-    return `${p.toFixed(1).replace('.', ',')}%`
+  function formatPctFromHours(h) {
+    const pctNum = totalH ? (Number(h) / totalH) * 100 : 0;
+    return `${pctNum.toFixed(1).replace('.', ',')}%`;
   }
+
+  // Indicadores recalculados em tempo real
+  const items = useMemo(() => [
+    { key: 'produzindo', label: 'Produzindo', valueH: totalProdH, color: '#0a7' },
+    { key: 'parada', label: 'Parada', valueH: totalParadaH, color: '#e74c3c' },
+    { key: 'loweff', label: 'Baixa Eficiência', valueH: totalLowEffH, color: '#ffc107' },
+    { key: 'semprog', label: 'Sem Programação', valueH: totalSemProgH, color: '#3498db' },
+  ], [totalProdH, totalParadaH, totalLowEffH, totalSemProgH, tick]);
 
   // === Toggle individual de máquina ===
   function toggleMachine(m) {
@@ -310,63 +339,35 @@ export default function Registro({ registroGrupos = [], openSet, toggleOpen }) {
 {/* Relatório geral do período (substituir o bloco antigo) */}
 <div className="card" style={{ marginBottom: 16, background: '#f6f6f6', padding: 16 }}>
   <div className="label" style={{ marginBottom: 8, textAlign: 'center' }}>Resumo do Período</div>
-
-  {/* Helper local para formatar horas decimais -> HH:MM:SS */}
-  { /* definimos como IIFE para ficar no JSX e usar valores já calculados */ }
-  {(() => {
-    function formatHoursToHMS(hoursDecimal) {
-      const totalSec = Math.round((Number(hoursDecimal) || 0) * 3600);
-      const h = Math.floor(totalSec / 3600);
-      const m = Math.floor((totalSec % 3600) / 60);
-      const s = totalSec % 60;
-      const pad = n => String(n).padStart(2, '0');
-      return `${pad(h)}:${pad(m)}:${pad(s)}`;
-    }
-    function formatPctFromHours(h) {
-      const pctNum = totalH ? (Number(h) / totalH) * 100 : 0;
-      // vírgula decimal
-      return `${pctNum.toFixed(1).replace('.', ',')}%`;
-    }
-
-    // prepare items list (same order as seu gráfico)
-    const items = [
-      { key: 'produzindo', label: 'Produzindo', valueH: totalProdH, color: '#0a7' },
-      { key: 'parada', label: 'Parada', valueH: totalParadaH, color: '#e74c3c' },
-      { key: 'loweff', label: 'Baixa Eficiência', valueH: totalLowEffH, color: '#ffc107' },
-      { key: 'semprog', label: 'Sem Programação', valueH: totalSemProgH, color: '#3498db' },
-    ];
-
-    const totalParadasText = formatHoursToHMS(totalParadaH); // se quer outro total, troque a variável
-
-    return (
-      <div style={{ display: 'flex', gap: 24, alignItems: 'center', flexWrap: 'wrap' }}>
-        {/* Gráfico (esquerda) */}
-        <div style={{ minWidth: 260 }}>
-          <PieChartIndicadores
-            data={[
-              { label: 'Produzindo', value: totalProdH, color: '#0a7' },
-              { label: 'Parada', value: totalParadaH, color: '#e74c3c' },
-              { label: 'Baixa Eficiência', value: totalLowEffH, color: '#ffc107' },
-              { label: 'Sem Programação', value: totalSemProgH, color: '#3498db' },
-            ]}
-            totalMaquinasParadas={totalMaquinasParadas}
-          />
+  <div style={{ display: 'flex', gap: 24, alignItems: 'center', flexWrap: 'wrap' }}>
+    {/* Gráfico (esquerda) */}
+    <div style={{ minWidth: 260 }}>
+      <PieChartIndicadores
+        data={items.map(it => ({ label: it.label, value: it.valueH, color: it.color }))}
+        totalMaquinasParadas={totalMaquinasParadas}
+        hoveredIndex={hoveredIndicador}
+        setHoveredIndex={setHoveredIndicador}
+        totalDisponivelH={totalDisponivelH}
+      />
+    </div>
+    {/* Resumo lateral (direita) - informações em uma linha conforme solicitado */}
+    <div className="summary-side" style={{ flex: 1, minWidth: 320 }}>
+      {items.map((it, idx) => (
+        <div
+          key={it.key}
+          className="summary-item"
+          style={{ display: 'flex', gap: 8, alignItems: 'center', whiteSpace: 'nowrap', marginBottom: 6 }}
+          onMouseEnter={() => setHoveredIndicador(idx)}
+          onMouseLeave={() => setHoveredIndicador(null)}
+        >
+          <span className="swatch" style={{ background: it.color, width: 10, height: 10, display: 'inline-block', borderRadius: 2 }} />
+          <span style={{ color: it.color, fontWeight: 700 }}>{it.label}:</span>
+          <span>{formatHoursToHMS(it.valueH)}</span>
+          <span style={{ color: '#666' }}> - {formatPctFromHours(it.valueH)}</span>
         </div>
-
-        {/* Resumo lateral (direita) - informações em uma linha conforme solicitado */}
-        <div className="summary-side" style={{ flex: 1, minWidth: 320 }}>
-          {items.map(it => (
-            <div key={it.key} className="summary-item" style={{ display: 'flex', gap: 8, alignItems: 'center', whiteSpace: 'nowrap', marginBottom: 6 }}>
-              <span className="swatch" style={{ background: it.color, width: 10, height: 10, display: 'inline-block', borderRadius: 2 }} />
-              <span style={{ color: it.color, fontWeight: 700 }}>{it.label}:</span>
-              <span>{formatHoursToHMS(it.valueH)}</span>
-              <span style={{ color: '#666' }}> - {formatPctFromHours(it.valueH)}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-    );
-  })()}
+      ))}
+    </div>
+  </div>
 </div>
 
         {/* Mensagem se não há registros */}

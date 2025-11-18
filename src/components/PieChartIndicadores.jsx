@@ -1,9 +1,11 @@
 import React, { useState } from 'react';
 import '../styles/PieChartIndicadores.css';
 
-export default function PieChartIndicadores({ data, totalMaquinasParadas = 0 }) {
-  const total = data.reduce((acc, d) => acc + (Number(d.value) || 0), 0);
-  const [hoveredIndex, setHoveredIndex] = useState(null);
+export default function PieChartIndicadores({ data, totalMaquinasParadas = 0, hoveredIndex: externalHoveredIndex, setHoveredIndex: externalSetHoveredIndex, totalDisponivelH }) {
+  const total = typeof totalDisponivelH === 'number' ? totalDisponivelH : data.reduce((acc, d) => acc + (Number(d.value) || 0), 0);
+  const [internalHoveredIndex, setInternalHoveredIndex] = useState(null);
+  const hoveredIndex = externalHoveredIndex !== undefined && externalHoveredIndex !== null ? externalHoveredIndex : internalHoveredIndex;
+  const setHoveredIndex = externalSetHoveredIndex || setInternalHoveredIndex;
 
   const radius = 90;
   const cx = 100;
