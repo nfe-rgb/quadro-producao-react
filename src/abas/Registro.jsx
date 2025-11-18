@@ -97,6 +97,8 @@ export default function Registro({ registroGrupos = [], openSet, toggleOpen }) {
 
   // === Calcular totais gerais para o período filtrado ===
   let totalProdMs = 0, totalParadaMs = 0, totalLowEffMs = 0, totalSemProgMs = 0
+  // mapa para contabilizar tempo de parada por máquina
+  const machineParadaMs = {}
 
   // helper para encontrar próxima ordem por started_at ordenada (garante próxima cronológica)
   const nextStartForMachine = (machineGroups, refTime) => {
@@ -173,6 +175,7 @@ export default function Registro({ registroGrupos = [], openSet, toggleOpen }) {
               const delta = Math.max(0, stFimCalc - stIniCalc)
               prodMs -= delta
               totalParadaMs += delta
+              machineParadaMs[m] = (machineParadaMs[m] || 0) + delta
               // LOG DE DEBUG PARADA
               console.log(`[DEBUG] Parada O.P.: ${o.code} | stIniCalc: ${new Date(stIniCalc).toLocaleString()} | stFimCalc: ${new Date(stFimCalc).toLocaleString()} | delta: ${(delta/1000/60/60).toFixed(2)}h`)
             }
@@ -190,10 +193,7 @@ export default function Registro({ registroGrupos = [], openSet, toggleOpen }) {
             }
           }
           // Desconta o tempo de fim de semana
-          // LOG DE DEBUG PARA ENTRADA E SAÍDA DA FUNÇÃO descontarFimDeSemana
-          console.log(`[DEBUG] Máquina: ${m} | O.P.: ${o.code} | iniCalc: ${new Date(iniCalc).toLocaleString()} | fimCalc: ${new Date(fimCalc).toLocaleString()}`);
           const descontoFimDeSemana = descontarFimDeSemana(iniCalc, fimCalc);
-          console.log(`[DEBUG] Máquina: ${m} | O.P.: ${o.code} | Desconto Fim de Semana: ${(descontoFimDeSemana / 1000 / 60 / 60).toFixed(2)}h`);
           prodMs -= descontoFimDeSemana;
           totalProdMs += Math.max(0, prodMs)
         }
@@ -220,6 +220,24 @@ export default function Registro({ registroGrupos = [], openSet, toggleOpen }) {
 
   // Percentuais
   const pct = v => totalH ? ((v / totalH) * 100).toFixed(1) : '0.0'
+
+  // Total de máquinas que tiveram parada (>0ms) no período
+  const totalMaquinasParadas = Object.keys(gruposPorMaquina).filter(m => (machineParadaMs[m] || 0) > 0).length
+
+  // formata horas decimais para HH:MM:SS
+  function formatHoursToHMS(hoursDecimal) {
+    const totalSec = Math.round((Number(hoursDecimal) || 0) * 3600)
+    const h = Math.floor(totalSec / 3600)
+    const m = Math.floor((totalSec % 3600) / 60)
+    const s = totalSec % 60
+    const pad = n => String(n).padStart(2, '0')
+    return `${pad(h)}:${pad(m)}:${pad(s)}`
+  }
+
+  function formatPctComma(v) {
+    const p = totalH ? (Number(v) / totalH) * 100 : 0
+    return `${p.toFixed(1).replace('.', ',')}%`
+  }
 
   // === Toggle individual de máquina ===
   function toggleMachine(m) {
@@ -289,35 +307,67 @@ export default function Registro({ registroGrupos = [], openSet, toggleOpen }) {
           </div>
         </div>
 
-        {/* Relatório geral do período */}
-        <div className="card" style={{ marginBottom: 16, background: '#f6f6f6', padding: 16 }}>
-          <div className="label" style={{ marginBottom: 8 }}>Resumo do Período</div>
-          <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', alignItems: 'center' }}>
-            <div>
-              <PieChartIndicadores
-                data={[
-                  { label: 'Produzindo', value: totalProdH, color: '#0a7' },
-                  { label: 'Parada', value: totalParadaH, color: '#e74c3c' },
-                  { label: 'Baixa Eficiência', value: totalLowEffH, color: '#ffc107' },
-                  { label: 'Sem Programação', value: totalSemProgH, color: '#3498db' },
-                ]}
-              />
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 8 }}>
-                <span style={{ color: '#0a7' }}>■ Produzindo</span>
-                <span style={{ color: '#e74c3c' }}>■ Parada</span>
-                <span style={{ color: '#ffc107' }}>■ Baixa Eficiência</span>
-                <span style={{ color: '#3498db' }}>■ Sem Programação</span>
-              </div>
-            </div>
-            <div>
-              <div><b>Tempo produzindo:</b> {totalProdH.toFixed(2)} h ({pct(totalProdH)}%)</div>
-              <div><b>Tempo parada:</b> {totalParadaH.toFixed(2)} h ({pct(totalParadaH)}%)</div>
-              <div><b>Tempo baixa eficiência:</b> {totalLowEffH.toFixed(2)} h ({pct(totalLowEffH)}%)</div>
-              <div><b>Tempo sem programação:</b> {totalSemProgH.toFixed(2)} h ({pct(totalSemProgH)}%)</div>
-              <div><b>Total:</b> {totalH.toFixed(2)} h</div>
-            </div>
-          </div>
+{/* Relatório geral do período (substituir o bloco antigo) */}
+<div className="card" style={{ marginBottom: 16, background: '#f6f6f6', padding: 16 }}>
+  <div className="label" style={{ marginBottom: 8, textAlign: 'center' }}>Resumo do Período</div>
+
+  {/* Helper local para formatar horas decimais -> HH:MM:SS */}
+  { /* definimos como IIFE para ficar no JSX e usar valores já calculados */ }
+  {(() => {
+    function formatHoursToHMS(hoursDecimal) {
+      const totalSec = Math.round((Number(hoursDecimal) || 0) * 3600);
+      const h = Math.floor(totalSec / 3600);
+      const m = Math.floor((totalSec % 3600) / 60);
+      const s = totalSec % 60;
+      const pad = n => String(n).padStart(2, '0');
+      return `${pad(h)}:${pad(m)}:${pad(s)}`;
+    }
+    function formatPctFromHours(h) {
+      const pctNum = totalH ? (Number(h) / totalH) * 100 : 0;
+      // vírgula decimal
+      return `${pctNum.toFixed(1).replace('.', ',')}%`;
+    }
+
+    // prepare items list (same order as seu gráfico)
+    const items = [
+      { key: 'produzindo', label: 'Produzindo', valueH: totalProdH, color: '#0a7' },
+      { key: 'parada', label: 'Parada', valueH: totalParadaH, color: '#e74c3c' },
+      { key: 'loweff', label: 'Baixa Eficiência', valueH: totalLowEffH, color: '#ffc107' },
+      { key: 'semprog', label: 'Sem Programação', valueH: totalSemProgH, color: '#3498db' },
+    ];
+
+    const totalParadasText = formatHoursToHMS(totalParadaH); // se quer outro total, troque a variável
+
+    return (
+      <div style={{ display: 'flex', gap: 24, alignItems: 'center', flexWrap: 'wrap' }}>
+        {/* Gráfico (esquerda) */}
+        <div style={{ minWidth: 260 }}>
+          <PieChartIndicadores
+            data={[
+              { label: 'Produzindo', value: totalProdH, color: '#0a7' },
+              { label: 'Parada', value: totalParadaH, color: '#e74c3c' },
+              { label: 'Baixa Eficiência', value: totalLowEffH, color: '#ffc107' },
+              { label: 'Sem Programação', value: totalSemProgH, color: '#3498db' },
+            ]}
+            totalMaquinasParadas={totalMaquinasParadas}
+          />
         </div>
+
+        {/* Resumo lateral (direita) - informações em uma linha conforme solicitado */}
+        <div className="summary-side" style={{ flex: 1, minWidth: 320 }}>
+          {items.map(it => (
+            <div key={it.key} className="summary-item" style={{ display: 'flex', gap: 8, alignItems: 'center', whiteSpace: 'nowrap', marginBottom: 6 }}>
+              <span className="swatch" style={{ background: it.color, width: 10, height: 10, display: 'inline-block', borderRadius: 2 }} />
+              <span style={{ color: it.color, fontWeight: 700 }}>{it.label}:</span>
+              <span>{formatHoursToHMS(it.valueH)}</span>
+              <span style={{ color: '#666' }}> - {formatPctFromHours(it.valueH)}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  })()}
+</div>
 
         {/* Mensagem se não há registros */}
         {(!Array.isArray(gruposFiltrados) || gruposFiltrados.length === 0) ? (

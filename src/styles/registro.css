@@ -516,3 +516,76 @@
   .custom-range__row { min-width: auto; width: 100%; }
   .custom-range__actions { justify-content: flex-end; width: 100%; }
 }
+/* ===== Resumo lateral do gráfico (Registro) ===== */
+.summary-side {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-left: 8px;
+}
+
+.summary-item {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 6px 8px;
+  border-radius: 8px;
+}
+
+.summary-item .swatch {
+  width: 16px;
+  height: 12px;
+  border-radius: 3px;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.06);
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.summary-texts {
+  display: flex;
+  flex-direction: column;
+}
+
+.summary-label {
+  font-weight: 700;
+  font-size: 14px;
+  color: #0f2a2a;
+}
+
+.summary-values {
+  font-size: 13px;
+  color: #333;
+  margin-top: 2px;
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+}
+
+.summary-time {
+  font-weight: 700;
+  color: #111;
+}
+
+.summary-pct {
+  color: #666;
+  font-size: 13px;
+}
+
+.summary-total {
+  margin-top: 8px;
+  font-size: 14px;
+  color: #0b2a2a;
+  padding-top: 8px;
+  border-top: 1px dashed rgba(0,0,0,0.06);
+}
+
+/* Remove qualquer legenda antiga que apareça abaixo do gráfico */
+.piechart-legend { display: none !important; }
+
+/* Responsivo */
+@media (max-width: 880px) {
+  .summary-side { min-width: 0; }
+  .summary-item { padding: 8px 6px; }
+  .piechart-container { justify-content: center; }
+  .summary-total { text-align: left; }
+}
