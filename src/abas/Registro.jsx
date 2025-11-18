@@ -43,6 +43,11 @@ export default function Registro({ registroGrupos = [], openSet, toggleOpen }) {
     if (p === 'hoje') {
       start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0)
       end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), now.getHours(), now.getMinutes(), now.getSeconds(), now.getMilliseconds())
+    } else if (p === 'ontem') {
+      // Ontem: 00:00 até 23:59:59
+      const ontem = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, 0, 0, 0, 0)
+      start = new Date(ontem.getFullYear(), ontem.getMonth(), ontem.getDate(), 0, 0, 0, 0)
+      end = new Date(ontem.getFullYear(), ontem.getMonth(), ontem.getDate(), 23, 59, 59, 999)
     } else if (p === 'semana') {
       // Segunda-feira 00:00 até domingo 00:00
       const day = now.getDay() === 0 ? 7 : now.getDay() // domingo = 7
@@ -71,18 +76,27 @@ export default function Registro({ registroGrupos = [], openSet, toggleOpen }) {
   // === Filtrar registroGrupos por período (defensivo) ===
   const gruposFiltrados = useMemo(() => {
     const source = Array.isArray(registroGrupos) ? registroGrupos : []
+    // Se filtro personalizado e datas não preenchidas, retorna array vazio
+    if (periodo === 'custom' && (!customStart || !customEnd)) return []
     if (!filtroStart || !filtroEnd) return source
 
     return source.filter(g => {
       const o = g.ordem || {}
       const iniMs = toTime(o.started_at)
       const fimMs = toTime(o.finalized_at)
+      // Verifica se há parada aberta que cruza o período
+      const hasOpenStop = (g.stops || []).some(st => {
+        const stIni = toTime(st.started_at)
+        const emAberto = !safe(st.resumed_at)
+        return emAberto && stIni < filtroEnd.getTime() && filtroStart.getTime() < filtroEnd.getTime()
+      })
       // Inclui ordens que:
       // - Foram iniciadas antes do fim do período
       // - E não foram finalizadas antes do início do período
+      // - Ou possuem parada aberta cruzando o período
       return (
-        iniMs && iniMs < filtroEnd.getTime() &&
-        (!fimMs || fimMs >= filtroStart.getTime())
+        (iniMs && iniMs < filtroEnd.getTime() && (!fimMs || fimMs >= filtroStart.getTime()))
+        || hasOpenStop
       )
     })
   }, [registroGrupos, filtroStart, filtroEnd, tick])
@@ -161,28 +175,135 @@ export default function Registro({ registroGrupos = [], openSet, toggleOpen }) {
         const tb = toTime(b?.ordem?.started_at) || 0;
         return ta - tb;
       });
+      let paradaMsMaquina = 0;
       gruposOrdenados.forEach((g, idx) => {
         const o = g.ordem || {};
-        let iniMs = toTime(o.started_at);
-        let fimMs = toTime(o.finalized_at) || Date.now();
-        if (iniMs && fimMs) {
+        // Monta todos os intervalos de produção considerando interrupções e reinícios
+        const intervals = [];
+        let lastStart = toTime(o.started_at);
+        let lastEnd = null;
+
+        // Paradas abertas que cruzam o período filtrado (sempre processa)
+        const paradaIntervalsAbertas = (g.stops || []).map(st => {
+          const stIni = toTime(st.started_at);
+          const emAberto = !safe(st.resumed_at);
+          if (emAberto && stIni < filtroEnd.getTime()) {
+            const ini = Math.max(stIni, filtroStart.getTime());
+            const fim = filtroEnd.getTime();
+            return ini < fim ? [ini, fim] : null;
+          }
+          return null;
+        }).filter(Boolean);
+        // Função para unir intervalos
+        function unirIntervalos(intervalos) {
+          if (!intervalos.length) return [];
+          intervalos.sort((a, b) => a[0] - b[0]);
+          const unidos = [intervalos[0]];
+          for (let i = 1; i < intervalos.length; i++) {
+            const ultimo = unidos[unidos.length - 1];
+            const atual = intervalos[i];
+            if (atual[0] <= ultimo[1]) {
+              ultimo[1] = Math.max(ultimo[1], atual[1]);
+            } else {
+              unidos.push([...atual]);
+            }
+          }
+          return unidos;
+        }
+        const paradaUnidaAbertas = unirIntervalos(paradaIntervalsAbertas);
+        let deltaParadaAbertas = 0;
+        paradaUnidaAbertas.forEach(([ini, fim]) => {
+          deltaParadaAbertas += Math.max(0, fim - ini);
+        });
+        paradaMsMaquina += deltaParadaAbertas;
+
+        // Se nunca iniciou, ignora intervalos de produção
+        if (!lastStart) {
+          return;
+        }
+
+        // Coleta todos os reinícios/interrupções
+        const reinicios = [];
+        if (safe(o.restarted_at)) reinicios.push({ t: toTime(o.restarted_at), type: 'restart' });
+        if (safe(o.interrupted_at)) reinicios.push({ t: toTime(o.interrupted_at), type: 'interrupt' });
+        // Adiciona finalized_at como fim final
+        if (safe(o.finalized_at)) reinicios.push({ t: toTime(o.finalized_at), type: 'final' });
+        // Ordena por tempo
+        reinicios.sort((a, b) => a.t - b.t);
+
+        // Se não há reinícios/interrupções, considera todo o período
+        if (reinicios.length === 0) {
+          lastEnd = Date.now();
+          if (filtroEnd && lastEnd > filtroEnd.getTime()) lastEnd = filtroEnd.getTime();
+          if (lastEnd > lastStart) intervals.push([lastStart, lastEnd]);
+        } else {
+          // Percorre reinícios/interrupções
+          let cursor = lastStart;
+          for (let i = 0; i < reinicios.length; i++) {
+            const r = reinicios[i];
+            if (r.type === 'interrupt' || r.type === 'final') {
+              // Período de produção termina aqui
+              if (r.t > cursor) intervals.push([cursor, r.t]);
+              // Busca próximo restart
+              const nextRestart = reinicios.find(x => x.type === 'restart' && x.t > r.t);
+              if (nextRestart) cursor = nextRestart.t;
+              else cursor = null;
+            }
+          }
+          // Se após o último reinício não há finalização, considera produção aberta até o fim do filtro
+          if (cursor) {
+            const fimAberto = filtroEnd.getTime();
+            if (fimAberto > cursor) intervals.push([cursor, fimAberto]);
+          }
+        }
+
+        // Para cada intervalo, desconta paradas e baixa eficiência
+        intervals.forEach(([iniMs, fimMs]) => {
           const iniCalc = Math.max(iniMs, filtroStart.getTime());
           const fimCalc = Math.min(fimMs, filtroEnd.getTime());
-          const interrompida = safe(o.interrupted_at) && toTime(o.interrupted_at) <= fimCalc;
-          if (fimCalc > iniCalc && fimCalc > filtroStart.getTime() && !interrompida) {
+          if (fimCalc > iniCalc) {
             let prodMs = fimCalc - iniCalc;
-            (g.stops || []).forEach(st => {
+            // Paradas: calcula união dos intervalos
+            const paradaIntervals = (g.stops || []).map(st => {
               const stIni = toTime(st.started_at);
-              const stFim = toTime(st.resumed_at) || fimMs;
-              const stIniCalc = Math.max(stIni || iniCalc, iniCalc);
-              const stFimCalc = Math.min(stFim || fimCalc, fimCalc);
-              if (stIniCalc < stFimCalc) {
-                const delta = Math.max(0, stFimCalc - stIniCalc);
-                prodMs -= delta;
-                totalParadaMs += delta;
-                machineParadaMs[m] = (machineParadaMs[m] || 0) + delta;
+              const emAberto = !safe(st.resumed_at);
+              // Se a parada está em aberto e começou antes do filtro, considera do início do filtro até o fim do filtro
+              if (emAberto && stIni < filtroStart.getTime()) {
+                return [filtroStart.getTime(), filtroEnd.getTime()];
               }
+              // Se não tem resumed_at, considera o fim do filtro
+              const stFim = emAberto ? filtroEnd.getTime() : toTime(st.resumed_at);
+              const stIniCalc = Math.max(stIni || iniCalc, filtroStart.getTime());
+              const stFimCalc = Math.min(stFim || fimCalc, filtroEnd.getTime());
+              return stIniCalc < stFimCalc ? [stIniCalc, stFimCalc] : null;
+            }).filter(Boolean);
+
+            // Função para unir intervalos
+            function unirIntervalos(intervalos) {
+              if (!intervalos.length) return [];
+              intervalos.sort((a, b) => a[0] - b[0]);
+              const unidos = [intervalos[0]];
+              for (let i = 1; i < intervalos.length; i++) {
+                const ultimo = unidos[unidos.length - 1];
+                const atual = intervalos[i];
+                if (atual[0] <= ultimo[1]) {
+                  ultimo[1] = Math.max(ultimo[1], atual[1]);
+                } else {
+                  unidos.push([...atual]);
+                }
+              }
+              return unidos;
+            }
+
+            const paradaUnida = unirIntervalos(paradaIntervals);
+            let deltaParada = 0;
+            paradaUnida.forEach(([ini, fim]) => {
+              deltaParada += Math.max(0, fim - ini);
             });
+            prodMs -= deltaParada;
+            paradaMsMaquina += deltaParada;
+
+            // Baixa eficiência
             if (safe(o.loweff_started_at)) {
               const leIni = toTime(o.loweff_started_at);
               const leFim = toTime(o.loweff_ended_at) || fimMs;
@@ -198,7 +319,7 @@ export default function Registro({ registroGrupos = [], openSet, toggleOpen }) {
             prodMs -= descontoFimDeSemana;
             totalProdMs += Math.max(0, prodMs);
           }
-        }
+        });
 
         // Tempo sem programação: entre finalized_at (se existir) e próxima started_at
         const finalizedMs = toTime(o.finalized_at);
@@ -213,6 +334,11 @@ export default function Registro({ registroGrupos = [], openSet, toggleOpen }) {
           }
         }
       });
+      // Limita o total de paradas ao tempo disponível do período
+      const horasPeriodoMs = (filtroEnd.getTime() - filtroStart.getTime());
+      if (paradaMsMaquina > horasPeriodoMs) paradaMsMaquina = horasPeriodoMs;
+      totalParadaMs += paradaMsMaquina;
+      machineParadaMs[m] = paradaMsMaquina;
     }
 
     const totalProdH = totalProdMs / 1000 / 60 / 60;
@@ -265,7 +391,7 @@ export default function Registro({ registroGrupos = [], openSet, toggleOpen }) {
     { key: 'produzindo', label: 'Produzindo', valueH: totalProdH, color: '#0a7' },
     { key: 'parada', label: 'Parada', valueH: totalParadaH, color: '#e74c3c' },
     { key: 'loweff', label: 'Baixa Eficiência', valueH: totalLowEffH, color: '#ffc107' },
-    { key: 'semprog', label: 'Sem Programação', valueH: totalSemProgH, color: '#3498db' },
+    { key: 'semprog', label: 'Sem Programação', valueH: totalSemProgH, color: '#3498db' }
   ], [totalProdH, totalParadaH, totalLowEffH, totalSemProgH, tick]);
 
   // === Toggle individual de máquina ===
@@ -306,6 +432,7 @@ export default function Registro({ registroGrupos = [], openSet, toggleOpen }) {
               onChange={e => setPeriodo(e.target.value)}
             >
               <option value="hoje">Hoje</option>
+              <option value="ontem">Ontem</option>
               <option value="semana">Esta Semana</option>
               <option value="mes">Este Mês</option>
               <option value="mespassado">Mês Passado</option>
@@ -336,39 +463,45 @@ export default function Registro({ registroGrupos = [], openSet, toggleOpen }) {
           </div>
         </div>
 
-{/* Relatório geral do período (substituir o bloco antigo) */}
-<div className="card" style={{ marginBottom: 16, background: '#f6f6f6', padding: 16 }}>
-  <div className="label" style={{ marginBottom: 8, textAlign: 'center' }}>Resumo do Período</div>
-  <div style={{ display: 'flex', gap: 24, alignItems: 'center', flexWrap: 'wrap' }}>
-    {/* Gráfico (esquerda) */}
-    <div style={{ minWidth: 260 }}>
-      <PieChartIndicadores
-        data={items.map(it => ({ label: it.label, value: it.valueH, color: it.color }))}
-        totalMaquinasParadas={totalMaquinasParadas}
-        hoveredIndex={hoveredIndicador}
-        setHoveredIndex={setHoveredIndicador}
-        totalDisponivelH={totalDisponivelH}
-      />
-    </div>
-    {/* Resumo lateral (direita) - informações em uma linha conforme solicitado */}
-    <div className="summary-side" style={{ flex: 1, minWidth: 320 }}>
-      {items.map((it, idx) => (
-        <div
-          key={it.key}
-          className="summary-item"
-          style={{ display: 'flex', gap: 8, alignItems: 'center', whiteSpace: 'nowrap', marginBottom: 6 }}
-          onMouseEnter={() => setHoveredIndicador(idx)}
-          onMouseLeave={() => setHoveredIndicador(null)}
-        >
-          <span className="swatch" style={{ background: it.color, width: 10, height: 10, display: 'inline-block', borderRadius: 2 }} />
-          <span style={{ color: it.color, fontWeight: 700 }}>{it.label}:</span>
-          <span>{formatHoursToHMS(it.valueH)}</span>
-          <span style={{ color: '#666' }}> - {formatPctFromHours(it.valueH)}</span>
-        </div>
-      ))}
-    </div>
-  </div>
-</div>
+        {/* Se filtro personalizado e datas não preenchidas, mostra mensagem amigável */}
+        {periodo === 'custom' && (!customStart || !customEnd) ? (
+          <div className="row muted" style={{ padding: '32px 0', textAlign: 'center', fontSize: 18, background: '#f6f6f6' }}>
+            Selecione as duas datas para visualizar os indicadores.
+          </div>
+        ) : (
+          <div className="card" style={{ marginBottom: 16, background: '#f6f6f6', padding: 16 }}>
+            <div className="label" style={{ marginBottom: 8, textAlign: 'center' }}>Resumo do Período</div>
+            <div style={{ display: 'flex', gap: 24, alignItems: 'center', flexWrap: 'wrap' }}>
+              {/* Gráfico (esquerda) */}
+              <div style={{ minWidth: 260 }}>
+                <PieChartIndicadores
+                  data={items.map(it => ({ label: it.label, value: it.valueH, color: it.color }))}
+                  totalMaquinasParadas={totalMaquinasParadas}
+                  hoveredIndex={hoveredIndicador}
+                  setHoveredIndex={setHoveredIndicador}
+                  totalDisponivelH={totalDisponivelH}
+                />
+              </div>
+              {/* Resumo lateral (direita) - informações em uma linha conforme solicitado */}
+              <div className="summary-side" style={{ flex: 1, minWidth: 320 }}>
+                {items.map((it, idx) => (
+                  <div
+                    key={it.key}
+                    className="summary-item"
+                    style={{ display: 'flex', gap: 8, alignItems: 'center', whiteSpace: 'nowrap', marginBottom: 6 }}
+                    onMouseEnter={() => setHoveredIndicador(idx)}
+                    onMouseLeave={() => setHoveredIndicador(null)}
+                  >
+                    <span className="swatch" style={{ background: it.color, width: 10, height: 10, display: 'inline-block', borderRadius: 2 }} />
+                    <span style={{ color: it.color, fontWeight: 700 }}>{it.label}:</span>
+                    <span>{formatHoursToHMS(it.valueH)}</span>
+                    <span style={{ color: '#666' }}> - {formatPctFromHours(it.valueH)}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Mensagem se não há registros */}
         {(!Array.isArray(gruposFiltrados) || gruposFiltrados.length === 0) ? (

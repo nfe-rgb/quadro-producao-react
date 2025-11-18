@@ -315,11 +315,27 @@ useEffect(() => {
       return
     }
 
-    // ➜ Saindo de PARADA
+    // 🟡 Saindo de PARADA (inclui BAIXA_EFICIENCIA)
     if (atual === 'PARADA' && targetStatus !== 'PARADA') {
-      const now=new Date()
+      const now = new Date();
+      // Se destino é BAIXA_EFICIENCIA, encerra parada aberta automaticamente
+      if (targetStatus === 'BAIXA_EFICIENCIA') {
+        (async () => {
+          const sel = await supabase.from('machine_stops').select('*')
+            .eq('order_id', ordem.id).is('resumed_at', null)
+            .order('started_at', { ascending:false })
+            .limit(1).maybeSingle();
+          if (sel.data) {
+            await supabase.from('machine_stops').update({ resumed_by: 'Sistema', resumed_at: now.toISOString() })
+              .eq('id', sel.data.id);
+          }
+        })();
+        setStatus(ordem, targetStatus);
+        return;
+      }
+      // Caso padrão: abre modal de retomada
       setResumeModal({ ordem, operador:'', data: now.toISOString().slice(0,10), hora: now.toTimeString().slice(0,5), targetStatus })
-      return
+      return;
     }
 
     setStatus(ordem, targetStatus)
@@ -412,22 +428,33 @@ useEffect(() => {
 
   // 🟡 Baixa Eficiência: confirmar início
   async function confirmarBaixaEf() {
-    const { ordem, operador, data, hora, obs } = lowEffModal
-    if (!operador || !data || !hora) { alert('Preencha operador, data e hora.'); return }
+    const { ordem, operador, data, hora, obs } = lowEffModal;
+    if (!operador || !data || !hora) { alert('Preencha operador, data e hora.'); return; }
 
-    const started_at = localDateTimeToISO(data, hora)
+    const started_at = localDateTimeToISO(data, hora);
+    // Se status anterior era PARADA, encerra parada aberta usando operador/hora do início da baixa eficiência
+    if (ordem.status === 'PARADA') {
+      const sel = await supabase.from('machine_stops').select('*')
+        .eq('order_id', ordem.id).is('resumed_at', null)
+        .order('started_at', { ascending:false })
+        .limit(1).maybeSingle();
+      if (sel.data) {
+        await supabase.from('machine_stops').update({ resumed_by: operador, resumed_at: started_at })
+          .eq('id', sel.data.id);
+      }
+    }
     const patch = {
       status: 'BAIXA_EFICIENCIA',
       loweff_started_at: started_at,
       loweff_ended_at: null,
       loweff_by: operador,
       loweff_notes: obs || null
-    }
-    patchOrdemLocal(ordem.id, patch)
-    const res = await supabase.from('orders').update(patch).eq('id', ordem.id).select('*').maybeSingle()
-    if (res.error) { alert('Erro ao registrar baixa eficiência: ' + res.error.message); return }
-    if (res.data) patchOrdemLocal(res.data.id, res.data)
-    setLowEffModal(null)
+    };
+    patchOrdemLocal(ordem.id, patch);
+    const res = await supabase.from('orders').update(patch).eq('id', ordem.id).select('*').maybeSingle();
+    if (res.error) { alert('Erro ao registrar baixa eficiência: ' + res.error.message); return; }
+    if (res.data) patchOrdemLocal(res.data.id, res.data);
+    setLowEffModal(null);
   }
 
   // 🟡 Baixa Eficiência: confirmar encerramento (retomar produção normal)
@@ -522,17 +549,28 @@ useEffect(() => {
 
     // 4) enviar a atual para o fim e registrar interrupção
     {
-      const finalPos = novaFilaRestante.length + 1
-            const agoraISO = (data && hora)
+      const finalPos = novaFilaRestante.length + 1;
+      const agoraISO = (data && hora)
         ? localDateTimeToISO(data, hora)
-        : new Date().toISOString()
+        : new Date().toISOString();
+      // Se status atual é PARADA, encerra parada aberta
+      if (ativa.status === 'PARADA') {
+        const sel = await supabase.from('machine_stops').select('*')
+          .eq('order_id', ativa.id).is('resumed_at', null)
+          .order('started_at', { ascending:false })
+          .limit(1).maybeSingle();
+        if (sel.data) {
+          await supabase.from('machine_stops').update({ resumed_by: operador || 'Sistema', resumed_at: agoraISO })
+            .eq('id', sel.data.id);
+        }
+      }
       const r = await supabase.from('orders').update({
         pos: finalPos,
         status: 'AGUARDANDO',
         interrupted_at: agoraISO,
         interrupted_by: operador || 'Sistema',
-      }).eq('id', ativa.id)
-      if (r.error) { alert('Erro ao enviar a atual para o fim da fila: ' + r.error.message); return }
+      }).eq('id', ativa.id);
+      if (r.error) { alert('Erro ao enviar a atual para o fim da fila: ' + r.error.message); return; }
     }
 
     // 5) atualizar estado local
