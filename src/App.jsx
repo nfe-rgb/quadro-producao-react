@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from './lib/supabaseClient.js'
 import { DndContext, useSensor, useSensors, MouseSensor, TouchSensor } from '@dnd-kit/core'
+import { Routes, Route, useLocation } from 'react-router-dom';
 
 import { MAQUINAS, STATUS, MOTIVOS_PARADA, ADMIN_EMAILS } from './lib/constants'
 import CadastroItens from './abas/CadastroItens'
@@ -14,6 +15,7 @@ import NovaOrdem from './abas/NovaOrdem'
 import Registro from './abas/Registro'
 import Apontamento from './feature/Apontamento.jsx'
 import PainelTV from "./routes/PainelTV";
+import Pet01 from './routes/Pet01';
 
 export default function App(){
   const [tab,setTab] = useState('painel')
@@ -645,8 +647,15 @@ const lastFinalizadoPorMaquina = useMemo(() => {
   function toggleOpen(id){ setOpenSet(prev=>{ const n=new Set(prev); if(n.has(id)) n.delete(id); else n.add(id); return n }) }
 
   // ========================= Render =========================
+  // Se rota for /pet-01, renderiza via Route abaixo
+
   return (
     <div className="app">
+      {/* Roteamento tablet: /pet-01 */}
+      <Routes>
+        <Route path="/pet-01" element={<Pet01 registroGrupos={registroGrupos} />} />
+      </Routes>
+
       <div className="brand-bar">
         <img src="/Logotipo Savanti.png" alt="Savanti Plásticos" className="brand-logo"
              onError={(e)=>{ e.currentTarget.src='/savanti-logo.png'; }}/>
@@ -868,6 +877,13 @@ const lastFinalizadoPorMaquina = useMemo(() => {
           </div>
         )}
       </Modal>
+      {/* === Botão + Modal de Apontamento (bipagem) === */}
+      <Apontamento
+        tab={tab}
+        ordens={ordens}
+       ativosPorMaquina={ativosPorMaquina}
+        finalizar={finalizar}
+      />
     </div>
   )
 }
