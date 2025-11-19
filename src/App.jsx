@@ -13,9 +13,7 @@ import Painel from './abas/Painel'
 import Lista from './abas/Lista'
 import NovaOrdem from './abas/NovaOrdem'
 import Registro from './abas/Registro'
-import Apontamento from './feature/Apontamento.jsx'
-import PainelTV from "./routes/PainelTV";
-import Pet01 from './routes/Pet01';
+import Pet01 from './pages/Pet01'
 
 export default function App(){
   // ...existing states...
@@ -652,7 +650,18 @@ const lastFinalizadoPorMaquina = useMemo(() => {
 
   // rota oculta: /pet-01 — renderiza diretamente a tela Pet01 (registroGrupos já existe aqui)
   if (location && location.pathname === '/pet-01') {
-    return <Pet01 registroGrupos={registroGrupos} />;
+    return (
+     <Pet01
+      registroGrupos={registroGrupos}
+      onStatusChange={onStatusChange}
+      setStartModal={setStartModal}
+      setStopModal={setStopModal}
+      setLowEffModal={setLowEffModal}
+      setResumeModal={setResumeModal}
+      setFinalizando={setFinalizando}
+      setEditando={setEditando}
+     />
+    );
   }
 
   const [openSet, setOpenSet] = useState(()=>new Set())
