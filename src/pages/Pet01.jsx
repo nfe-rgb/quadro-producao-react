@@ -1,0 +1,483 @@
+// =======================
+//  PET01.jsx — PARTE 1/3
+// =======================
+
+import { useEffect, useMemo, useRef, useState } from "react";
+import { supabase } from "../lib/supabaseClient";
+import Etiqueta from "../components/Etiqueta";
+
+// ⭐ Importa o mesmo statusClass usado no painel
+import { statusClass } from "../lib/utils";
+
+import "../styles/Pet01.css";
+
+export default function Pet01({
+  registroGrupos,
+  paradas,
+  tick,
+  onStatusChange,
+  setStartModal,
+  setStopModal,
+  setLowEffModal,
+  setResumeModal,
+  setFinalizando,
+}) {
+
+  // ===== ESTADOS =====
+  const [ativa, setAtiva] = useState(null);
+  const [proximo, setProximo] = useState(null);
+
+  const [scans, setScans] = useState([]);
+
+  const [showBip, setShowBip] = useState(false);
+  const [showRefugo, setShowRefugo] = useState(false);
+
+  const bipRef = useRef(null);
+  const [bipOperator, setBipOperator] = useState("");
+
+  const [refugoForm, setRefugoForm] = useState({
+    operador: "",
+    turno: "",
+    quantidade: "",
+    motivo: "Rebarba",
+  });
+
+  // --------------------------
+  // Motivos padrão de refugo
+  // --------------------------
+  const REFUGO_MOTIVOS = [
+    "Rebarba",
+    "Bolha",
+    "Contaminação ou Caídas no Chão",
+    "Ponto de Injeção Alto ou Deslocado",
+    "Sujas de Óleo",
+    "Fora de Cor",
+    "Parede Fraca",
+    "Fundo/Ombro Deformado",
+    "Peças falhadas",
+    "Peças Furadas",
+    "Fiapo",
+    "Queimadas",
+    "Manchadas",
+  ];
+
+  // ===========================
+  //  CAPTURAR ORDEM ATIVA P1
+  // ===========================
+  useEffect(() => {
+    if (!registroGrupos) return;
+
+    const ordens = registroGrupos
+      .map((g) => g.ordem)
+      .filter((o) => o?.machine_id === "P1" && !o.finalized)
+      .sort((a, b) => (a.pos ?? 999) - (b.pos ?? 999));
+
+    setAtiva(ordens[0] || null);
+    setProximo(ordens[1] || null);
+  }, [registroGrupos]);
+
+  // ===========================
+  //  BIPAGENS
+  // ===========================
+  async function loadScans(id) {
+    if (!id) {
+      setScans([]);
+      return;
+    }
+    const { data } = await supabase
+      .from("production_scans")
+      .select("*")
+      .eq("order_id", id)
+      .order("scanned_box", { ascending: true });
+
+    setScans(data || []);
+  }
+
+  useEffect(() => {
+    if (ativa?.id) loadScans(ativa.id);
+  }, [ativa?.id]);
+
+  const lidas = scans.length;
+  const saldo = ativa ? Math.max(0, Number(ativa.boxes) - lidas) : 0;
+
+  // ========================================
+  //  CRONÔMETRO — PARADA E BAIXA EFICIÊNCIA
+  // ========================================
+  const paradaAberta = paradas?.find(
+    (p) => p.order_id === ativa?.id && !p.resumed_at
+  );
+
+  const tempoParada = useMemo(() => {
+    if (!paradaAberta) return null;
+    const _ = tick;
+    const diff = Math.floor(
+      (Date.now() - new Date(paradaAberta.started_at).getTime()) / 1000
+    );
+    const hh = String(Math.floor(diff / 3600)).padStart(2, "0");
+    const mm = String(Math.floor((diff % 3600) / 60)).padStart(2, "0");
+    const ss = String(diff % 60).padStart(2, "0");
+    return `${hh}:${mm}:${ss}`;
+  }, [paradaAberta, tick]);
+
+
+  const tempoLow = useMemo(() => {
+    if (!ativa) return null;
+    if (ativa.status !== "BAIXA_EFICIENCIA") return null;
+    if (!ativa.loweff_started_at) return null;
+
+    const _ = tick;
+    const diff = Math.floor(
+      (Date.now() - new Date(ativa.loweff_started_at).getTime()) / 1000
+    );
+    const hh = String(Math.floor(diff / 3600)).padStart(2, "0");
+    const mm = String(Math.floor((diff % 3600) / 60)).padStart(2, "0");
+    const ss = String(diff % 60).padStart(2, "0");
+    return `${hh}:${mm}:${ss}`;
+  }, [ativa, tick]);
+
+  // ===========================
+  //  Função para mapear status para classes locais (borda esquerda)
+  // ===========================
+  const pet01StatusClass = (s) => {
+    if (!s) return "status-produzindo";
+    const st = String(s).toUpperCase();
+    if (st === "PARADA") return "status-parada";
+    if (st.includes("BAIXA")) return "status-baixa";
+    if (st === "PRODUZINDO") return "status-produzindo";
+    // inclui AGUARDANDO como produzindo visualmente no tablet (ajuste se quiser diferente)
+    if (st === "AGUARDANDO") return "status-produzindo";
+    return "status-produzindo";
+  };
+
+  // ===========================
+  //  BIPAGEM (função usada pelo modal)
+  //  - já implementada na parte 1 mas repetimos aqui para ligar tudo
+  // ===========================
+  async function bipar(cod) {
+    if (!ativa) return alert("Nenhuma ordem atual.");
+    if (!bipOperator || !bipOperator.trim()) return alert("Informe o operador.");
+
+    const reg = /^OS\s+(\d+)\s*-\s*(\d{3})$/i;
+    const m = cod?.trim()?.match(reg);
+    if (!m) return alert("Formato inválido: OS 753 - 001");
+
+    const op = m[1];
+    const caixa = Number(m[2]);
+
+    if (String(op) !== String(ativa.code)) {
+      return alert(`Código não pertence à O.P ${ativa.code}`);
+    }
+
+    if (caixa < 1 || caixa > Number(ativa.boxes)) {
+      return alert("Caixa fora do intervalo.");
+    }
+
+    // verifica duplicidade
+    const { data: dup, error: dupErr } = await supabase
+      .from("production_scans")
+      .select("id")
+      .eq("order_id", ativa.id)
+      .eq("scanned_box", caixa)
+      .maybeSingle();
+
+    if (dupErr) { console.error(dupErr); return alert("Erro ao verificar bipagem."); }
+    if (dup) return alert("Esta caixa já foi bipada.");
+
+    // insere no banco
+    const { error } = await supabase.from("production_scans").insert([{
+      order_id: ativa.id,
+      machine_id: "P1",
+      scanned_box: caixa,
+      code: cod.trim(),
+      operator: bipOperator.trim(),
+    }]);
+
+    if (error) {
+      console.error(error);
+      return alert("Erro ao registrar bipagem.");
+    }
+
+    // atualiza localmente
+    await loadScans(ativa.id);
+    setShowBip(false);
+    setBipOperator("");
+
+    // Se zerou -> abre finalização
+    if (saldo - 1 <= 0) {
+      // chama finalização via App
+      setFinalizando && setFinalizando(ativa);
+    }
+  }
+
+  // ===========================
+  //  Registrar refugo
+  // ===========================
+  async function enviarRefugo(e) {
+    if (e && e.preventDefault) e.preventDefault();
+    if (!ativa) return alert("Nenhuma ordem atual.");
+
+    const { operador, turno, quantidade, motivo } = refugoForm;
+    if (!operador?.trim() || !turno?.trim() || !quantidade) return alert("Preencha os campos obrigatórios.");
+
+    const payload = {
+      order_id: ativa.id,
+      machine_id: "P1",
+      operator: operador.trim(),
+      shift: turno.trim(),
+      qty: Number(quantidade),
+      reason: motivo,
+    };
+
+    const { error } = await supabase.from("scrap_logs").insert([payload]);
+    if (error) { console.error(error); return alert("Erro ao registrar refugo."); }
+
+    setShowRefugo(false);
+    setRefugoForm({ operador: "", turno: "", quantidade: "", motivo: REFUGO_MOTIVOS[0] });
+  }
+
+  // ===========================
+  //  Tratamento de alteração de status (atualização otimista)
+  //  - atualiza localmente para efeito imediato
+  //  - chama onStatusChange (vindo do App) para persistir e abrir modais se necessários
+  // ===========================
+  function handleStatusChange(targetStatus) {
+    if (!ativa) return;
+    const before = ativa.status;
+
+    // validações locais que o App fazia (copiadas do App.jsx behaviours)
+    // Se já iniciou e tentar voltar para AGUARDANDO => bloqueia
+    const jaIniciouLocal = !!ativa.started_at;
+    if (jaIniciouLocal && targetStatus === "AGUARDANDO") {
+      alert('Após iniciar a produção, não é permitido voltar para "Aguardando".');
+      return;
+    }
+
+    // Mantém comportamento do painel: se for entrar em BAIXA_EFICIENCIA, abre modal local (se o App espera)
+    if (targetStatus === "BAIXA_EFICIENCIA" && before !== "BAIXA_EFICIENCIA") {
+      const now = new Date();
+      setLowEffModal && setLowEffModal({
+        ordem: ativa,
+        operador: "",
+        obs: "",
+        data: now.toISOString().slice(0,10),
+        hora: now.toTimeString().slice(0,5),
+      });
+      return;
+    }
+
+    // Se for PARADA e não vem de BAIXA_EFICIENCIA -> abre modal de parada
+    if (targetStatus === "PARADA" && before !== "PARADA") {
+      const now = new Date();
+      setStopModal && setStopModal({
+        ordem: ativa,
+        operador: "",
+        motivo: "Parada Técnica",
+        obs: "",
+        data: now.toISOString().slice(0,10),
+        hora: now.toTimeString().slice(0,5),
+      });
+      return;
+    }
+
+    // Para saída de PARADA -> abre resumeModal
+    if (before === "PARADA" && targetStatus !== "PARADA") {
+      const now = new Date();
+      setResumeModal && setResumeModal({
+        ordem: ativa,
+        operador: "",
+        data: now.toISOString().slice(0,10),
+        hora: now.toTimeString().slice(0,5),
+        targetStatus,
+      });
+      return;
+    }
+
+    // Caso padrão: atualiza local otimisticamente e chama handler do App
+    setAtiva(prev => prev ? { ...prev, status: targetStatus } : prev);
+    // chama o onStatusChange que está definido no App.jsx
+    try {
+      onStatusChange && onStatusChange(ativa, targetStatus);
+    } catch (err) {
+      console.error('Erro ao chamar onStatusChange', err);
+      // reverte se falhar (não muito provável, pois onStatusChange faz alert)
+      setAtiva(prev => prev ? { ...prev, status: before } : prev);
+    }
+  }
+
+  // ============================
+  //  PARTE 3/3 — RENDER / JSX
+  // ============================
+  return (
+    <div className="pet01-wrapper">
+
+      <h1 className="pet01-title">Apontamento — Máquina P1</h1>
+
+      {/* CARD PRINCIPAL: aplica classe local + aplica class do painel (statusClass) ao conteúdo */}
+      <div className={`pet01-card ${pet01StatusClass(ativa?.status)}`}>
+
+        {/* header: timer (esquerda) e O.P (direita) */}
+        <div className="pet01-card-header">
+          <div className="left">
+            {ativa?.status === "PARADA" && tempoParada && (
+              <span className="pet01-timer red">{tempoParada}</span>
+            )}
+            {ativa?.status === "BAIXA_EFICIENCIA" && tempoLow && (
+              <span className="pet01-timer yellow">{tempoLow}</span>
+            )}
+          </div>
+
+          <div className="right">
+            <div className="op-inline">O.P - {ativa?.code}</div>
+          </div>
+        </div>
+
+        {/* Usa a mesma classe que o Painel usa para garantir cor/estilo idênticos */}
+        <div className={statusClass(ativa?.status)}>
+          <Etiqueta o={ativa} variant="painel" saldoCaixas={saldo} lidasCaixas={lidas} />
+        </div>
+
+        {/* Motivo de parada logo abaixo se existir */}
+        {paradaAberta?.reason && ativa?.status === "PARADA" && (
+          <div className="stop-reason-below">{paradaAberta.reason}</div>
+        )}
+
+        <div className="sep" style={{ marginTop: 12 }} />
+
+        {/* Situação: usa handleStatusChange que abre modais conforme regra do App */}
+        <div className="pet01-field" style={{ marginTop: 10 }}>
+          <label style={{ minWidth: 90 }}>Situação</label>
+          <select
+            value={ativa?.status || "AGUARDANDO"}
+            onChange={(e) => handleStatusChange(e.target.value)}
+          >
+            {/* Se já iniciou, Painel evita voltar para AGUARDANDO; o App faz validação também */}
+            <option value="PRODUZINDO">Produzindo</option>
+            <option value="BAIXA_EFICIENCIA">Baixa Eficiência</option>
+            <option value="PARADA">Parada</option>
+          </select>
+
+          {/* botão Iniciar aparece somente quando AGUARDANDO */}
+          <div style={{ marginLeft: 12 }}>
+            {ativa?.status === "AGUARDANDO" && (
+              <button
+                className="btn small primary"
+                onClick={() =>
+                  setStartModal &&
+                  setStartModal({
+                    ordem: ativa,
+                    operador: "",
+                    data: new Date().toISOString().slice(0, 10),
+                    hora: new Date().toTimeString().slice(0, 5),
+                  })
+                }
+              >
+                Iniciar Produção
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* BOTÕES */}
+      <div className="pet01-buttons">
+        <button
+          className="pet01-btn green"
+          onClick={() => {
+            setShowBip(true);
+            setTimeout(() => bipRef.current?.focus?.(), 120);
+          }}
+        >
+          Apontar Produção
+        </button>
+
+        <button
+          className="pet01-btn orange"
+          onClick={() => {
+            setShowRefugo(true);
+          }}
+        >
+          Apontar Refugo
+        </button>
+      </div>
+
+      {/* PRÓXIMO ITEM */}
+      <div className="pet01-next">
+        <h2>Próximo Item</h2>
+        {proximo ? (
+          <div className="pet01-next-grid">
+            <div><b>Cliente:</b> {proximo.customer}</div>
+            <div><b>Produto:</b> {proximo.product}</div>
+            <div><b>Cor:</b> {proximo.color}</div>
+            <div><b>Qtd:</b> {proximo.qty}</div>
+            <div><b>Volumes:</b> {proximo.boxes}</div>
+          </div>
+        ) : (
+          <div className="pet01-no-next">Nenhum item na fila</div>
+        )}
+      </div>
+
+      {/* MODAL — BIPAGEM (CENTRALIZADO) */}
+      {showBip && (
+        <div className="pet01-modal-bg" role="dialog" aria-modal>
+          <div className="pet01-modal">
+            <h3>Apontamento por Bipagem</h3>
+
+            <label>Operador *</label>
+            <input
+              className="input"
+              value={bipOperator}
+              onChange={(e) => setBipOperator(e.target.value)}
+              placeholder="Nome do operador"
+            />
+
+            <label style={{ marginTop: 8 }}>Código (OS 753 - 001)</label>
+            <input
+              ref={bipRef}
+              className="input"
+              placeholder="OS 753 - 001"
+              onKeyDown={(e) => {
+                if (e.key === "Enter") bipar(e.target.value || bipRef.current?.value);
+              }}
+            />
+
+            <div className="pet01-modal-buttons" style={{ marginTop: 12 }}>
+              <button className="gray" onClick={() => { setShowBip(false); setBipOperator(""); }}>Cancelar</button>
+              <button className="green" onClick={() => bipar(bipRef.current?.value)}>Registrar</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL — REFUGO (CENTRALIZADO) */}
+      {showRefugo && (
+        <div className="pet01-modal-bg" role="dialog" aria-modal>
+          <div className="pet01-modal">
+            <h3>Apontar Refugo</h3>
+
+            <form onSubmit={enviarRefugo}>
+              <label>Operador *</label>
+              <input className="input" value={refugoForm.operador} onChange={e => setRefugoForm(f => ({ ...f, operador: e.target.value }))} />
+
+              <label>Turno *</label>
+              <input className="input" value={refugoForm.turno} onChange={e => setRefugoForm(f => ({ ...f, turno: e.target.value }))} />
+
+              <label>Quantidade *</label>
+              <input className="input" type="number" value={refugoForm.quantidade} onChange={e => setRefugoForm(f => ({ ...f, quantidade: e.target.value }))} />
+
+              <label>Motivo *</label>
+              <select className="input" value={refugoForm.motivo} onChange={e => setRefugoForm(f => ({ ...f, motivo: e.target.value }))}>
+                {REFUGO_MOTIVOS.map(m => <option key={m} value={m}>{m}</option>)}
+              </select>
+
+              <div className="pet01-modal-buttons" style={{ marginTop: 12 }}>
+                <button type="button" className="gray" onClick={() => setShowRefugo(false)}>Cancelar</button>
+                <button type="submit" className="orange">Registrar</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
