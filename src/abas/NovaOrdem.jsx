@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '../lib/supabaseClient.js'
 import { MAQUINAS } from '../lib/constants'
 
-export default function NovaOrdem({ form, setForm, criarOrdem }) {
+export default function NovaOrdem({ form, setForm, criarOrdem, setTab }) {
   // ====== Busca de itens ligada ao campo "Produto" ======
   const [qProd, setQProd] = useState(form.product || '') // espelho do campo Produto
   const [suggestions, setSuggestions] = useState([])
@@ -133,7 +133,7 @@ export default function NovaOrdem({ form, setForm, criarOrdem }) {
               className="input"
               value={form.code}
               onChange={e=>setForm(f=>({...f, code:e.target.value}))}
-              placeholder="Ex.: OP-2025-00123"
+              placeholder="Ex.: 1015"
             />
           </div>
 
@@ -172,7 +172,7 @@ export default function NovaOrdem({ form, setForm, criarOrdem }) {
                 setPickedItem(null) // reseta até confirmar
               }}
               onFocus={() => { if (suggestions.length) setOpenList(true) }}
-              placeholder='Ex.: "500009 - FRASCO PET 200 ML" ou só "500009" ou "FRASCO"'
+              placeholder='Ex.: "500009 - FRASCO PET 200 ML RT R24/410"'
               autoComplete="off"
             />
             {openList && (
@@ -214,13 +214,13 @@ export default function NovaOrdem({ form, setForm, criarOrdem }) {
               className="input"
               value={form.color}
               onChange={e=>setForm(f=>({...f, color:e.target.value}))}
-              placeholder="Preenche ao escolher produto — editável"
+              placeholder="Ex.: Natural, Azul, Vermelho"
             />
           </div>
 
           {/* Restante dos campos */}
           <div><div className="label">Quantidade</div><input className="input" value={form.qty} onChange={e=>setForm(f=>({...f, qty:e.target.value}))}/></div>
-          <div><div className="label">Caixas</div><input className="input" value={form.boxes} onChange={e=>setForm(f=>({...f, boxes:e.target.value}))}/></div>
+          <div><div className="label">Volumes</div><input className="input" value={form.boxes} onChange={e=>setForm(f=>({...f, boxes:e.target.value}))}/></div>
           <div><div className="label">Padrão</div><input className="input" value={form.standard} onChange={e=>setForm(f=>({...f, standard:e.target.value}))}/></div>
           <div><div className="label">Prazo de Entrega</div><input type="date" className="input" value={form.due_date} onChange={e=>setForm(f=>({...f, due_date:e.target.value}))}/></div>
           <div><div className="label">Observações</div><input className="input" value={form.notes} onChange={e=>setForm(f=>({...f, notes:e.target.value}))}/></div>
@@ -236,7 +236,7 @@ export default function NovaOrdem({ form, setForm, criarOrdem }) {
         )}
 
         <div className="sep"></div>
-        <button className="btn primary" onClick={criarOrdem}>Adicionar</button>
+        <button className="btn primary" onClick={() => criarOrdem(form, setForm, setTab)}>Adicionar</button>
       </div>
     </div>
   )

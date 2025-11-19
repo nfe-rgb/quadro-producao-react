@@ -29,7 +29,7 @@ export default function Etiqueta({ o, variant = 'painel', saldoCaixas, lidasCaix
 
         {o.boxes && (
           <>
-            <div><b>Caixas:</b> {o.boxes}</div>
+            <div><b>Volumes:</b> {o.boxes}</div>
             {(typeof lidasCaixas === 'number' || typeof saldoCaixas === 'number') && (
               <div className="pill-row">
                 {typeof lidasCaixas === 'number' && (
@@ -67,7 +67,7 @@ export default function Etiqueta({ o, variant = 'painel', saldoCaixas, lidasCaix
 
       {o.boxes && (
         <>
-          <div><b>Caixas:</b> {o.boxes}</div>
+          <div><b>Volumes:</b> {o.boxes}</div>
           {(typeof lidasCaixas === 'number' || typeof saldoCaixas === 'number') && (
             <div className="pill-row">
               {typeof lidasCaixas === 'number' && (

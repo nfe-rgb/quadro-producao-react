@@ -5,6 +5,7 @@ import Etiqueta from '../components/Etiqueta';
 import Modal from '../components/Modal';
 import { STATUS } from '../lib/constants';
 import { statusClass } from '../lib/utils';
+import '../styles/ApontamentoTablet.css';
 
 export default function ApontamentoTablet({ registroGrupos }) {
   // Filtra apenas os itens da máquina P1
