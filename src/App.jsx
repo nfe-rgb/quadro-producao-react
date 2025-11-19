@@ -46,6 +46,19 @@ export default function App(){
     confirmData, setConfirmData,
   } = useOrders()
 
+  // controla quais grupos do Registro estão expandidos (Set de ids)
+const [openSet, setOpenSet] = useState(() => new Set())
+
+function toggleOpen(id) {
+  setOpenSet(prev => {
+    const n = new Set(prev)
+    if (n.has(id)) n.delete(id)
+    else n.add(id)
+    return n
+  })
+}
+
+
   // ======= Form local (passado para NovaOrdem) - evita `form` undefined =======
   const [form, setForm] = useState({
     code:'', customer:'', product:'', color:'', qty:'', boxes:'', standard:'', due_date:'', notes:'', machine_id:'P1'
@@ -201,7 +214,11 @@ export default function App(){
 
       {/* Registro */}
       {tab === 'registro' && (
-        <Registro registroGrupos={registroGrupos} />
+      <Registro
+       registroGrupos={registroGrupos}
+       openSet={openSet}
+       toggleOpen={toggleOpen}
+       />
       )}
 
       {/* Modais */}
