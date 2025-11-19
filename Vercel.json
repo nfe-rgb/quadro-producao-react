@@ -1,5 +1,10 @@
 {
-  "rewrites": [
+  "builds": [
+    { "src": "index.html", "use": "@vercel/static-build" }
+  ],
+  "routes": [
+    { "handle": "filesystem" },
+    { "source": "/api/(.*)", "destination": "/api/$1" },
     { "source": "/(.*)", "destination": "/index.html" }
   ]
 }
