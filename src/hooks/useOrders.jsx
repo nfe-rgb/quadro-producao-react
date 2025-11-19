@@ -388,20 +388,46 @@ export default function useOrders() {
     return map
   }, [finalizadas])
 
-  const registroGrupos = useMemo(()=>{
-    const byId = new Map()
-    const push = (o)=>{ if(!o) return; byId.set(o.id, { ...o }) }
-    finalizadas.forEach(push)
-    ordens.forEach(o=>{ if(o.started_at) push(o) })
-    const stopsByOrder = paradas.reduce((acc,st)=>{ (acc[st.order_id] ||= []).push(st); return acc },{})
-    const arr = Array.from(byId.values())
-    arr.sort((a,b)=>{
-      const ta = new Date(a.finalized_at || a.restarted_at || a.interrupted_at || a.started_at || a.created_at || 0).getTime()
-      const tb = new Date(b.finalized_at || b.restarted_at || b.interrupted_at || b.started_at || b.created_at || 0).getTime()
-      return tb - ta
-    })
-    return arr.map(o=>({ ordem:o, stops:(stopsByOrder[o.id]||[]).sort((a,b)=>new Date(a.started_at)-new Date(b.started_at)) }))
-  },[finalizadas, ordens, paradas])
+  const registroGrupos = useMemo(() => {
+  const byId = new Map();
+
+  const push = (o) => {
+    if (!o || !o.id) return;  // segurança
+    byId.set(o.id, { ...o });
+  };
+
+  finalizadas.forEach(push);
+
+  // somente ordens realmente iniciadas e com ID válido
+  ordens.forEach(o => {
+    if (o?.id && o.started_at) push(o);
+  });
+
+  const stopsByOrder = paradas.reduce((acc, st) => {
+    if (!st?.order_id) return acc;
+    (acc[st.order_id] ||= []).push(st);
+    return acc;
+  }, {});
+
+  const arr = Array.from(byId.values());
+
+  arr.sort((a, b) => {
+    const ta = new Date(
+      a.finalized_at || a.restarted_at || a.interrupted_at || a.started_at || a.created_at || 0
+    ).getTime();
+    const tb = new Date(
+      b.finalized_at || b.restarted_at || b.interrupted_at || b.started_at || b.created_at || 0
+    ).getTime();
+    return tb - ta;
+  });
+
+  return arr.map(o => ({
+    ordem: o,
+    stops: (stopsByOrder[o.id] || []).sort(
+      (a, b) => new Date(a.started_at) - new Date(b.started_at)
+    ),
+  }));
+}, [finalizadas, ordens, paradas]);
 
   return {
     ordens, finalizadas, paradas, tick,
