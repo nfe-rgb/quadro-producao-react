@@ -13,6 +13,7 @@ import "../styles/Pet01.css";
 
 export default function Pet01({
   registroGrupos,
+  ativosP1,
   paradas,
   tick,
   onStatusChange,
@@ -65,16 +66,10 @@ export default function Pet01({
   //  CAPTURAR ORDEM ATIVA P1
   // ===========================
   useEffect(() => {
-    if (!registroGrupos) return;
-
-    const ordens = registroGrupos
-      .map((g) => g.ordem)
-      .filter((o) => o?.machine_id === "P1" && !o.finalized)
-      .sort((a, b) => (a.pos ?? 999) - (b.pos ?? 999));
-
-    setAtiva(ordens[0] || null);
-    setProximo(ordens[1] || null);
-  }, [registroGrupos]);
+    if (!ativosP1) return;
+    setAtiva(ativosP1[0] || null);
+    setProximo(ativosP1[1] || null);
+  }, [ativosP1]);
 
   // ===========================
   //  BIPAGENS
@@ -245,14 +240,12 @@ export default function Pet01({
     const before = ativa.status;
 
     // validações locais que o App fazia (copiadas do App.jsx behaviours)
-    // Se já iniciou e tentar voltar para AGUARDANDO => bloqueia
     const jaIniciouLocal = !!ativa.started_at;
     if (jaIniciouLocal && targetStatus === "AGUARDANDO") {
       alert('Após iniciar a produção, não é permitido voltar para "Aguardando".');
       return;
     }
 
-    // Mantém comportamento do painel: se for entrar em BAIXA_EFICIENCIA, abre modal local (se o App espera)
     if (targetStatus === "BAIXA_EFICIENCIA" && before !== "BAIXA_EFICIENCIA") {
       const now = new Date();
       setLowEffModal && setLowEffModal({
@@ -265,7 +258,6 @@ export default function Pet01({
       return;
     }
 
-    // Se for PARADA e não vem de BAIXA_EFICIENCIA -> abre modal de parada
     if (targetStatus === "PARADA" && before !== "PARADA") {
       const now = new Date();
       setStopModal && setStopModal({
@@ -279,7 +271,6 @@ export default function Pet01({
       return;
     }
 
-    // Para saída de PARADA -> abre resumeModal
     if (before === "PARADA" && targetStatus !== "PARADA") {
       const now = new Date();
       setResumeModal && setResumeModal({
@@ -292,15 +283,11 @@ export default function Pet01({
       return;
     }
 
-    // Caso padrão: atualiza local otimisticamente e chama handler do App
-    setAtiva(prev => prev ? { ...prev, status: targetStatus } : prev);
-    // chama o onStatusChange que está definido no App.jsx
+    // Chama apenas o handler do App, sem atualizar localmente
     try {
       onStatusChange && onStatusChange(ativa, targetStatus);
     } catch (err) {
       console.error('Erro ao chamar onStatusChange', err);
-      // reverte se falhar (não muito provável, pois onStatusChange faz alert)
-      setAtiva(prev => prev ? { ...prev, status: before } : prev);
     }
   }
 
@@ -311,6 +298,28 @@ export default function Pet01({
     <div className="pet01-wrapper">
 
       <h1 className="pet01-title">Apontamento — Máquina P1</h1>
+
+      {/* BOTÕES — agora logo abaixo do título */}
+      <div className="pet01-buttons" style={{marginBottom: 16}}>
+        <button
+          className="pet01-btn green"
+          onClick={() => {
+            setShowBip(true);
+            setTimeout(() => bipRef.current?.focus?.(), 120);
+          }}
+        >
+          Apontar Produção
+        </button>
+
+        <button
+          className="pet01-btn orange"
+          onClick={() => {
+            setShowRefugo(true);
+          }}
+        >
+          Apontar Refugo
+        </button>
+      </div>
 
       {/* CARD PRINCIPAL: aplica classe local + aplica class do painel (statusClass) ao conteúdo */}
       <div className={`pet01-card ${pet01StatusClass(ativa?.status)}`}>
@@ -378,38 +387,13 @@ export default function Pet01({
         </div>
       </div>
 
-      {/* BOTÕES */}
-      <div className="pet01-buttons">
-        <button
-          className="pet01-btn green"
-          onClick={() => {
-            setShowBip(true);
-            setTimeout(() => bipRef.current?.focus?.(), 120);
-          }}
-        >
-          Apontar Produção
-        </button>
-
-        <button
-          className="pet01-btn orange"
-          onClick={() => {
-            setShowRefugo(true);
-          }}
-        >
-          Apontar Refugo
-        </button>
-      </div>
 
       {/* PRÓXIMO ITEM */}
       <div className="pet01-next">
         <h2>Próximo Item</h2>
         {proximo ? (
-          <div className="pet01-next-grid">
-            <div><b>Cliente:</b> {proximo.customer}</div>
-            <div><b>Produto:</b> {proximo.product}</div>
-            <div><b>Cor:</b> {proximo.color}</div>
-            <div><b>Qtd:</b> {proximo.qty}</div>
-            <div><b>Volumes:</b> {proximo.boxes}</div>
+          <div style={{ background: '#fff', borderRadius: 8, boxShadow: '0 1px 4px #0001', padding: 12, marginTop: 8 }}>
+            <Etiqueta o={proximo} variant="fila" saldoCaixas={null} lidasCaixas={null} />
           </div>
         ) : (
           <div className="pet01-no-next">Nenhum item na fila</div>

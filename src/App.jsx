@@ -650,17 +650,20 @@ const lastFinalizadoPorMaquina = useMemo(() => {
 
   // rota oculta: /pet-01 — renderiza diretamente a tela Pet01 (registroGrupos já existe aqui)
   if (location && location.pathname === '/pet-01') {
+    // Passa ativosP1 para garantir a ordem correta
+    const ativosP1 = ordens.filter(o => o.machine_id === 'P1' && !o.finalized).sort((a,b)=>(a.pos??999)-(b.pos??999));
     return (
-     <Pet01
-      registroGrupos={registroGrupos}
-      onStatusChange={onStatusChange}
-      setStartModal={setStartModal}
-      setStopModal={setStopModal}
-      setLowEffModal={setLowEffModal}
-      setResumeModal={setResumeModal}
-      setFinalizando={setFinalizando}
-      setEditando={setEditando}
-     />
+      <Pet01
+        registroGrupos={registroGrupos}
+        ativosP1={ativosP1}
+        onStatusChange={onStatusChange}
+        setStartModal={setStartModal}
+        setStopModal={setStopModal}
+        setLowEffModal={setLowEffModal}
+        setResumeModal={setResumeModal}
+        setFinalizando={setFinalizando}
+        setEditando={setEditando}
+      />
     );
   }
 
