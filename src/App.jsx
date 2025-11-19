@@ -22,12 +22,6 @@ export default function App(){
 
   // Derivados
 
-  const location = useLocation();
-
-  // ========================= Render =========================
-  if (location.pathname === '/pet-01') {
-    return <Pet01 registroGrupos={registroGrupos} />;
-  }
   const [tab,setTab] = useState('painel')
   const mouseSensor = useSensor(MouseSensor, { activationConstraint: { distance: 5 }})
   const touchSensor = useSensor(TouchSensor, { pressDelay: 150, activationConstraint: { distance: 5 }})
@@ -653,6 +647,14 @@ const lastFinalizadoPorMaquina = useMemo(() => {
     }))
   },[finalizadas, ordens, paradas])
 
+    // leitura de rota (via react-router quando App estiver dentro de um Router)
+  const location = useLocation();
+
+  // rota oculta: /pet-01 — renderiza diretamente a tela Pet01 (registroGrupos já existe aqui)
+  if (location && location.pathname === '/pet-01') {
+    return <Pet01 registroGrupos={registroGrupos} />;
+  }
+
   const [openSet, setOpenSet] = useState(()=>new Set())
   function toggleOpen(id){ setOpenSet(prev=>{ const n=new Set(prev); if(n.has(id)) n.delete(id); else n.add(id); return n }) }
 
@@ -883,13 +885,7 @@ const lastFinalizadoPorMaquina = useMemo(() => {
           </div>
         )}
       </Modal>
-      {/* === Botão + Modal de Apontamento (bipagem) === */}
-      <Apontamento
-        tab={tab}
-        ordens={ordens}
-       ativosPorMaquina={ativosPorMaquina}
-        finalizar={finalizar}
-      />
+
     </div>
   )
 }
