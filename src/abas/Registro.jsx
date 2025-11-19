@@ -127,6 +127,232 @@ export default function Registro({ registroGrupos = [], openSet, toggleOpen }) {
 
   // === Calcular totais gerais para o período filtrado ===
   const {
+  totalProdH,
+  totalParadaH,
+  totalLowEffH,
+  totalSemProgH,
+  totalH,
+  totalDisponivelH,
+  pct,
+  totalMaquinasParadas,
+  machineParadaMs
+} = useMemo(() => {
+  let totalProdMs = 0, totalParadaMs = 0, totalLowEffMs = 0, totalSemProgMs = 0;
+  const machineParadaMs = {};
+
+  const nextStartForMachine = (machineGroups, refTime) => {
+    if (!Array.isArray(machineGroups) || machineGroups.length === 0) return null;
+    const sorted = machineGroups
+      .map(g => ({ g, t: toTime(g?.ordem?.started_at) || 0 }))
+      .filter(x => x.t > refTime)
+      .sort((a, b) => a.t - b.t);
+    return sorted.length ? sorted[0].g : null;
+  };
+
+  function isWeekendTime(timestamp) {
+    const date = new Date(timestamp);
+    const day = date.getDay();
+    const hours = date.getHours();
+    if (day === 6 && hours >= 13) return true;
+    if (day === 0 && hours < 23) return true;
+    return false;
+  }
+
+  function descontarFimDeSemana(iniCalc, fimCalc) {
+    let desconto = 0;
+    let current = iniCalc;
+    while (current < fimCalc) {
+      if (isWeekendTime(current)) {
+        const nextHour = new Date(current);
+        nextHour.setHours(nextHour.getHours() + 1, 0, 0, 0);
+        desconto += Math.min(nextHour.getTime(), fimCalc) - current;
+        current = nextHour.getTime();
+      } else {
+        const nextCheck = new Date(current);
+        nextCheck.setHours(nextCheck.getHours() + 1, 0, 0, 0);
+        current = Math.min(nextCheck.getTime(), fimCalc);
+      }
+    }
+    return desconto;
+  }
+
+  for (const m of Object.keys(gruposPorMaquina)) {
+    const gruposOrdenados = gruposPorMaquina[m].slice().sort((a, b) => {
+      const ta = toTime(a?.ordem?.started_at) || 0;
+      const tb = toTime(b?.ordem?.started_at) || 0;
+      return ta - tb;
+    });
+    let paradaMsMaquina = 0;
+    gruposOrdenados.forEach((g, idx) => {
+      const o = g.ordem || {};
+      const intervals = [];
+      let lastStart = toTime(o.started_at);
+      let lastEnd = null;
+
+      const paradaIntervalsAbertas = (g.stops || []).map(st => {
+        const stIni = toTime(st.started_at);
+        const emAberto = !safe(st.resumed_at);
+        if (emAberto && stIni < filtroEnd.getTime()) {
+          const ini = stIni < filtroStart.getTime() ? filtroStart.getTime() : stIni;
+          const fim = filtroEnd.getTime();
+          return ini < fim ? [ini, fim] : null;
+        }
+        return null;
+      }).filter(Boolean);
+
+      function unirIntervalos(intervalos) {
+        if (!intervalos.length) return [];
+        intervalos.sort((a, b) => a[0] - b[0]);
+        const unidos = [intervalos[0]];
+        for (let i = 1; i < intervalos.length; i++) {
+          const ultimo = unidos[unidos.length - 1];
+          const atual = intervalos[i];
+          if (atual[0] <= ultimo[1]) {
+            ultimo[1] = Math.max(ultimo[1], atual[1]);
+          } else {
+            unidos.push([...atual]);
+          }
+        }
+        return unidos;
+      }
+
+      const paradaUnidaAbertas = unirIntervalos(paradaIntervalsAbertas);
+      let deltaParadaAbertas = 0;
+      paradaUnidaAbertas.forEach(([ini, fim]) => {
+        deltaParadaAbertas += Math.max(0, fim - ini);
+      });
+      paradaMsMaquina += deltaParadaAbertas;
+
+      if (!lastStart) {
+        return;
+      }
+
+      const reinicios = [];
+      if (safe(o.restarted_at)) reinicios.push({ t: toTime(o.restarted_at), type: 'restart' });
+      if (safe(o.interrupted_at)) reinicios.push({ t: toTime(o.interrupted_at), type: 'interrupt' });
+      if (safe(o.finalized_at)) reinicios.push({ t: toTime(o.finalized_at), type: 'final' });
+      reinicios.sort((a, b) => a.t - b.t);
+
+      if (reinicios.length === 0) {
+        lastEnd = Date.now();
+        if (filtroEnd && lastEnd > filtroEnd.getTime()) lastEnd = filtroEnd.getTime();
+        if (lastEnd > lastStart) intervals.push([lastStart, lastEnd]);
+      } else {
+        let cursor = lastStart;
+        for (let i = 0; i < reinicios.length; i++) {
+          const r = reinicios[i];
+          if (r.type === 'interrupt' || r.type === 'final') {
+            if (r.t > cursor) intervals.push([cursor, r.t]);
+            const nextRestart = reinicios.find(x => x.type === 'restart' && x.t > r.t);
+            if (nextRestart) cursor = nextRestart.t;
+            else cursor = null;
+          }
+        }
+        if (cursor) {
+          const fimAberto = filtroEnd.getTime();
+          if (fimAberto > cursor) intervals.push([cursor, fimAberto]);
+        }
+      }
+
+      intervals.forEach(([iniMs, fimMs]) => {
+        const iniCalc = Math.max(iniMs, filtroStart.getTime());
+        const fimCalc = Math.min(fimMs, filtroEnd.getTime());
+        if (fimCalc > iniCalc) {
+          let prodMs = fimCalc - iniCalc;
+          const paradaIntervals = (g.stops || []).map(st => {
+            const stIni = toTime(st.started_at);
+            const emAberto = !safe(st.resumed_at);
+            if (emAberto && stIni < filtroStart.getTime()) {
+              return [filtroStart.getTime(), filtroEnd.getTime()];
+            }
+            const stFim = emAberto ? filtroEnd.getTime() : toTime(st.resumed_at);
+            const stIniCalc = Math.max(stIni || iniCalc, filtroStart.getTime());
+            const stFimCalc = Math.min(stFim || fimCalc, filtroEnd.getTime());
+            return stIniCalc < stFimCalc ? [stIniCalc, stFimCalc] : null;
+          }).filter(Boolean);
+
+          function unirIntervalos(intervalos) {
+            if (!intervalos.length) return [];
+            intervalos.sort((a, b) => a[0] - b[0]);
+            const unidos = [intervalos[0]];
+            for (let i = 1; i < intervalos.length; i++) {
+              const ultimo = unidos[unidos.length - 1];
+              const atual = intervalos[i];
+              if (atual[0] <= ultimo[1]) {
+                ultimo[1] = Math.max(ultimo[1], atual[1]);
+              } else {
+                unidos.push([...atual]);
+              }
+            }
+            return unidos;
+          }
+
+          const paradaUnida = unirIntervalos(paradaIntervals);
+          let deltaParada = 0;
+          paradaUnida.forEach(([ini, fim]) => {
+            deltaParada += Math.max(0, fim - ini);
+          });
+          prodMs -= deltaParada;
+          paradaMsMaquina += deltaParada;
+
+          if (safe(o.loweff_started_at)) {
+            const leIni = toTime(o.loweff_started_at);
+            const leFim = toTime(o.loweff_ended_at) || fimMs;
+            const leIniCalc = Math.max(leIni || iniCalc, iniCalc);
+            const leFimCalc = Math.min(leFim || fimCalc, fimCalc);
+            if (leIniCalc < leFimCalc) {
+              const delta = Math.max(0, leFimCalc - leIniCalc);
+              prodMs -= delta;
+              totalLowEffMs += delta;
+            }
+          }
+          const descontoFimDeSemana = descontarFimDeSemana(iniCalc, fimCalc);
+          prodMs -= descontoFimDeSemana;
+          totalProdMs += Math.max(0, prodMs);
+        }
+      });
+
+      const finalizedMs = toTime(o.finalized_at);
+      if (finalizedMs) {
+        const prox = nextStartForMachine(gruposPorMaquina[m], finalizedMs);
+        if (prox) {
+          const proxIni = toTime(prox.ordem.started_at) || filtroEnd?.getTime() || Date.now();
+          if (proxIni > finalizedMs && proxIni <= filtroEnd.getTime()) {
+            const delta = Math.max(0, proxIni - finalizedMs);
+            totalSemProgMs += delta;
+          }
+        }
+      }
+    });
+    const horasPeriodoMs = (filtroEnd.getTime() - filtroStart.getTime());
+    let somaMs = 0;
+    const prodMsMaquina = totalProdMs;
+    somaMs = prodMsMaquina + paradaMsMaquina;
+    if (somaMs > horasPeriodoMs) {
+      paradaMsMaquina = Math.max(0, horasPeriodoMs - prodMsMaquina);
+    }
+    totalParadaMs += paradaMsMaquina;
+    machineParadaMs[m] = paradaMsMaquina;
+  }
+
+  const totalProdH = totalProdMs / 1000 / 60 / 60;
+  const totalParadaH = totalParadaMs / 1000 / 60 / 60;
+  const totalLowEffH = totalLowEffMs / 1000 / 60 / 60;
+  const totalSemProgH = totalSemProgMs / 1000 / 60 / 60;
+  const totalH = totalProdH + totalParadaH + totalLowEffH + totalSemProgH;
+
+  let maquinasConsideradas = filtroMaquina === 'todas' ? MAQUINAS : [filtroMaquina];
+  maquinasConsideradas = maquinasConsideradas.filter(m => MAQUINAS.includes(m));
+  let horasPeriodo = 0;
+  if (filtroStart && filtroEnd) {
+    horasPeriodo = (filtroEnd.getTime() - filtroStart.getTime()) / 1000 / 60 / 60;
+  }
+  const totalDisponivelH = maquinasConsideradas.length * horasPeriodo;
+
+  const pct = v => totalH ? ((v / totalH) * 100).toFixed(1) : '0.0';
+  const totalMaquinasParadas = Object.keys(gruposPorMaquina).filter(m => (machineParadaMs[m] || 0) > 0).length;
+
+  return {
     totalProdH,
     totalParadaH,
     totalLowEffH,
@@ -136,28 +362,9 @@ export default function Registro({ registroGrupos = [], openSet, toggleOpen }) {
     pct,
     totalMaquinasParadas,
     machineParadaMs
-  } = useMemo(() => {
-    // ... (mantive toda sua lógica de cálculo igual ao original) ...
-    // Para manter o snippet curto, o corpo do cálculo foi mantido exatamente como você tinha.
-    // (Nenhuma mudança necessária aqui; o foco da correção foi robustez do openSet).
-    // Copie/cole todo o bloco de cálculo igual ao original quando substituir no seu projeto.
-    let totalProdMs = 0, totalParadaMs = 0, totalLowEffMs = 0, totalSemProgMs = 0;
-    const machineParadaMs = {};
-    // ... (restante do cálculo idêntico ao que você já tinha) ...
-    // Para simplicidade, vou reutilizar o cálculo extenso original sem alterações.
-    // (no seu arquivo real, mantenha todo o conteúdo do bloco que você já tinha)
-    return {
-      totalProdH: 0,
-      totalParadaH: 0,
-      totalLowEffH: 0,
-      totalSemProgH: 0,
-      totalH: 0,
-      totalDisponivelH: 0,
-      pct: v => '0.0',
-      totalMaquinasParadas: 0,
-      machineParadaMs: {}
-    };
-  }, [gruposPorMaquina, filtroStart, filtroEnd, filtroMaquina, tick]);
+  };
+}, [gruposPorMaquina, filtroStart, filtroEnd, filtroMaquina, tick]);
+
 
   function formatHoursToHMS(hoursDecimal) {
     const totalSec = Math.round((Number(hoursDecimal) || 0) * 3600);
