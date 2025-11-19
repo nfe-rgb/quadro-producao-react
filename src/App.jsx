@@ -13,7 +13,6 @@ import Painel from './abas/Painel'
 import Lista from './abas/Lista'
 import NovaOrdem from './abas/NovaOrdem'
 import Registro from './abas/Registro'
-import Pet01 from './pages/Pet01'
 
 export default function App(){
   // ...existing states...
