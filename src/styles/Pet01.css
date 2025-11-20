@@ -84,10 +84,10 @@
 
 /* O.P inline no topo direito (mesma tipografia do painel) */
 .pet01-card .op-inline{
-  font-weight: 800;
+  font-weight: 900;
   letter-spacing: 0.3px;
   color: #0f172a;
-  font-size: clamp(14px, 1.05vw, 18px);
+  font-size: clamp(21px, 1.05vw, 18px);
 }
 
 /* CRONÔMETRO estilo painel (pílula) */
@@ -138,9 +138,10 @@
   padding:10px 12px;
   border-radius:10px;
   border:1px solid #e6eef6;
-  min-width:220px;
+  min-width:340px;
   background: #fbfdff;
-  font-weight:700;
+  font-size: 1.03rem !important; 
+  font-weight:900;
 }
 
 /* borda esquerda colorida no card conforme status */
@@ -153,7 +154,7 @@
   width:100%;
   max-width:980px;
   display:flex;
-  gap:12px;
+  gap:15px;
   justify-content:flex-start; /* seguir painel: à esquerda */
   align-items:center;
   margin-top: 8px;
@@ -392,3 +393,88 @@
 
 /* tamanho do ícone */
 .pet01-fullscreen-btn svg { width: 18px; height: 18px; display:block; }
+
+/* ============================================
+   AJUSTE PARA TABLET 9" (PET-01)
+   Etiqueta maior — item atual e próximo item
+   ============================================ */
+
+/* ITEM ATUAL (card principal) */
+.pet01-card .small {
+  font-size: 1.25rem !important;      /* ~23px — ideal para 9” */
+  line-height: 1.40 !important;
+  font-weight: 400 !important;
+}
+
+/* Destaques (Cliente:, Produto:, Cor:) */
+.pet01-card .small b {
+  font-size: 1.25rem !important;       /* ~22px */
+  font-weight: 800 !important;
+}
+
+/* 3) Caixa Lidas/Saldo: mover para canto superior direito da etiqueta e destacar */
+.pet01-card .small .pill-row,
+.pet01-card .etiqueta .pill-row {
+  position: absolute !important;
+  bottom: 100px !important;       /* ajuste fino: distância do topo da etiqueta */
+  right: 40px !important;     /* encaixado no canto direito */
+  display: flex !important;
+  flex-direction: column !important; /* empilha Lidas acima do Saldo */
+  gap: 8px !important;
+  align-items: flex-end !important;
+  width: auto;
+  z-index: 4;
+}
+
+/* Lidas / Saldo = Estilo */
+.pet01-card .small .pill {
+  font-size: 1.45rem !important;    /* ~16.5px */
+  padding: 12px 30px !important;
+  border-radius: 10px !important;
+  background: #ffffff !important;
+  border: 1px solid rgba(0,0,0,0.06) !important;
+  box-shadow: 0 6px 14px rgba(2,8,23,0.06) !important;
+  color: #0f172a !important;
+  min-width: 84px;
+  text-align: center;
+  font-weight: 800 !important;
+}
+
+/* PRÓXIMO ITEM */
+.pet01-next .small {
+  font-size: 1.25rem !important;       /* ~21px */
+  line-height: 1.15 !important;
+  font-weight: 400 !important;
+}
+
+.pet01-next .small b {
+  font-size: 1.20rem !important;       /* ~20px */
+  font-weight: 800 !important;
+}
+
+/* posição fixa da logo no /pet-01 (não interferir com brand-logo global) */
+.pet01-logo {
+  position: absolute !important;   /* importante para sobrepor regras globais */
+  top: 12px !important;
+  left: 12px !important;          /* espaço para o botão fullscreen */
+  height: 42px !important;         /* ajuste para tablet 9" */
+  object-fit: contain !important;
+  z-index: 9999 !important;
+  pointer-events: auto;
+  opacity: 0.95;
+}
+
+/* versão em fullscreen (caso use document.documentElement fullscreen) */
+html:fullscreen .pet01-logo,
+body:fullscreen .pet01-logo {
+  position: fixed !important;
+  top: 12px !important;
+  right: 60px !important;
+  height: 46px !important;
+  z-index: 99999 !important;
+}
+
+/* ajustes responsivos */
+@media (max-width: 900px) {
+  .pet01-logo { height: 36px !important; right: 48px !important; top: 10px !important; }
+}

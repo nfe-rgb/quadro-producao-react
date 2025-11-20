@@ -1,5 +1,5 @@
 // =======================
-//  PET01.jsx — PARTE 1/3
+//  PET02.jsx — PARTE 1/3
 // =======================
 
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -11,9 +11,9 @@ import { statusClass } from "../lib/utils";
 
 import "../styles/Pet01.css";
 
-export default function Pet01({
+export default function Pet02({
   registroGrupos,
-  ativosP1,
+  ativosP2,
   paradas,
   tick,
   onStatusChange,
@@ -95,10 +95,10 @@ async function toggleFullscreen() {
   //  CAPTURAR ORDEM ATIVA P1
   // ===========================
   useEffect(() => {
-    if (!ativosP1) return;
-    setAtiva(ativosP1[0] || null);
-    setProximo(ativosP1[1] || null);
-  }, [ativosP1]);
+    if (!ativosP2) return;
+    setAtiva(ativosP2[0] || null);
+    setProximo(ativosP2[1] || null);
+  }, [ativosP2]);
 
   // ===========================
   //  BIPAGENS
@@ -210,7 +210,7 @@ async function toggleFullscreen() {
     // insere no banco
     const { error } = await supabase.from("production_scans").insert([{
       order_id: ativa.id,
-      machine_id: "P1",
+      machine_id: "P2",
       scanned_box: caixa,
       code: cod.trim(),
       operator: bipOperator.trim(),
@@ -245,7 +245,7 @@ async function toggleFullscreen() {
 
     const payload = {
       order_id: ativa.id,
-      machine_id: "P1",
+      machine_id: "P2",
       operator: operador.trim(),
       shift: turno.trim(),
       qty: Number(quantidade),
@@ -330,7 +330,7 @@ async function toggleFullscreen() {
   return (
     <div className="pet01-wrapper" ref={wrapperRef}>
 
-      <h1 className="pet01-title">Apontamento — PET 01</h1>
+      <h1 className="pet01-title">Apontamento — PET 02</h1>
 <img
   src="/Logotipo Savanti.png"
   alt="Savanti Plásticos"
