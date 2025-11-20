@@ -349,3 +349,46 @@
   color: white;
   border-color: transparent;
 }
+
+/* ===========================
+   Pet01 — botão tela cheia
+   =========================== */
+
+.pet01-wrapper {
+  position: relative; /* necessário para posicionar o botão absoluto dentro */
+}
+
+/* botão pequeno no canto superior direito */
+.pet01-fullscreen-btn {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  width: 40px;
+  height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  background: rgba(255,255,255,0.95);
+  border: 1px solid rgba(0,0,0,0.06);
+  box-shadow: 0 6px 18px rgba(2,8,23,0.06);
+  cursor: pointer;
+  transition: transform .06s ease, background .15s ease, box-shadow .15s ease;
+  z-index: 1200;
+}
+
+/* hover e active */
+.pet01-fullscreen-btn:hover { transform: translateY(-2px); box-shadow: 0 10px 30px rgba(2,8,23,0.08); }
+
+/* estado ativo (quando estiver em tela cheia) */
+.pet01-fullscreen-btn.active {
+  background: linear-gradient(90deg, var(--primary), var(--secondary));
+  border-color: transparent;
+  color: #ffffff;
+}
+
+/* inverte o svg quando ativo (para garantir contraste) */
+.pet01-fullscreen-btn.active svg { filter: invert(1) brightness(1.2); }
+
+/* tamanho do ícone */
+.pet01-fullscreen-btn svg { width: 18px; height: 18px; display:block; }

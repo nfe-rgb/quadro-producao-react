@@ -62,6 +62,35 @@ export default function Pet01({
     "Manchadas",
   ];
 
+    // ---------- Fullscreen (botão) ----------
+  const wrapperRef = useRef(null);           // referência do container que vamos fullscreen
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
+  useEffect(() => {
+    const onFsChange = () => {
+      setIsFullscreen(!!document.fullscreenElement);
+    };
+    document.addEventListener('fullscreenchange', onFsChange);
+    return () => document.removeEventListener('fullscreenchange', onFsChange);
+  }, []);
+
+async function toggleFullscreen() {
+  try {
+    const elem = document.documentElement;
+
+    if (!document.fullscreenElement) {
+      if (elem.requestFullscreen) await elem.requestFullscreen();
+      else if (elem.webkitRequestFullscreen) elem.webkitRequestFullscreen();
+    } else {
+      if (document.exitFullscreen) await document.exitFullscreen();
+      else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+    }
+  } catch (err) {
+    console.warn("Fullscreen failed:", err);
+  }
+}
+  // ---------- end fullscreen ----------
+
   // ===========================
   //  CAPTURAR ORDEM ATIVA P1
   // ===========================
@@ -299,9 +328,36 @@ export default function Pet01({
   //  PARTE 3/3 — RENDER / JSX
   // ============================
   return (
-    <div className="pet01-wrapper">
+    <div className="pet01-wrapper" ref={wrapperRef}>
 
       <h1 className="pet01-title">Apontamento — Máquina P1</h1>
+
+       {/* botão pequeno de tela cheia (canto superior direito) */}
+      <button
+        type="button"
+        className={`pet01-fullscreen-btn ${isFullscreen ? 'active' : ''}`}
+        onClick={toggleFullscreen}
+        aria-label={isFullscreen ? "Sair da tela cheia" : "Entrar em tela cheia"}
+        title={isFullscreen ? "Sair da tela cheia" : "Entrar em tela cheia"}
+      >
+        {isFullscreen ? (
+          /* ícone de minimizar (x) */
+          <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden>
+            <path d="M6 9V6h3" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
+            <path d="M6 6l6 6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
+            <path d="M18 15v3h-3" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
+            <path d="M18 18l-6-6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
+          </svg>
+        ) : (
+          /* ícone de expandir */
+          <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden>
+            <path d="M9 6H6v3" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
+            <path d="M6 6l6 6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
+            <path d="M15 18h3v-3" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
+            <path d="M18 18l-6-6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
+          </svg>
+        )}
+      </button>
 
       {/* BOTÕES — agora logo abaixo do título */}
       <div className="pet01-buttons" style={{marginBottom: 16}}>
