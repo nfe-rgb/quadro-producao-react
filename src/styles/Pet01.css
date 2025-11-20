@@ -17,6 +17,7 @@
   --pet01-timer-color-red:         #C62828;
   --pet01-timer-color-yellow:      #7a5a00;
   --pet01-timer-color-blue:        #1051dd;
+  --pet01-card-bg: var(--panel); /* fundo do card principal igual ao painel */
 }
 
 /* wrapper: centraliza o painel no tablet */
@@ -121,7 +122,10 @@
   margin: 6px 0;
   width: 100%;
   box-sizing: border-box;
-  /* forçar background transparente pois a etiqueta já tem estilo */
+  background: #fff !important;
+  border-radius: 12px;
+  box-shadow: 0 2px 8px 0 rgba(0,0,0,0.04);
+  padding: 12px 18px;
 }
 
 /* separador igual ao painel */

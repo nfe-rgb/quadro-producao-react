@@ -248,6 +248,7 @@ export default function Pet01({
 
     if (targetStatus === "BAIXA_EFICIENCIA" && before !== "BAIXA_EFICIENCIA") {
       const now = new Date();
+      console.log("[Pet01] Abrindo modal Baixa Eficiência", ativa, targetStatus);
       setLowEffModal && setLowEffModal({
         ordem: ativa,
         operador: "",
@@ -260,6 +261,7 @@ export default function Pet01({
 
     if (targetStatus === "PARADA" && before !== "PARADA") {
       const now = new Date();
+      console.log("[Pet01] Abrindo modal Parada", ativa, targetStatus);
       setStopModal && setStopModal({
         ordem: ativa,
         operador: "",
@@ -273,6 +275,7 @@ export default function Pet01({
 
     if (before === "PARADA" && targetStatus !== "PARADA") {
       const now = new Date();
+      console.log("[Pet01] Abrindo modal Retomada", ativa, targetStatus);
       setResumeModal && setResumeModal({
         ordem: ativa,
         operador: "",
@@ -285,6 +288,7 @@ export default function Pet01({
 
     // Chama apenas o handler do App, sem atualizar localmente
     try {
+      console.log("[Pet01] Chamando onStatusChange", ativa, targetStatus);
       onStatusChange && onStatusChange(ativa, targetStatus);
     } catch (err) {
       console.error('Erro ao chamar onStatusChange', err);

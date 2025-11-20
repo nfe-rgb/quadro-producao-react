@@ -182,7 +182,12 @@ export default function Registro({ registroGrupos = [], openSet, toggleOpen }) {
       const tb = toTime(b?.ordem?.started_at) || 0;
       return ta - tb;
     });
-    let paradaMsMaquina = 0;
+        let paradaMsMaquina = 0;
+        // Para evitar erro de 'sem programação' antes da primeira O.P. e após a última O.P.
+        const firstOP = gruposOrdenados[0]?.ordem;
+        const lastOP = gruposOrdenados[gruposOrdenados.length - 1]?.ordem;
+        const firstOPStart = toTime(firstOP?.started_at);
+        const lastOPEnd = toTime(lastOP?.finalized_at);
     gruposOrdenados.forEach((g, idx) => {
       const o = g.ordem || {};
       const intervals = [];
@@ -314,14 +319,22 @@ export default function Registro({ registroGrupos = [], openSet, toggleOpen }) {
 
       const finalizedMs = toTime(o.finalized_at);
       if (finalizedMs) {
-        const prox = nextStartForMachine(gruposPorMaquina[m], finalizedMs);
-        if (prox) {
-          const proxIni = toTime(prox.ordem.started_at) || filtroEnd?.getTime() || Date.now();
-          if (proxIni > finalizedMs && proxIni <= filtroEnd.getTime()) {
-            const delta = Math.max(0, proxIni - finalizedMs);
-            totalSemProgMs += delta;
+          const prox = nextStartForMachine(gruposPorMaquina[m], finalizedMs);
+          if (prox) {
+            const proxIni = toTime(prox.ordem.started_at) || filtroEnd?.getTime() || Date.now();
+            // Só conta como "sem programação" se o intervalo está dentro do filtro e não há outra O.P. programada nesse tempo
+              // Só conta se NÃO for antes da primeira O.P. e NÃO for após a última O.P.
+              if (
+                proxIni > finalizedMs &&
+                finalizedMs >= filtroStart.getTime() &&
+                proxIni <= filtroEnd.getTime() &&
+                finalizedMs >= firstOPStart &&
+                finalizedMs <= lastOPEnd
+              ) {
+              const delta = Math.max(0, proxIni - finalizedMs);
+              totalSemProgMs += delta;
+            }
           }
-        }
       }
     });
     const horasPeriodoMs = (filtroEnd.getTime() - filtroStart.getTime());
