@@ -1,5 +1,5 @@
 // =======================
-//  PET01.jsx — PARTE 1/3
+//  PET03.jsx — PARTE 1/3
 // =======================
 
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -11,9 +11,9 @@ import { statusClass } from "../lib/utils";
 
 import "../styles/Pet01.css";
 
-export default function Pet01({
+export default function Pet03({
   registroGrupos,
-  ativosP1,
+  ativosP3,
   paradas,
   tick,
   onStatusChange,
@@ -42,8 +42,7 @@ export default function Pet01({
     quantidade: "",
     motivo: "Rebarba",
   });
-  
-  const TURNOS = ["1", "2", "3", "Hora Extra"];
+
   // --------------------------
   // Motivos padrão de refugo
   // --------------------------
@@ -93,13 +92,13 @@ async function toggleFullscreen() {
   // ---------- end fullscreen ----------
 
   // ===========================
-  //  CAPTURAR ORDEM ATIVA P1
+  //  CAPTURAR ORDEM ATIVA P3
   // ===========================
   useEffect(() => {
-    if (!ativosP1) return;
-    setAtiva(ativosP1[0] || null);
-    setProximo(ativosP1[1] || null);
-  }, [ativosP1]);
+    if (!ativosP3) return;
+    setAtiva(ativosP3[0] || null);
+    setProximo(ativosP3[1] || null);
+  }, [ativosP3]);
 
   // ===========================
   //  BIPAGENS
@@ -211,7 +210,7 @@ async function toggleFullscreen() {
     // insere no banco
     const { error } = await supabase.from("production_scans").insert([{
       order_id: ativa.id,
-      machine_id: "P1",
+      machine_id: "P3",
       scanned_box: caixa,
       code: cod.trim(),
       operator: bipOperator.trim(),
@@ -246,7 +245,7 @@ async function toggleFullscreen() {
 
     const payload = {
       order_id: ativa.id,
-      machine_id: "P1",
+      machine_id: "P3",
       operator: operador.trim(),
       shift: turno.trim(),
       qty: Number(quantidade),
@@ -331,7 +330,7 @@ async function toggleFullscreen() {
   return (
     <div className="pet01-wrapper" ref={wrapperRef}>
 
-      <h1 className="pet01-title">Apontamento — PET 01</h1>
+      <h1 className="pet01-title">Apontamento — PET 03</h1>
 <img
   src="/Logotipo Savanti.png"
   alt="Savanti Plásticos"
@@ -395,13 +394,10 @@ async function toggleFullscreen() {
         <div className="pet01-card-header">
           <div className="left">
             {ativa?.status === "PARADA" && tempoParada && (
-              <span className="rotas-parada-timer">{tempoParada}</span>
+              <span className="pet01-timer red">{tempoParada}</span>
             )}
             {ativa?.status === "BAIXA_EFICIENCIA" && tempoLow && (
               <span className="rotas-loweff-timer">{tempoLow}</span>
-            )}
-            {ativa?.status === "SEM_PROGRAMACAO" && tempoSemProg && (
-              <span className="rotas-semprog-timer">{tempoSemProg}</span>
             )}
           </div>
 
@@ -475,10 +471,14 @@ async function toggleFullscreen() {
         <div className="pet01-modal-bg" role="dialog" aria-modal>
           <div className="pet01-modal">
             <h3>Apontamento por Bipagem</h3>
-            <label>Turno *</label>
-              <select className="input" value={refugoForm.turno} onChange={e => setRefugoForm(f => ({ ...f, turno: e.target.value }))}>
-                {TURNOS.map(t => <option key={t} value={t}>{t}</option>)}
-              </select>
+
+            <label>Operador *</label>
+            <input
+              className="input"
+              value={bipOperator}
+              onChange={(e) => setBipOperator(e.target.value)}
+              placeholder="Nome do operador"
+            />
 
             <label style={{ marginTop: 8 }}>Código (OS 753 - 001)</label>
             <input
@@ -491,7 +491,8 @@ async function toggleFullscreen() {
             />
 
             <div className="pet01-modal-buttons" style={{ marginTop: 12 }}>
-              <button className="green" onClick={() => { setShowBip(false); setBipOperator(""); }}>Fechar</button>
+              <button className="gray" onClick={() => { setShowBip(false); setBipOperator(""); }}>Cancelar</button>
+              <button className="green" onClick={() => bipar(bipRef.current?.value)}>Registrar</button>
             </div>
           </div>
         </div>

@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "../lib/supabaseClient.js";
 import { MAQUINAS } from "../lib/constants";
+import { getTurnoAtual } from "../lib/utils";
 
 const BARCODE_RE = /^\s*OS\s+(\d{1,6})\s*-\s*(\d{3})\s*$/i;
 
@@ -26,6 +27,13 @@ export default function Apontamento({ tab, ordens, ativosPorMaquina, finalizar }
   const [sessionSeen, setSessionSeen] = useState(() => new Set()); // "orderId#seq"
   const [busy, setBusy] = useState(false);
   const inputRef = useRef(null);
+  const [turno, setTurno] = useState(getTurnoAtual());
+  // Atualiza turno ao abrir modal
+  useEffect(() => {
+    if (open) {
+      setTurno(getTurnoAtual());
+    }
+  }, [open]);
 
   // Contador por ordem (order_id -> count) — fallback visual local
   const [counts, setCounts] = useState({}); // { [orderId]: number }
@@ -239,6 +247,7 @@ export default function Apontamento({ tab, ordens, ativosPorMaquina, finalizar }
           <div className="card" style={{ width: 420 }} onClick={(e) => e.stopPropagation()}>
             <div className="label" style={{ marginBottom: 8 }}>Apontamento por Bipagem</div>
 
+
             <div className="grid">
               <div>
                 <div className="label">Operador *</div>
@@ -247,6 +256,21 @@ export default function Apontamento({ tab, ordens, ativosPorMaquina, finalizar }
                   value={operador}
                   onChange={(e) => setOperador(e.target.value)}
                   placeholder="Nome do operador"
+                />
+              </div>
+
+              <div>
+                <div className="label">Turno detectado</div>
+                <input
+                  className="input"
+                  value={
+                    turno === 1 ? "Turno 1"
+                    : turno === 2 ? "Turno 2"
+                    : turno === 3 ? "Turno 3"
+                    : "Hora Extra"
+                  }
+                  disabled
+                  style={{ background: '#f5f5f5', color: '#333' }}
                 />
               </div>
 
@@ -264,7 +288,8 @@ export default function Apontamento({ tab, ordens, ativosPorMaquina, finalizar }
 
               <div className="muted" style={{ marginTop: 8 }}>
                 • Formato aceito: <code>OS 753 - 001</code><br/>
-                • Duplicidade é bloqueada por sessão e por banco de dados.
+                • Duplicidade é bloqueada por sessão e por banco de dados.<br/>
+                • O turno é detectado automaticamente pelo sistema.
               </div>
             </div>
 

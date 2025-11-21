@@ -107,12 +107,7 @@ export default function Painel({
                 {/* Cronômetro de BAIXA_EFICIENCIA (amarelo) — mesmo lugar e formato */}
                 {lowEffText && (
                   <span
-                    className="parada-timer"
-                    style={{
-                      background: "rgba(255, 193, 7, 0.12)",
-                      borderColor: "rgba(255, 193, 7, 0.8)",
-                      color: "#7a5a00",
-                    }}
+                    className="loweff-timer"
                     title={ativa?.loweff_by ? `Operador: ${ativa.loweff_by}` : ""}
                   >
                     {lowEffText}

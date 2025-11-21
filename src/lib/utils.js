@@ -1,3 +1,40 @@
+// Determina o turno atual com base no horário e dia da semana
+export function getTurnoAtual(date = new Date()) {
+  const dia = date.getDay(); // 0=Dom, 1=Seg, ..., 6=Sáb
+  const hora = date.getHours();
+  const min = date.getMinutes();
+  const minutos = hora * 60 + min;
+
+  // Domingo
+  if (dia === 0) {
+    // 23:00 às 23:59 Turno 3
+    if (minutos >= 23 * 60) return 3;
+    // 00:00 às 04:59 Turno 3 (continuação)
+    if (minutos < 5 * 60) return 3;
+    // 05:00 às 22:59 = Hora Extra
+    return 'HE';
+  }
+  // Segunda a Sexta
+  if (dia >= 1 && dia <= 5) {
+    if (minutos >= 5 * 60 && minutos < 13 * 60 + 30) return 1;
+    if (minutos >= 13 * 60 + 30 && minutos < 22 * 60) return 2;
+    // 22:00 às 23:59 Turno 3
+    if (minutos >= 22 * 60) return 3;
+    // 00:00 às 04:59 Turno 3 (continuação)
+    if (minutos < 5 * 60) return 3;
+  }
+  // Sábado
+  if (dia === 6) {
+    if (minutos >= 5 * 60 && minutos < 9 * 60) return 1;
+    if (minutos >= 9 * 60 && minutos < 13 * 60) return 2;
+    // 13:00 às 23:59 = Hora Extra
+    if (minutos >= 13 * 60) return 'HE';
+    // 00:00 às 04:59 = Fora de turno (considerar HE)
+    if (minutos < 5 * 60) return 'HE';
+  }
+  // Fora de qualquer turno (deve ser HE)
+  return 'HE';
+}
 // src/lib/utils.js
 export function statusClass(s){
   if(s==='AGUARDANDO') return 'card gray'

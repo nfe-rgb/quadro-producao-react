@@ -5,6 +5,7 @@ import { fmtDateTime, fmtDuracao } from '../lib/utils'
 import { MAQUINAS } from '../lib/constants'
 
 export default function Registro({ registroGrupos = [], openSet, toggleOpen }) {
+    // ...existing code...
   // Timer para atualização automática dos tempos em aberto
   const [tick, setTick] = useState(0);
   useEffect(() => {
@@ -37,6 +38,10 @@ export default function Registro({ registroGrupos = [], openSet, toggleOpen }) {
   const [customStart, setCustomStart] = useState('')
   const [customEnd, setCustomEnd] = useState('')
   const [filtroMaquina, setFiltroMaquina] = useState('todas')
+
+  // Definir maquinasConsideradas após o useState de filtroMaquina
+  let maquinasConsideradas = filtroMaquina === 'todas' ? MAQUINAS : [filtroMaquina];
+  maquinasConsideradas = maquinasConsideradas.filter(m => MAQUINAS.includes(m));
 
   // ---------- Helpers defensivos ----------
   const safe = v => {
@@ -101,10 +106,18 @@ export default function Registro({ registroGrupos = [], openSet, toggleOpen }) {
         const emAberto = !safe(st.resumed_at)
         return emAberto && stIni < filtroEnd.getTime() && filtroStart.getTime() < filtroEnd.getTime()
       })
-      return (
-        (iniMs && iniMs < filtroEnd.getTime() && (!fimMs || fimMs >= filtroStart.getTime()))
-        || hasOpenStop
-      )
+      // Exclui ordens que foram finalizadas ou interrompidas antes do início do filtro
+      const interruptedMs = toTime(o.interrupted_at);
+      const endedBeforeFilter = (fimMs && fimMs < filtroStart.getTime()) || (interruptedMs && interruptedMs < filtroStart.getTime());
+      // ...existing code...
+      if (endedBeforeFilter) return false;
+
+      const startedInRange = iniMs && iniMs < filtroEnd.getTime() && (!fimMs || fimMs >= filtroStart.getTime());
+      const finalizedInRange = fimMs && fimMs >= filtroStart.getTime() && fimMs <= filtroEnd.getTime();
+      const openInRange = !fimMs && iniMs < filtroEnd.getTime();
+      const resultado = startedInRange || finalizedInRange || openInRange || hasOpenStop;
+      // ...existing code...
+      return resultado;
     })
   }, [registroGrupos, filtroStart, filtroEnd, tick])
 
@@ -139,6 +152,21 @@ export default function Registro({ registroGrupos = [], openSet, toggleOpen }) {
 } = useMemo(() => {
   let totalProdMs = 0, totalParadaMs = 0, totalLowEffMs = 0, totalSemProgMs = 0;
   const machineParadaMs = {};
+
+  // Verificações defensivas para filtroStart/filtroEnd
+  if (!filtroStart || !filtroEnd) {
+    return {
+      totalProdH: 0,
+      totalParadaH: 0,
+      totalLowEffH: 0,
+      totalSemProgH: 0,
+      totalH: 0,
+      totalDisponivelH: 0,
+      pct: () => '0.0',
+      totalMaquinasParadas: 0,
+      machineParadaMs: {}
+    };
+  }
 
   const nextStartForMachine = (machineGroups, refTime) => {
     if (!Array.isArray(machineGroups) || machineGroups.length === 0) return null;
@@ -176,33 +204,72 @@ export default function Registro({ registroGrupos = [], openSet, toggleOpen }) {
     return desconto;
   }
 
-  for (const m of Object.keys(gruposPorMaquina)) {
-    const gruposOrdenados = gruposPorMaquina[m].slice().sort((a, b) => {
+  // CORRIGIDO: Percorre todas as máquinas do filtro
+  for (const m of maquinasConsideradas) {
+    const gruposOrdenados = (gruposPorMaquina[m] || []).slice().sort((a, b) => {
       const ta = toTime(a?.ordem?.started_at) || 0;
       const tb = toTime(b?.ordem?.started_at) || 0;
       return ta - tb;
     });
-        let paradaMsMaquina = 0;
-        // Para evitar erro de 'sem programação' antes da primeira O.P. e após a última O.P.
-        const firstOP = gruposOrdenados[0]?.ordem;
-        const lastOP = gruposOrdenados[gruposOrdenados.length - 1]?.ordem;
-        const firstOPStart = toTime(firstOP?.started_at);
-        const lastOPEnd = toTime(lastOP?.finalized_at);
+    let paradaMsMaquina = 0;
+    let prodMsMaquina = 0;
+    // Para evitar erro de 'sem programação' antes da primeira O.P. e após a última O.P.
+    const firstOP = gruposOrdenados[0]?.ordem;
+    const lastOP = gruposOrdenados[gruposOrdenados.length - 1]?.ordem;
+    const firstOPStart = toTime(firstOP?.started_at);
+    const lastOPEnd = toTime(lastOP?.finalized_at);
+
+    // Se não há O.P. para a máquina no período, contabiliza sem programação para o período inteiro
+    if (gruposOrdenados.length === 0) {
+      totalSemProgMs += filtroEnd.getTime() - filtroStart.getTime();
+      continue;
+    }
+
+    // Se não há O.P. ou a última O.P. terminou antes do início do filtro, contabiliza sem programação desde o início do filtro
+    if (!lastOP || (lastOPEnd && lastOPEnd < filtroStart.getTime())) {
+      // Busca próxima O.P. após o início do filtro
+      const proxOP = gruposOrdenados.find(g => toTime(g?.ordem?.started_at) > filtroStart.getTime());
+      const inicioSemProg = filtroStart.getTime();
+      const fimSemProg = proxOP ? toTime(proxOP?.ordem?.started_at) : filtroEnd.getTime();
+      if (fimSemProg > inicioSemProg) {
+        totalSemProgMs += fimSemProg - inicioSemProg;
+      }
+      // Se a última O.P. terminou antes do início do dia de hoje, contabiliza sem programação desde 00:00 até agora
+      else if (periodo === 'hoje' && lastOPEnd && lastOPEnd < filtroStart.getTime()) {
+        totalSemProgMs += filtroEnd.getTime() - filtroStart.getTime();
+      }
+    } else if (lastOPEnd && lastOPEnd < filtroEnd.getTime()) {
+      // Se a última O.P. terminou antes do fim do filtro e não há próxima O.P., contabiliza sem programação até o fim do filtro
+      const inicioSemProg = lastOPEnd;
+      const fimSemProg = filtroEnd.getTime();
+      if (fimSemProg > inicioSemProg) {
+        totalSemProgMs += fimSemProg - inicioSemProg;
+      }
+      // Garante que o tempo de produção seja contabilizado até o fim da última O.P.
+      // Não altera prodMsMaquina, pois já é somado nos intervalos
+    }
     gruposOrdenados.forEach((g, idx) => {
       const o = g.ordem || {};
       const intervals = [];
       let lastStart = toTime(o.started_at);
       let lastEnd = null;
 
+      // Sempre cria intervalo de produção para O.P. finalizada
+        if (safe(o.started_at) && safe(o.finalized_at)) {
+          const ini = Math.max(toTime(o.started_at), filtroStart.getTime());
+          const fim = Math.min(toTime(o.finalized_at), filtroEnd.getTime());
+          if (fim > ini) intervals.push({ tipo: 'producao', ini, fim });
+      }
+
       const paradaIntervalsAbertas = (g.stops || []).map(st => {
-        const stIni = toTime(st.started_at);
-        const emAberto = !safe(st.resumed_at);
-        if (emAberto && stIni < filtroEnd.getTime()) {
-          const ini = stIni < filtroStart.getTime() ? filtroStart.getTime() : stIni;
-          const fim = filtroEnd.getTime();
-          return ini < fim ? [ini, fim] : null;
-        }
-        return null;
+          const stIni = toTime(st.started_at);
+          const emAberto = !safe(st.resumed_at);
+          if (emAberto && stIni < filtroEnd.getTime()) {
+            const ini = stIni < filtroStart.getTime() ? filtroStart.getTime() : stIni;
+            const fim = filtroEnd.getTime();
+            return ini < fim ? [ini, fim] : null;
+          }
+          return null;
       }).filter(Boolean);
 
       function unirIntervalos(intervalos) {
@@ -239,15 +306,25 @@ export default function Registro({ registroGrupos = [], openSet, toggleOpen }) {
       reinicios.sort((a, b) => a.t - b.t);
 
       if (reinicios.length === 0) {
-        lastEnd = Date.now();
-        if (filtroEnd && lastEnd > filtroEnd.getTime()) lastEnd = filtroEnd.getTime();
-        if (lastEnd > lastStart) intervals.push([lastStart, lastEnd]);
+        // Se a O.P. está aberta, considera até o fim do filtro
+        if (!safe(o.finalized_at)) {
+          lastEnd = Date.now();
+          if (filtroEnd && lastEnd > filtroEnd.getTime()) lastEnd = filtroEnd.getTime();
+          if (lastEnd > lastStart) intervals.push({ tipo: 'producao', ini: lastStart, fim: lastEnd });
+        } else {
+          lastEnd = toTime(o.finalized_at);
+          if (lastEnd > lastStart) intervals.push({ tipo: 'producao', ini: lastStart, fim: lastEnd });
+        }
+      } else if (reinicios.length === 1 && reinicios[0].type === 'final') {
+        // Caso especial: O.P. finalizada sem outros eventos
+      const finalTime = toTime(o.finalized_at);
+      if (finalTime > lastStart) intervals.push({ tipo: 'producao', ini: lastStart, fim: finalTime });
       } else {
         let cursor = lastStart;
         for (let i = 0; i < reinicios.length; i++) {
           const r = reinicios[i];
           if (r.type === 'interrupt' || r.type === 'final') {
-            if (r.t > cursor) intervals.push([cursor, r.t]);
+            if (r.t > cursor) intervals.push({ tipo: 'producao', ini: cursor, fim: r.t });
             const nextRestart = reinicios.find(x => x.type === 'restart' && x.t > r.t);
             if (nextRestart) cursor = nextRestart.t;
             else cursor = null;
@@ -255,67 +332,74 @@ export default function Registro({ registroGrupos = [], openSet, toggleOpen }) {
         }
         if (cursor) {
           const fimAberto = filtroEnd.getTime();
-          if (fimAberto > cursor) intervals.push([cursor, fimAberto]);
+          if (fimAberto > cursor) intervals.push({ tipo: 'producao', ini: cursor, fim: fimAberto });
         }
       }
 
-      intervals.forEach(([iniMs, fimMs]) => {
-        const iniCalc = Math.max(iniMs, filtroStart.getTime());
-        const fimCalc = Math.min(fimMs, filtroEnd.getTime());
-        if (fimCalc > iniCalc) {
-          let prodMs = fimCalc - iniCalc;
-          const paradaIntervals = (g.stops || []).map(st => {
-            const stIni = toTime(st.started_at);
-            const emAberto = !safe(st.resumed_at);
-            if (emAberto && stIni < filtroStart.getTime()) {
-              return [filtroStart.getTime(), filtroEnd.getTime()];
-            }
-            const stFim = emAberto ? filtroEnd.getTime() : toTime(st.resumed_at);
-            const stIniCalc = Math.max(stIni || iniCalc, filtroStart.getTime());
-            const stFimCalc = Math.min(stFim || fimCalc, filtroEnd.getTime());
-            return stIniCalc < stFimCalc ? [stIniCalc, stFimCalc] : null;
-          }).filter(Boolean);
+        prodMsMaquina = 0;
+      if (Array.isArray(intervals)) {
+        intervals.forEach((intervalo) => {
+          if (!intervalo || intervalo.tipo !== 'producao') return;
+          const iniCalc = Math.max(intervalo.ini, filtroStart.getTime());
+          const fimCalc = Math.min(intervalo.fim, filtroEnd.getTime());
+          if (fimCalc > iniCalc) {
+            let prodMs = fimCalc - iniCalc;
+            const paradaIntervals = (g.stops || []).map(st => {
+              const stIni = toTime(st.started_at);
+              const emAberto = !safe(st.resumed_at);
+              if (emAberto && stIni < filtroStart.getTime()) {
+                return [filtroStart.getTime(), filtroEnd.getTime()];
+              }
+              const stFim = emAberto ? filtroEnd.getTime() : toTime(st.resumed_at);
+              const stIniCalc = Math.max(stIni || iniCalc, filtroStart.getTime());
+              const stFimCalc = Math.min(stFim || fimCalc, filtroEnd.getTime());
+              return stIniCalc < stFimCalc ? [stIniCalc, stFimCalc] : null;
+            }).filter(Boolean);
 
-          function unirIntervalos(intervalos) {
-            if (!intervalos.length) return [];
-            intervalos.sort((a, b) => a[0] - b[0]);
-            const unidos = [intervalos[0]];
-            for (let i = 1; i < intervalos.length; i++) {
-              const ultimo = unidos[unidos.length - 1];
-              const atual = intervalos[i];
-              if (atual[0] <= ultimo[1]) {
-                ultimo[1] = Math.max(ultimo[1], atual[1]);
-              } else {
-                unidos.push([...atual]);
+            function unirIntervalos(intervalos) {
+              if (!intervalos.length) return [];
+              intervalos.sort((a, b) => a[0] - b[0]);
+              const unidos = [intervalos[0]];
+              for (let i = 1; i < intervalos.length; i++) {
+                const ultimo = unidos[unidos.length - 1];
+                const atual = intervalos[i];
+                if (atual[0] <= ultimo[1]) {
+                  ultimo[1] = Math.max(ultimo[1], atual[1]);
+                } else {
+                  unidos.push([...atual]);
+                }
+              }
+              return unidos;
+            }
+
+            const paradaUnida = unirIntervalos(paradaIntervals);
+            let deltaParada = 0;
+            paradaUnida.forEach(([ini, fim]) => {
+              deltaParada += Math.max(0, fim - ini);
+            });
+            prodMs -= deltaParada;
+            paradaMsMaquina += deltaParada;
+
+            // Corrigir cálculo de baixa eficiência para considerar apenas o intervalo dentro do filtro
+            if (safe(o.loweff_started_at)) {
+              const leIni = toTime(o.loweff_started_at);
+              const leFim = toTime(o.loweff_ended_at) || intervalo.fim;
+              // Garante que só conta tempo dentro do filtro
+              const leIniCalc = Math.max(leIni, filtroStart.getTime(), iniCalc);
+              const leFimCalc = Math.min(leFim, filtroEnd.getTime(), fimCalc);
+              if (leIniCalc < leFimCalc) {
+                const delta = Math.max(0, leFimCalc - leIniCalc);
+                prodMs -= delta;
+                totalLowEffMs += delta;
               }
             }
-            return unidos;
+            const descontoFimDeSemana = descontarFimDeSemana(iniCalc, fimCalc);
+            prodMs -= descontoFimDeSemana;
+            prodMsMaquina += Math.max(0, prodMs);
           }
-
-          const paradaUnida = unirIntervalos(paradaIntervals);
-          let deltaParada = 0;
-          paradaUnida.forEach(([ini, fim]) => {
-            deltaParada += Math.max(0, fim - ini);
-          });
-          prodMs -= deltaParada;
-          paradaMsMaquina += deltaParada;
-
-          if (safe(o.loweff_started_at)) {
-            const leIni = toTime(o.loweff_started_at);
-            const leFim = toTime(o.loweff_ended_at) || fimMs;
-            const leIniCalc = Math.max(leIni || iniCalc, iniCalc);
-            const leFimCalc = Math.min(leFim || fimCalc, fimCalc);
-            if (leIniCalc < leFimCalc) {
-              const delta = Math.max(0, leFimCalc - leIniCalc);
-              prodMs -= delta;
-              totalLowEffMs += delta;
-            }
-          }
-          const descontoFimDeSemana = descontarFimDeSemana(iniCalc, fimCalc);
-          prodMs -= descontoFimDeSemana;
-          totalProdMs += Math.max(0, prodMs);
-        }
-      });
+        });
+      }
+      // Removido fechamento duplicado
 
       const finalizedMs = toTime(o.finalized_at);
       if (finalizedMs) {
@@ -339,7 +423,7 @@ export default function Registro({ registroGrupos = [], openSet, toggleOpen }) {
     });
     const horasPeriodoMs = (filtroEnd.getTime() - filtroStart.getTime());
     let somaMs = 0;
-    const prodMsMaquina = totalProdMs;
+      totalProdMs += prodMsMaquina;
     somaMs = prodMsMaquina + paradaMsMaquina;
     if (somaMs > horasPeriodoMs) {
       paradaMsMaquina = Math.max(0, horasPeriodoMs - prodMsMaquina);
@@ -354,8 +438,6 @@ export default function Registro({ registroGrupos = [], openSet, toggleOpen }) {
   const totalSemProgH = totalSemProgMs / 1000 / 60 / 60;
   const totalH = totalProdH + totalParadaH + totalLowEffH + totalSemProgH;
 
-  let maquinasConsideradas = filtroMaquina === 'todas' ? MAQUINAS : [filtroMaquina];
-  maquinasConsideradas = maquinasConsideradas.filter(m => MAQUINAS.includes(m));
   let horasPeriodo = 0;
   if (filtroStart && filtroEnd) {
     horasPeriodo = (filtroEnd.getTime() - filtroStart.getTime()) / 1000 / 60 / 60;

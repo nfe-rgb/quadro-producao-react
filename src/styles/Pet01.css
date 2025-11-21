@@ -8,15 +8,6 @@
   --pet01-left-accent-produzindo: #2eb27b; /* verde produção (ajuste se quiser outro) */
   --pet01-left-accent-parada:      #e74c3c; /* vermelho parada */
   --pet01-left-accent-baixa:       #ffd166; /* amarelo baixa ef. */
-  --pet01-timer-red:               rgba(231,76,60,0.12);   /* fundo pílula parada */
-  --pet01-timer-red-border:        rgba(231,76,60,0.18);
-  --pet01-timer-yellow:            rgba(255,193,7,0.12);
-  --pet01-timer-yellow-border:     rgba(255,193,7,0.18);
-  --pet01-timer-blue:              rgba(60,146,226,0.12);
-  --pet01-timer-blue-border:       rgba(60,146,226,0.14);
-  --pet01-timer-color-red:         #C62828;
-  --pet01-timer-color-yellow:      #7a5a00;
-  --pet01-timer-color-blue:        #1051dd;
   --pet01-card-bg: var(--panel); /* fundo do card principal igual ao painel */
 }
 
@@ -90,32 +81,6 @@
   font-size: clamp(21px, 1.05vw, 18px);
 }
 
-/* CRONÔMETRO estilo painel (pílula) */
-.pet01-timer{
-  font-weight:800;
-  padding: 6px 10px;
-  border-radius: 999px;
-  font-size: 15px;
-  box-shadow: none;
-}
-
-/* cores do timer conforme estado */
-.pet01-timer.red {
-  background: var(--pet01-timer-red);
-  border: 1px solid var(--pet01-timer-red-border);
-  color: var(--pet01-timer-color-red);
-}
-.pet01-timer.yellow {
-  background: var(--pet01-timer-yellow);
-  border: 1px solid var(--pet01-timer-yellow-border);
-  color: var(--pet01-timer-color-yellow);
-}
-.pet01-timer.blue {
-  background: var(--pet01-timer-blue);
-  border: 1px solid var(--pet01-timer-blue-border);
-  color: var(--pet01-timer-color-blue);
-}
-
 /* etiqueta dentro do card — usa seu componente Etiqueta (apenas garantimos espaçamento) */
 .pet01-card > .small,
 .pet01-card > .etiqueta {
@@ -138,7 +103,7 @@
   padding:10px 12px;
   border-radius:10px;
   border:1px solid #e6eef6;
-  min-width:340px;
+  min-width:190px;
   background: #fbfdff;
   font-size: 1.03rem !important; 
   font-weight:900;
@@ -180,23 +145,15 @@
 .pet01-next h2 { margin: 0 0 8px 0; font-size:18px; color:var(--pet01-text); }
 .pet01-next-grid { display:grid; grid-template-columns: 1fr 1fr; gap:8px 20px; background: transparent; padding: 6px 0; }
 
-/* PÍLULAS (Lidas / Saldo) — como no painel */
-.pill-row { display:flex; gap:8px; margin-top:6px; }
-.pill {
-  display:inline-flex; align-items:center; gap:8px;
-  padding:6px 10px; border-radius:999px; background: var(--pet01-pill-bg);
-  border:1px solid var(--pet01-pill-border); font-weight:700; font-size:13px;
-}
-
 /* MODAL: sobreposição e centralização completa (idêntico ao painel) */
 .pet01-modal-bg{
   position: fixed;
   inset: 0;
   background: rgba(2,8,23,0.45);
   display:flex;
-  align-items:center;
+  align-items:flex-start;
   justify-content:center;
-  z-index: 9999;
+  z-index: 99999;
   padding: 20px;
 }
 
@@ -238,19 +195,6 @@
   .pet01-buttons { flex-direction: column; align-items: stretch; }
   .pet01-buttons button { width:100%; }
   .pet01-modal{ width: calc(100% - 32px); }
-}
-
-
-/* timer pills colors */
-.pet01-timer.red {
-  background: var(--panel-timer-red-bg);
-  border: 1px solid var(--panel-timer-red-border);
-  color: var(--panel-red);
-}
-.pet01-timer.yellow {
-  background: var(--panel-timer-yellow-bg);
-  border: 1px solid var(--panel-timer-yellow-border);
-  color: #7a5a00;
 }
 
 /* =======================
@@ -401,6 +345,7 @@
 
 /* ITEM ATUAL (card principal) */
 .pet01-card .small {
+  position: relative !important;
   font-size: 1.25rem !important;      /* ~23px — ideal para 9” */
   line-height: 1.40 !important;
   font-weight: 400 !important;
@@ -409,34 +354,6 @@
 /* Destaques (Cliente:, Produto:, Cor:) */
 .pet01-card .small b {
   font-size: 1.25rem !important;       /* ~22px */
-  font-weight: 800 !important;
-}
-
-/* 3) Caixa Lidas/Saldo: mover para canto superior direito da etiqueta e destacar */
-.pet01-card .small .pill-row,
-.pet01-card .etiqueta .pill-row {
-  position: absolute !important;
-  bottom: 100px !important;       /* ajuste fino: distância do topo da etiqueta */
-  right: 40px !important;     /* encaixado no canto direito */
-  display: flex !important;
-  flex-direction: column !important; /* empilha Lidas acima do Saldo */
-  gap: 8px !important;
-  align-items: flex-end !important;
-  width: auto;
-  z-index: 4;
-}
-
-/* Lidas / Saldo = Estilo */
-.pet01-card .small .pill {
-  font-size: 1.45rem !important;    /* ~16.5px */
-  padding: 12px 30px !important;
-  border-radius: 10px !important;
-  background: #ffffff !important;
-  border: 1px solid rgba(0,0,0,0.06) !important;
-  box-shadow: 0 6px 14px rgba(2,8,23,0.06) !important;
-  color: #0f172a !important;
-  min-width: 84px;
-  text-align: center;
   font-weight: 800 !important;
 }
 
@@ -459,7 +376,7 @@
   left: 12px !important;          /* espaço para o botão fullscreen */
   height: 42px !important;         /* ajuste para tablet 9" */
   object-fit: contain !important;
-  z-index: 9999 !important;
+  z-index: 500 !important;
   pointer-events: auto;
   opacity: 0.95;
 }
@@ -471,10 +388,91 @@ body:fullscreen .pet01-logo {
   top: 12px !important;
   right: 60px !important;
   height: 46px !important;
-  z-index: 99999 !important;
+  z-index: 800 !important;
 }
 
 /* ajustes responsivos */
 @media (max-width: 900px) {
   .pet01-logo { height: 36px !important; right: 48px !important; top: 10px !important; }
 }
+
+/* ===== Mostrar/forçar botão "Iniciar Produção" no PET-01 / PET-02 ===== */
+/* Cole no final de src/styles/Pet01.css */
+
+/* garante que o container de situação use layout flex e não esconda o botão */
+.pet01-card .pet01-field {
+  display: flex !important;
+  align-items: center !important;
+  gap: 12px !important;
+  flex-wrap: nowrap !important;
+}
+
+/* garante que o container do botão não quebre/empurre pra fora */
+.pet01-card .pet01-field > div {
+  display: flex !important;
+  align-items: center !important;
+}
+
+/* força a exibição do botão iniciar (evita regras que escondem em mobile) */
+.pet01-card .btn.small.primary,
+.pet01-card .btn.small.primary:enabled {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  padding: 8px 12px !important;
+  min-width: 120px !important;
+  border-radius: 999px !important;
+  box-shadow: 0 4px 12px rgba(2,8,23,0.08) !important;
+  z-index: 50 !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+}
+
+/* segurança para visibilidade do texto (contraste) */
+.pet01-card .btn.small.primary {
+  color: #fff !important;
+  background: linear-gradient(90deg, var(--primary), var(--secondary)) !important;
+  border: 0 !important;
+}
+
+/* se algum ancestor tiver overflow: hidden que corte o botão, damos folga interna */
+.pet01-card {
+  padding-bottom: 18px !important;
+}
+
+/* regras responsivas (tablet 9") — garante que o botão caiba e não quebre linha */
+@media (max-width: 900px) {
+  .pet01-card .pet01-field { gap: 8px !important; }
+  .pet01-card .btn.small.primary { min-width: 110px !important; padding: 7px 10px !important; font-size: 0.95rem !important; }
+}
+
+/* ========================= TIMERS COM FUNDO ========================= */
+
+.rotas-loweff-timer{
+  font-weight: 900;
+  margin-left: 10px;
+  padding: 2px 20px;
+  border-radius: 999px;
+  background: rgba(255, 193, 7, 0.12);
+  color: #7a5a00;
+  font-size: 20px;
+}
+.rotas-parada-timer{
+  font-weight: 800;
+  margin-left: 10px;
+  padding: 2px 20px;
+  border-radius: 999px;
+  background: rgba(198,40,40,.12);
+  color: #C62828;
+  font-size: 20px;
+}
+.rotas-semprog-timer {
+  font-weight: 800;
+  margin-left: 10px;
+  padding: 2px 20px;
+  border-radius: 999px;
+  background: rgba(60, 146, 226, 0.12);
+  color: #1051dd;
+  font-size: 20px;
+}
+/* === PÍLULAS DE LIDAS / SALDO NAS ETIQUETAS FIXA EM ETIQUETAS.CSS === */
