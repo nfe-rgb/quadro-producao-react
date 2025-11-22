@@ -42,7 +42,8 @@ export default function Pet03({
     quantidade: "",
     motivo: "Rebarba",
   });
-
+  
+  const TURNOS = ["1", "2", "3", "Hora Extra"];
   // --------------------------
   // Motivos padrão de refugo
   // --------------------------
@@ -330,7 +331,7 @@ async function toggleFullscreen() {
   return (
     <div className="pet01-wrapper" ref={wrapperRef}>
 
-      <h1 className="pet01-title">Apontamento — PET 03</h1>
+      <h1 className="pet01-title">Apontamento — PET 02</h1>
 <img
   src="/Logotipo Savanti.png"
   alt="Savanti Plásticos"
@@ -394,10 +395,13 @@ async function toggleFullscreen() {
         <div className="pet01-card-header">
           <div className="left">
             {ativa?.status === "PARADA" && tempoParada && (
-              <span className="pet01-timer red">{tempoParada}</span>
+              <span className="rotas-parada-timer">{tempoParada}</span>
             )}
             {ativa?.status === "BAIXA_EFICIENCIA" && tempoLow && (
               <span className="rotas-loweff-timer">{tempoLow}</span>
+            )}
+            {ativa?.status === "SEM_PROGRAMACAO" && tempoSemProg && (
+              <span className="rotas-semprog-timer">{tempoSemProg}</span>
             )}
           </div>
 
@@ -471,14 +475,10 @@ async function toggleFullscreen() {
         <div className="pet01-modal-bg" role="dialog" aria-modal>
           <div className="pet01-modal">
             <h3>Apontamento por Bipagem</h3>
-
-            <label>Operador *</label>
-            <input
-              className="input"
-              value={bipOperator}
-              onChange={(e) => setBipOperator(e.target.value)}
-              placeholder="Nome do operador"
-            />
+            <label>Turno *</label>
+              <select className="input" value={refugoForm.turno} onChange={e => setRefugoForm(f => ({ ...f, turno: e.target.value }))}>
+                {TURNOS.map(t => <option key={t} value={t}>{t}</option>)}
+              </select>
 
             <label style={{ marginTop: 8 }}>Código (OS 753 - 001)</label>
             <input
@@ -491,8 +491,7 @@ async function toggleFullscreen() {
             />
 
             <div className="pet01-modal-buttons" style={{ marginTop: 12 }}>
-              <button className="gray" onClick={() => { setShowBip(false); setBipOperator(""); }}>Cancelar</button>
-              <button className="green" onClick={() => bipar(bipRef.current?.value)}>Registrar</button>
+              <button className="green" onClick={() => { setShowBip(false); setBipOperator(""); }}>Fechar</button>
             </div>
           </div>
         </div>

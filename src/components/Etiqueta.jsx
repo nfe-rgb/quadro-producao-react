@@ -69,7 +69,7 @@ export default function Etiqueta({ o, variant = 'painel', saldoCaixas, lidasCaix
             <div className="pill-row">
               {typeof lidasCaixas === 'number' && (
                 <span className="pill" title="Caixas já bipadas">
-                  Lidas: <b>{lidasCaixas}</b>
+                  Apontadas: <b>{lidasCaixas}</b>
                 </span>
               )}
               {typeof saldoCaixas === 'number' && (

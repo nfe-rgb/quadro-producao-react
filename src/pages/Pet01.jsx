@@ -1,14 +1,8 @@
-// =======================
-//  PET01.jsx — PARTE 1/3
-// =======================
-
+// src/pages/Pet01.jsx
 import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "../lib/supabaseClient";
 import Etiqueta from "../components/Etiqueta";
-
-// ⭐ Importa o mesmo statusClass usado no painel
-import { statusClass } from "../lib/utils";
-
+import { getTurnoAtual, statusClass } from "../lib/utils";
 import "../styles/Pet01.css";
 
 export default function Pet01({
@@ -23,27 +17,12 @@ export default function Pet01({
   setResumeModal,
   setFinalizando,
 }) {
-
-  // ===== ESTADOS =====
+  // estados principais
   const [ativa, setAtiva] = useState(null);
   const [proximo, setProximo] = useState(null);
-
   const [scans, setScans] = useState([]);
 
-  const [showBip, setShowBip] = useState(false);
-  const [showRefugo, setShowRefugo] = useState(false);
-
-  const bipRef = useRef(null);
-  const [bipOperator, setBipOperator] = useState("");
-
-  const [refugoForm, setRefugoForm] = useState({
-    operador: "",
-    turno: "",
-    quantidade: "",
-    motivo: "Rebarba",
-  });
-  
-  const TURNOS = ["1", "2", "3", "Hora Extra"];
+  const [refugoForm, setRefugoForm] = useState({ operador: "", turno: "", quantidade: "", motivo: "Rebarba",});
   // --------------------------
   // Motivos padrão de refugo
   // --------------------------
@@ -63,47 +42,37 @@ export default function Pet01({
     "Manchadas",
   ];
 
-    // ---------- Fullscreen (botão) ----------
-  const wrapperRef = useRef(null);           // referência do container que vamos fullscreen
+  const [showRefugo, setShowRefugo] = useState(false);
+
+
+  // toast de notificação superior
+  const [toast, setToast] = useState({ visible: false, type: "ok", msg: "" });
+
+  // listener de scanner: buffer e timestamps
+  const scanBufferRef = useRef("");
+  const lastKeyTimeRef = useRef(0);
+
+  // turno atual (usado para gravar)
+  const [currentShift, setCurrentShift] = useState(() => getTurnoAtual() ?? "Hora Extra");
+
+  // fullscreen ref + state (se usar)
+  const wrapperRef = useRef(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
 
   useEffect(() => {
-    const onFsChange = () => {
-      setIsFullscreen(!!document.fullscreenElement);
-    };
-    document.addEventListener('fullscreenchange', onFsChange);
-    return () => document.removeEventListener('fullscreenchange', onFsChange);
+    const onFsChange = () => setIsFullscreen(!!document.fullscreenElement);
+    document.addEventListener("fullscreenchange", onFsChange);
+    return () => document.removeEventListener("fullscreenchange", onFsChange);
   }, []);
 
-async function toggleFullscreen() {
-  try {
-    const elem = document.documentElement;
-
-    if (!document.fullscreenElement) {
-      if (elem.requestFullscreen) await elem.requestFullscreen();
-      else if (elem.webkitRequestFullscreen) elem.webkitRequestFullscreen();
-    } else {
-      if (document.exitFullscreen) await document.exitFullscreen();
-      else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
-    }
-  } catch (err) {
-    console.warn("Fullscreen failed:", err);
-  }
-}
-  // ---------- end fullscreen ----------
-
-  // ===========================
-  //  CAPTURAR ORDEM ATIVA P1
-  // ===========================
+  // Atualiza ativa/proximo sempre que ativos mudam (somente P1)
   useEffect(() => {
     if (!ativosP1) return;
     setAtiva(ativosP1[0] || null);
     setProximo(ativosP1[1] || null);
   }, [ativosP1]);
 
-  // ===========================
-  //  BIPAGENS
-  // ===========================
+  // carrega scans existentes da ordem ativa
   async function loadScans(id) {
     if (!id) {
       setScans([]);
@@ -114,87 +83,78 @@ async function toggleFullscreen() {
       .select("*")
       .eq("order_id", id)
       .order("scanned_box", { ascending: true });
-
     setScans(data || []);
   }
-
-  useEffect(() => {
-    if (ativa?.id) loadScans(ativa.id);
-  }, [ativa?.id]);
+  useEffect(() => { if (ativa?.id) loadScans(ativa.id); }, [ativa?.id]);
 
   const lidas = scans.length;
   const saldo = ativa ? Math.max(0, Number(ativa.boxes) - lidas) : 0;
 
-  // ========================================
-  //  CRONÔMETRO — PARADA E BAIXA EFICIÊNCIA
-  // ========================================
-  const paradaAberta = paradas?.find(
-    (p) => p.order_id === ativa?.id && !p.resumed_at
-  );
-
+    // cronômetros
+  const paradaAberta = paradas?.find((p) => p.order_id === ativa?.id && !p.resumed_at);
   const tempoParada = useMemo(() => {
     if (!paradaAberta) return null;
     const _ = tick;
-    const diff = Math.floor(
-      (Date.now() - new Date(paradaAberta.started_at).getTime()) / 1000
-    );
+    const diff = Math.floor((Date.now() - new Date(paradaAberta.started_at).getTime()) / 1000);
     const hh = String(Math.floor(diff / 3600)).padStart(2, "0");
     const mm = String(Math.floor((diff % 3600) / 60)).padStart(2, "0");
     const ss = String(diff % 60).padStart(2, "0");
     return `${hh}:${mm}:${ss}`;
   }, [paradaAberta, tick]);
 
-
   const tempoLow = useMemo(() => {
     if (!ativa) return null;
     if (ativa.status !== "BAIXA_EFICIENCIA") return null;
     if (!ativa.loweff_started_at) return null;
-
     const _ = tick;
-    const diff = Math.floor(
-      (Date.now() - new Date(ativa.loweff_started_at).getTime()) / 1000
-    );
+    const diff = Math.floor((Date.now() - new Date(ativa.loweff_started_at).getTime()) / 1000);
     const hh = String(Math.floor(diff / 3600)).padStart(2, "0");
     const mm = String(Math.floor((diff % 3600) / 60)).padStart(2, "0");
     const ss = String(diff % 60).padStart(2, "0");
     return `${hh}:${mm}:${ss}`;
   }, [ativa, tick]);
 
-  // ===========================
-  //  Função para mapear status para classes locais (borda esquerda)
-  // ===========================
+  // classe local para borda esquerda (verde/vermelho/amarelo)
   const pet01StatusClass = (s) => {
     if (!s) return "status-produzindo";
     const st = String(s).toUpperCase();
     if (st === "PARADA") return "status-parada";
     if (st.includes("BAIXA")) return "status-baixa";
-    if (st === "PRODUZINDO") return "status-produzindo";
-    // inclui AGUARDANDO como produzindo visualmente no tablet (ajuste se quiser diferente)
-    if (st === "AGUARDANDO") return "status-produzindo";
+    if (st === "PRODUZINDO" || st === "AGUARDANDO") return "status-produzindo";
     return "status-produzindo";
   };
 
-  // ===========================
-  //  BIPAGEM (função usada pelo modal)
-  //  - já implementada na parte 1 mas repetimos aqui para ligar tudo
-  // ===========================
-  async function bipar(cod) {
-    if (!ativa) return alert("Nenhuma ordem atual.");
-    if (!bipOperator || !bipOperator.trim()) return alert("Informe o operador.");
+  // ---------- TOAST helper ----------
+  function showToast(msg, type = "ok", ms = 2400) {
+    setToast({ visible: true, type, msg });
+    setTimeout(() => setToast((t) => ({ ...t, visible: false })), ms);
+  }
+
+  // ---------- bipagem (registro) ----------
+  async function biparWithCode(code) {
+    // code example: "OS 753 - 001"
+    const value = (code || "").trim();
+    if (!ativa) {
+      showToast("Nenhuma ordem ativa.", "err");
+      return;
+    }
 
     const reg = /^OS\s+(\d+)\s*-\s*(\d{3})$/i;
-    const m = cod?.trim()?.match(reg);
-    if (!m) return alert("Formato inválido: OS 753 - 001");
-
+    const m = value.match(reg);
+    if (!m) {
+      showToast("Formato inválido. Use: OS 753 - 001", "err");
+      return;
+    }
     const op = m[1];
     const caixa = Number(m[2]);
 
     if (String(op) !== String(ativa.code)) {
-      return alert(`Código não pertence à O.P ${ativa.code}`);
+      showToast(`Código não pertence à O.P ${ativa.code}`, "err");
+      return;
     }
-
     if (caixa < 1 || caixa > Number(ativa.boxes)) {
-      return alert("Caixa fora do intervalo.");
+      showToast("Caixa fora do intervalo.", "err");
+      return;
     }
 
     // verifica duplicidade
@@ -205,71 +165,103 @@ async function toggleFullscreen() {
       .eq("scanned_box", caixa)
       .maybeSingle();
 
-    if (dupErr) { console.error(dupErr); return alert("Erro ao verificar bipagem."); }
-    if (dup) return alert("Esta caixa já foi bipada.");
-
-    // insere no banco
-    const { error } = await supabase.from("production_scans").insert([{
-      order_id: ativa.id,
-      machine_id: "P1",
-      scanned_box: caixa,
-      code: cod.trim(),
-      operator: bipOperator.trim(),
-    }]);
-
-    if (error) {
-      console.error(error);
-      return alert("Erro ao registrar bipagem.");
+    if (dupErr) {
+      console.error(dupErr);
+      showToast("Erro ao verificar bipagem.", "err");
+      return;
+    }
+    if (dup) {
+      showToast("Caixa já bipada.", "err");
+      return;
     }
 
-    // atualiza localmente
-    await loadScans(ativa.id);
-    setShowBip(false);
-    setBipOperator("");
+    // qty_pieces = padrão (peças por caixa) OR 0 if missing
+    const qtyPiecesPerBox = Number(ativa.standard || 0);
 
-    // Se zerou -> abre finalização
+    const payload = {
+      created_at: new Date().toISOString(),
+      machine_id: "P1",
+      shift: String(currentShift || getTurnoAtual() || "Hora Extra"),
+      order_id: ativa.id,
+      op_code: String(ativa.code),
+      scanned_box: caixa,
+      qty_pieces: qtyPiecesPerBox,
+      code: value,
+    };
+
+    const { error } = await supabase.from("production_scans").insert([payload]);
+    if (error) {
+      console.error("Erro insert production_scans:", error);
+      showToast("Erro ao registrar bipagem.", "err");
+      return;
+    }
+
+    // atualiza local e mostra sucesso (mantém fluxo aberto)
+    await loadScans(ativa.id);
+    showToast(`Caixa ${String(caixa).padStart(3, "0")} registrada • Turno ${payload.shift}`, "ok");
+
+    // se zerou -> chama finalização (o App abre modal de finalização)
     if (saldo - 1 <= 0) {
-      // chama finalização via App
       setFinalizando && setFinalizando(ativa);
     }
   }
 
-  // ===========================
-  //  Registrar refugo
-  // ===========================
-  async function enviarRefugo(e) {
-    if (e && e.preventDefault) e.preventDefault();
-    if (!ativa) return alert("Nenhuma ordem atual.");
+  // ---------- Global scanner listener (HID) ----------
+  useEffect(() => {
+    function onGlobalKey(e) {
+      // ignore modifier keys
+      if (e.key === "Shift" || e.key === "Alt" || e.key === "Meta" || e.key === "CapsLock") return;
 
-    const { operador, turno, quantidade, motivo } = refugoForm;
-    if (!operador?.trim() || !turno?.trim() || !quantidade) return alert("Preencha os campos obrigatórios.");
+      const now = Date.now();
 
-    const payload = {
-      order_id: ativa.id,
-      machine_id: "P1",
-      operator: operador.trim(),
-      shift: turno.trim(),
-      qty: Number(quantidade),
-      reason: motivo,
-    };
+      // threshold between characters of scanner (ms)
+      const THRESHOLD = 120;
 
-    const { error } = await supabase.from("scrap_logs").insert([payload]);
-    if (error) { console.error(error); return alert("Erro ao registrar refugo."); }
+      if (now - lastKeyTimeRef.current > THRESHOLD) {
+        scanBufferRef.current = "";
+      }
+      lastKeyTimeRef.current = now;
 
-    setShowRefugo(false);
-    setRefugoForm({ operador: "", turno: "", quantidade: "", motivo: REFUGO_MOTIVOS[0] });
-  }
+      // if Enter -> finalize
+      if (e.key === "Enter") {
+        const code = (scanBufferRef.current || "").trim();
+        if (code) {
+          // call bipar
+          biparWithCode(code);
+        }
+        scanBufferRef.current = "";
+        // prevent default so Enter doesn't submit forms
+        e.preventDefault();
+        return;
+      }
 
-  // ===========================
-  //  Tratamento de alteração de status (atualização otimista)
-  //  - atualiza localmente para efeito imediato
-  //  - chama onStatusChange (vindo do App) para persistir e abrir modais se necessários
-  // ===========================
+      // If user typing in an input and modal isn't open, don't capture
+      const active = document.activeElement;
+      const activeTag = active && active.tagName ? active.tagName.toUpperCase() : null;
+      const activeIsInput = activeTag === "INPUT" || activeTag === "TEXTAREA" || active?.isContentEditable;
+
+      const modalOpen = !!document.querySelector(".pet01-modal-bg");
+      if (!modalOpen && activeIsInput) {
+        // user's typing — do not intercept
+        return;
+      }
+
+      // add printable characters only (length === 1)
+      if (e.key.length === 1) {
+        scanBufferRef.current += e.key;
+        // prevent typing anywhere that would show text (if modal not open)
+        if (!modalOpen) e.preventDefault();
+      }
+    }
+
+    window.addEventListener("keydown", onGlobalKey, true);
+    return () => window.removeEventListener("keydown", onGlobalKey, true);
+  }, [ativa, scans, currentShift, saldo]); // deps: ativa so buffer relevant
+
+  // ---------- status change handler (keeps behavior) ----------
   function handleStatusChange(targetStatus) {
     if (!ativa) return;
     const before = ativa.status;
-
-    // validações locais que o App fazia (copiadas do App.jsx behaviours)
     const jaIniciouLocal = !!ativa.started_at;
     if (jaIniciouLocal && targetStatus === "AGUARDANDO") {
       alert('Após iniciar a produção, não é permitido voltar para "Aguardando".');
@@ -278,7 +270,6 @@ async function toggleFullscreen() {
 
     if (targetStatus === "BAIXA_EFICIENCIA" && before !== "BAIXA_EFICIENCIA") {
       const now = new Date();
-      console.log("[Pet01] Abrindo modal Baixa Eficiência", ativa, targetStatus);
       setLowEffModal && setLowEffModal({
         ordem: ativa,
         operador: "",
@@ -291,11 +282,10 @@ async function toggleFullscreen() {
 
     if (targetStatus === "PARADA" && before !== "PARADA") {
       const now = new Date();
-      console.log("[Pet01] Abrindo modal Parada", ativa, targetStatus);
       setStopModal && setStopModal({
         ordem: ativa,
         operador: "",
-        motivo: "Parada Técnica",
+        motivo: "SET UP",
         obs: "",
         data: now.toISOString().slice(0,10),
         hora: now.toTimeString().slice(0,5),
@@ -305,7 +295,6 @@ async function toggleFullscreen() {
 
     if (before === "PARADA" && targetStatus !== "PARADA") {
       const now = new Date();
-      console.log("[Pet01] Abrindo modal Retomada", ativa, targetStatus);
       setResumeModal && setResumeModal({
         ordem: ativa,
         operador: "",
@@ -316,48 +305,57 @@ async function toggleFullscreen() {
       return;
     }
 
-    // Chama apenas o handler do App, sem atualizar localmente
     try {
-      console.log("[Pet01] Chamando onStatusChange", ativa, targetStatus);
       onStatusChange && onStatusChange(ativa, targetStatus);
     } catch (err) {
-      console.error('Erro ao chamar onStatusChange', err);
+      console.error("Erro onStatusChange:", err);
     }
   }
 
-  // ============================
-  //  PARTE 3/3 — RENDER / JSX
-  // ============================
+  // ---------- open fullscreen helper ----------
+  async function toggleFullscreen() {
+    try {
+      const elem = document.documentElement;
+      if (!document.fullscreenElement) {
+        if (elem.requestFullscreen) await elem.requestFullscreen();
+        else if (elem.webkitRequestFullscreen) elem.webkitRequestFullscreen();
+      } else {
+        if (document.exitFullscreen) await document.exitFullscreen();
+        else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+      }
+    } catch (err) {
+      console.warn("Fullscreen failed:", err);
+    }
+  }
+
+  // ---------- render ----------
   return (
     <div className="pet01-wrapper" ref={wrapperRef}>
+      {/* Top toast notification */}
+      <div className={`pet01-toast ${toast.type === "ok" ? "ok" : "err"} ${toast.visible ? "show" : ""}`} role="status" aria-live="polite">
+        {toast.msg}
+      </div>
 
-      <h1 className="pet01-title">Apontamento — PET 01</h1>
-<img
-  src="/Logotipo Savanti.png"
-  alt="Savanti Plásticos"
-  className="pet01-logo"
-  onError={(e) => { e.currentTarget.src = '/savanti-logo.png'; }}
-/>
+      <h1 className="pet01-title">Apontamento — Máquina P1</h1>
 
-       {/* botão pequeno de tela cheia (canto superior direito) */}
+      <img src="/Logotipo Savanti.png" alt="Savanti Plásticos" className="pet01-logo" onError={(e) => e.currentTarget.src = "/savanti-logo.png"} />
+
       <button
         type="button"
-        className={`pet01-fullscreen-btn ${isFullscreen ? 'active' : ''}`}
+        className={`pet01-fullscreen-btn ${isFullscreen ? "active" : ""}`}
         onClick={toggleFullscreen}
         aria-label={isFullscreen ? "Sair da tela cheia" : "Entrar em tela cheia"}
         title={isFullscreen ? "Sair da tela cheia" : "Entrar em tela cheia"}
       >
         {isFullscreen ? (
-          /* ícone de minimizar (x) */
-          <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden>
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" xmlns="http://www.w3.org/2000/svg">
             <path d="M6 9V6h3" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
             <path d="M6 6l6 6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
             <path d="M18 15v3h-3" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
             <path d="M18 18l-6-6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
           </svg>
         ) : (
-          /* ícone de expandir */
-          <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden>
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" xmlns="http://www.w3.org/2000/svg">
             <path d="M9 6H6v3" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
             <path d="M6 6l6 6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
             <path d="M15 18h3v-3" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
@@ -366,32 +364,13 @@ async function toggleFullscreen() {
         )}
       </button>
 
-      {/* BOTÕES — agora logo abaixo do título */}
-      <div className="pet01-buttons" style={{marginBottom: 16}}>
-        <button
-          className="pet01-btn green"
-          onClick={() => {
-            setShowBip(true);
-            setTimeout(() => bipRef.current?.focus?.(), 120);
-          }}
-        >
-          Apontar Produção
-        </button>
-
-        <button
-          className="pet01-btn orange"
-          onClick={() => {
-            setShowRefugo(true);
-          }}
-        >
-          Apontar Refugo
-        </button>
+      {/* Buttons: keep only Refugo (we removed Apontar Produção button per your request) */}
+      <div className="pet01-buttons" style={{ marginBottom: 12 }}>
+        <button className="pet01-btn orange" onClick={() => setShowRefugo(true)}>Apontar Refugo</button>
       </div>
 
-      {/* CARD PRINCIPAL: aplica classe local + aplica class do painel (statusClass) ao conteúdo */}
+      {/* CARD PRINCIPAL */}
       <div className={`pet01-card ${pet01StatusClass(ativa?.status)}`}>
-
-        {/* header: timer (esquerda) e O.P (direita) */}
         <div className="pet01-card-header">
           <div className="left">
             {ativa?.status === "PARADA" && tempoParada && (
@@ -410,46 +389,32 @@ async function toggleFullscreen() {
           </div>
         </div>
 
-        {/* Usa a mesma classe que o Painel usa para garantir cor/estilo idênticos */}
         <div className={statusClass(ativa?.status)}>
           <Etiqueta o={ativa} variant="painel" saldoCaixas={saldo} lidasCaixas={lidas} />
         </div>
 
-        {/* Motivo de parada logo abaixo se existir */}
         {paradaAberta?.reason && ativa?.status === "PARADA" && (
           <div className="stop-reason-below">{paradaAberta.reason}</div>
         )}
 
         <div className="sep" style={{ marginTop: 12 }} />
 
-        {/* Situação: usa handleStatusChange que abre modais conforme regra do App */}
         <div className="pet01-field" style={{ marginTop: 10 }}>
           <label style={{ minWidth: 90 }}>Situação</label>
-          <select
-            value={ativa?.status || "AGUARDANDO"}
-            onChange={(e) => handleStatusChange(e.target.value)}
-          >
-            {/* Se já iniciou, Painel evita voltar para AGUARDANDO; o App faz validação também */}
+          <select value={ativa?.status || "AGUARDANDO"} onChange={(e) => handleStatusChange(e.target.value)}>
             <option value="PRODUZINDO">Produzindo</option>
             <option value="BAIXA_EFICIENCIA">Baixa Eficiência</option>
             <option value="PARADA">Parada</option>
           </select>
 
-          {/* botão Iniciar aparece somente quando AGUARDANDO */}
           <div style={{ marginLeft: 12 }}>
             {ativa?.status === "AGUARDANDO" && (
-              <button
-                className="btn small primary"
-                onClick={() =>
-                  setStartModal &&
-                  setStartModal({
-                    ordem: ativa,
-                    operador: "",
-                    data: new Date().toISOString().slice(0, 10),
-                    hora: new Date().toTimeString().slice(0, 5),
-                  })
-                }
-              >
+              <button className="btn small primary" onClick={() => setStartModal && setStartModal({
+                ordem: ativa,
+                operador: "",
+                data: new Date().toISOString().slice(0,10),
+                hora: new Date().toTimeString().slice(0,5),
+              })}>
                 Iniciar Produção
               </button>
             )}
@@ -457,8 +422,7 @@ async function toggleFullscreen() {
         </div>
       </div>
 
-
-      {/* PRÓXIMO ITEM */}
+      {/* Próximo item */}
       <div className="pet01-next">
         <h2>Próximo Item</h2>
         {proximo ? (
@@ -470,54 +434,45 @@ async function toggleFullscreen() {
         )}
       </div>
 
-      {/* MODAL — BIPAGEM (CENTRALIZADO) */}
-      {showBip && (
-        <div className="pet01-modal-bg" role="dialog" aria-modal>
-          <div className="pet01-modal">
-            <h3>Apontamento por Bipagem</h3>
-            <label>Turno *</label>
-              <select className="input" value={refugoForm.turno} onChange={e => setRefugoForm(f => ({ ...f, turno: e.target.value }))}>
-                {TURNOS.map(t => <option key={t} value={t}>{t}</option>)}
-              </select>
-
-            <label style={{ marginTop: 8 }}>Código (OS 753 - 001)</label>
-            <input
-              ref={bipRef}
-              className="input"
-              placeholder="OS 753 - 001"
-              onKeyDown={(e) => {
-                if (e.key === "Enter") bipar(e.target.value || bipRef.current?.value);
-              }}
-            />
-
-            <div className="pet01-modal-buttons" style={{ marginTop: 12 }}>
-              <button className="green" onClick={() => { setShowBip(false); setBipOperator(""); }}>Fechar</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL — REFUGO (CENTRALIZADO) */}
+      {/* MODAL — REFUGO (mantive para registrar refugos) */}
       {showRefugo && (
         <div className="pet01-modal-bg" role="dialog" aria-modal>
           <div className="pet01-modal">
             <h3>Apontar Refugo</h3>
+            <form onSubmit={async (e) => {
+              e.preventDefault();
+              if (!ativa) { showToast("Nenhuma ordem ativa.", "err"); return; }
+              const { operador, turno, quantidade, motivo } = refugoForm;
+              if (!operador?.trim() || !turno?.trim() || !quantidade) { showToast("Preencha os campos.", "err"); return; }
 
-            <form onSubmit={enviarRefugo}>
+              const payload = {
+                created_at: new Date().toISOString(),
+                machine_id: "P1",
+                shift: turno.trim(),
+                operator: operador.trim(),
+                order_id: ativa.id,
+                op_code: String(ativa.code),
+                qty_pieces: Number(quantidade),
+                reason: motivo,
+              };
+
+              const { error } = await supabase.from("scrap_logs").insert([payload]);
+              if (error) { console.error(error); showToast("Erro ao registrar refugo.", "err"); return; }
+
+              setShowRefugo(false);
+              setRefugoForm({ operador: "", turno: "", quantidade: "", motivo: REFUGO_MOTIVOS[0] });
+              showToast("Refugo registrado.", "ok");
+            }}>
               <label>Operador *</label>
               <input className="input" value={refugoForm.operador} onChange={e => setRefugoForm(f => ({ ...f, operador: e.target.value }))} />
-
               <label>Turno *</label>
               <input className="input" value={refugoForm.turno} onChange={e => setRefugoForm(f => ({ ...f, turno: e.target.value }))} />
-
-              <label>Quantidade *</label>
+              <label>Quantidade (peças) *</label>
               <input className="input" type="number" value={refugoForm.quantidade} onChange={e => setRefugoForm(f => ({ ...f, quantidade: e.target.value }))} />
-
               <label>Motivo *</label>
               <select className="input" value={refugoForm.motivo} onChange={e => setRefugoForm(f => ({ ...f, motivo: e.target.value }))}>
                 {REFUGO_MOTIVOS.map(m => <option key={m} value={m}>{m}</option>)}
               </select>
-
               <div className="pet01-modal-buttons" style={{ marginTop: 12 }}>
                 <button type="button" className="gray" onClick={() => setShowRefugo(false)}>Cancelar</button>
                 <button type="submit" className="orange">Registrar</button>
@@ -526,7 +481,7 @@ async function toggleFullscreen() {
           </div>
         </div>
       )}
+
     </div>
   );
 }
-

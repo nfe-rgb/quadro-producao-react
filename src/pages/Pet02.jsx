@@ -35,6 +35,10 @@ export default function Pet02({
 
   const bipRef = useRef(null);
   const [bipOperator, setBipOperator] = useState("");
+  const scanBufferRef = useRef('');
+  const [scanBuffer, setScanBuffer] = useState('');      // valor exibido no input do modal
+  const lastKeyTimeRef = useRef(0);
+
 
   const [refugoForm, setRefugoForm] = useState({
     operador: "",
@@ -42,7 +46,8 @@ export default function Pet02({
     quantidade: "",
     motivo: "Rebarba",
   });
-
+  
+  const TURNOS = ["1", "2", "3", "Hora Extra"];
   // --------------------------
   // Motivos padrão de refugo
   // --------------------------
@@ -92,7 +97,7 @@ async function toggleFullscreen() {
   // ---------- end fullscreen ----------
 
   // ===========================
-  //  CAPTURAR ORDEM ATIVA P1
+  //  CAPTURAR ORDEM ATIVA P2
   // ===========================
   useEffect(() => {
     if (!ativosP2) return;
@@ -233,6 +238,60 @@ async function toggleFullscreen() {
     }
   }
 
+  // Listener global que recebe teclas do scanner (HID) e chama bipar() ao ENTER
+useEffect(() => {
+  function onGlobalKey(e) {
+    // ignore teclas especiais
+    if (e.key === 'Shift' || e.key === 'Alt' || e.key === 'Meta' || e.key === 'CapsLock') return;
+
+    const now = Date.now();
+
+    // Se a pausa entre teclas for grande -> novo buffer (threshold 120ms)
+    if (now - lastKeyTimeRef.current > 120) {
+      scanBufferRef.current = '';
+    }
+    lastKeyTimeRef.current = now;
+
+    // Se ENTER -> finalizar leitura e tentar bipar
+    if (e.key === 'Enter') {
+      const code = (scanBufferRef.current || '').trim();
+      if (code) {
+        // chama bipar com o código lido
+        try { bipar(code); } catch(err){ console.error('bipar error', err); }
+      }
+      scanBufferRef.current = '';
+      setScanBuffer('');
+      // prevenir acão padrão (por exemplo enviar form)
+      e.preventDefault();
+      return;
+    }
+
+    // Não capturar se o usuário está digitando manualmente em um input visível
+    const active = document.activeElement;
+    const activeTag = active && active.tagName ? active.tagName.toUpperCase() : null;
+    const activeIsInput = activeTag === 'INPUT' || activeTag === 'TEXTAREA' || active?.isContentEditable;
+
+    // Se modal aberto, aceitamos mesmo que algum input esteja focado (modal foi projetado para scanner).
+    const modalOpen = !!document.querySelector('.pet01-modal-bg');
+
+    if (!modalOpen && activeIsInput) {
+      // usuário digitando em outro campo — não interferimos
+      return;
+    }
+
+    // anexar apenas caracteres imprimíveis (key length === 1)
+    if (e.key.length === 1) {
+      scanBufferRef.current += e.key;
+      setScanBuffer(scanBufferRef.current);
+      // opcional: impedir que a tecla apareça em inputs (evita efeitos colaterais)
+      if (!modalOpen) e.preventDefault();
+    }
+  }
+
+  window.addEventListener('keydown', onGlobalKey, true);
+  return () => window.removeEventListener('keydown', onGlobalKey, true);
+}, [bipar]); // depende de bipar (garanta bipar está estável ou use useCallback)
+
   // ===========================
   //  Registrar refugo
   // ===========================
@@ -371,6 +430,8 @@ async function toggleFullscreen() {
           className="pet01-btn green"
           onClick={() => {
             setShowBip(true);
+            scanBufferRef.current = '';
+            setScanBuffer('');
             setTimeout(() => bipRef.current?.focus?.(), 120);
           }}
         >
@@ -394,10 +455,13 @@ async function toggleFullscreen() {
         <div className="pet01-card-header">
           <div className="left">
             {ativa?.status === "PARADA" && tempoParada && (
-              <span className="pet01-timer red">{tempoParada}</span>
+              <span className="rotas-parada-timer">{tempoParada}</span>
             )}
             {ativa?.status === "BAIXA_EFICIENCIA" && tempoLow && (
-              <span className="pet01-timer yellow">{tempoLow}</span>
+              <span className="rotas-loweff-timer">{tempoLow}</span>
+            )}
+            {ativa?.status === "SEM_PROGRAMACAO" && tempoSemProg && (
+              <span className="rotas-semprog-timer">{tempoSemProg}</span>
             )}
           </div>
 
@@ -471,28 +535,28 @@ async function toggleFullscreen() {
         <div className="pet01-modal-bg" role="dialog" aria-modal>
           <div className="pet01-modal">
             <h3>Apontamento por Bipagem</h3>
+            <label>Turno *</label>
+              <select className="input" value={refugoForm.turno} onChange={e => setRefugoForm(f => ({ ...f, turno: e.target.value }))}>
+                {TURNOS.map(t => <option key={t} value={t}>{t}</option>)}
+              </select>
 
-            <label>Operador *</label>
-            <input
-              className="input"
-              value={bipOperator}
-              onChange={(e) => setBipOperator(e.target.value)}
-              placeholder="Nome do operador"
-            />
-
-            <label style={{ marginTop: 8 }}>Código (OS 753 - 001)</label>
-            <input
-              ref={bipRef}
-              className="input"
-              placeholder="OS 753 - 001"
-              onKeyDown={(e) => {
-                if (e.key === "Enter") bipar(e.target.value || bipRef.current?.value);
-              }}
-            />
+           {/* Código (OS 753 - 001) */}
+<label style={{ marginTop: 8 }}>Código (OS 753 - 001)</label>
+<input
+  ref={bipRef}
+  className="input"
+  placeholder="OS 753 - 001"
+  readOnly={true}                 // evita abrir teclado virtual no Android
+  value={scanBuffer}              // mostra o buffer lido (veja definição abaixo)
+  onChange={() => { /* intencionalmente vazio - controlado por listener */ }}
+  onFocus={(e) => {
+    // mantém readonly para evitar teclado, mas mostra foco visual se necessário
+    try { e.target.setSelectionRange && e.target.setSelectionRange(0,0); } catch(_) {}
+  }}
+/>
 
             <div className="pet01-modal-buttons" style={{ marginTop: 12 }}>
-              <button className="gray" onClick={() => { setShowBip(false); setBipOperator(""); }}>Cancelar</button>
-              <button className="green" onClick={() => bipar(bipRef.current?.value)}>Registrar</button>
+              <button className="green" onClick={() => { setShowBip(false); setBipOperator(""); }}>Fechar</button>
             </div>
           </div>
         </div>

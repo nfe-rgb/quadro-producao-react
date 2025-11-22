@@ -12,7 +12,7 @@ export function getTurnoAtual(date = new Date()) {
     // 00:00 às 04:59 Turno 3 (continuação)
     if (minutos < 5 * 60) return 3;
     // 05:00 às 22:59 = Hora Extra
-    return 'HE';
+    return 'Hora Extra';
   }
   // Segunda a Sexta
   if (dia >= 1 && dia <= 5) {
@@ -28,12 +28,12 @@ export function getTurnoAtual(date = new Date()) {
     if (minutos >= 5 * 60 && minutos < 9 * 60) return 1;
     if (minutos >= 9 * 60 && minutos < 13 * 60) return 2;
     // 13:00 às 23:59 = Hora Extra
-    if (minutos >= 13 * 60) return 'HE';
-    // 00:00 às 04:59 = Fora de turno (considerar HE)
-    if (minutos < 5 * 60) return 'HE';
+    if (minutos >= 13 * 60) return 'Hora Extra';
+    // 00:00 às 04:59 = Fora de turno (considerar Hora Extra)
+    if (minutos < 5 * 60) return 'Hora Extra';
   }
-  // Fora de qualquer turno (deve ser HE)
-  return 'HE';
+  // Fora de qualquer turno (deve ser Hora Extra)
+  return 'Hora Extra';
 }
 // src/lib/utils.js
 export function statusClass(s){
