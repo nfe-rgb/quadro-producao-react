@@ -305,6 +305,7 @@ export default function Registro({ registroGrupos = [], openSet, toggleOpen }) {
         });
         paradaMsMaquina += deltaParadaAbertas;
 
+
         // reinicios/interrupções/final
         const reinicios = [];
         if (safe(o.restarted_at)) reinicios.push({ t: toTime(o.restarted_at), type: 'restart' });
@@ -322,9 +323,6 @@ export default function Registro({ registroGrupos = [], openSet, toggleOpen }) {
             lastEnd = toTime(o.finalized_at);
             if (lastEnd > lastStart) intervals.push({ tipo: 'producao', ini: lastStart, fim: lastEnd });
           }
-        } else if (reinicios.length === 1 && reinicios[0].type === 'final') {
-          const finalTime = toTime(o.finalized_at);
-          if (finalTime > lastStart) intervals.push({ tipo: 'producao', ini: lastStart, fim: finalTime });
         } else {
           let cursor = lastStart;
           for (let i = 0; i < reinicios.length; i++) {
@@ -332,12 +330,22 @@ export default function Registro({ registroGrupos = [], openSet, toggleOpen }) {
             if (r.type === 'interrupt' || r.type === 'final') {
               if (r.t > cursor) intervals.push({ tipo: 'producao', ini: cursor, fim: r.t });
               const nextRestart = reinicios.find(x => x.type === 'restart' && x.t > r.t);
-              if (nextRestart) cursor = nextRestart.t;
-              else cursor = null;
+              if (nextRestart) {
+                cursor = nextRestart.t;
+              } else {
+                cursor = null;
+                // Se for o último evento e for 'final', garantir que o tempo entre o fim da última parada e o final da O.P. seja contabilizado
+                if (r.type === 'final' && r.t < toTime(o.finalized_at)) {
+                  const finalTime = toTime(o.finalized_at);
+                  if (finalTime > r.t) intervals.push({ tipo: 'producao', ini: r.t, fim: finalTime });
+                }
+              }
             }
           }
+          // Se ainda restar tempo após o último evento até o fim do filtro ou final da O.P., contabiliza como produção
           if (cursor) {
-            const fimAberto = filtroEnd.getTime();
+            let fimAberto = filtroEnd.getTime();
+            if (safe(o.finalized_at)) fimAberto = Math.min(fimAberto, toTime(o.finalized_at));
             if (fimAberto > cursor) intervals.push({ tipo: 'producao', ini: cursor, fim: fimAberto });
           }
         }
@@ -351,7 +359,7 @@ export default function Registro({ registroGrupos = [], openSet, toggleOpen }) {
             if (fimCalc > iniCalc) {
               let prodMs = fimCalc - iniCalc;
 
-              // calcula paradas que caem dentro deste intervalo (resumed_at ou em aberto)
+              // Unir intervalos de parada e baixa eficiência para evitar sobreposição
               const paradaIntervals = (g.stops || []).map(st => {
                 const stIni = toTime(st.started_at);
                 const stFim = !safe(st.resumed_at) ? filtroEnd.getTime() : toTime(st.resumed_at);
@@ -360,26 +368,66 @@ export default function Registro({ registroGrupos = [], openSet, toggleOpen }) {
                 return stIniCalc < stFimCalc ? [stIniCalc, stFimCalc] : null;
               }).filter(Boolean);
 
-              const paradaUnida = unirArrays(paradaIntervals);
-              let deltaParada = 0;
-              paradaUnida.forEach(([ini, fim]) => {
-                deltaParada += Math.max(0, fim - ini);
-              });
-              prodMs -= deltaParada;
-              paradaMsMaquina += deltaParada;
-
-              // baixa eficiência (apenas o trecho dentro do filtro e dentro do interval)
+              let lowEffIntervals = [];
               if (safe(o.loweff_started_at)) {
                 const leIni = toTime(o.loweff_started_at);
                 const leFim = toTime(o.loweff_ended_at) || intervalo.fim;
                 const leIniCalc = Math.max(leIni, filtroStart.getTime(), iniCalc);
                 const leFimCalc = Math.min(leFim, filtroEnd.getTime(), fimCalc);
                 if (leIniCalc < leFimCalc) {
-                  const delta = Math.max(0, leFimCalc - leIniCalc);
-                  prodMs -= delta;
-                  totalLowEffMs += delta;
+                  lowEffIntervals.push([leIniCalc, leFimCalc]);
                 }
               }
+
+
+              // Separar intervalos exclusivos de parada, baixa eficiência e produção
+              // 1. Unir todos os intervalos de parada e baixa eficiência
+              const allIntervals = unirArrays([...paradaIntervals, ...lowEffIntervals]);
+              // 2. Criar lista de "eventos" (início/fim de cada intervalo)
+              let eventos = [];
+              allIntervals.forEach(([ini, fim]) => {
+                eventos.push({ t: ini, tipo: 'ini' });
+                eventos.push({ t: fim, tipo: 'fim' });
+              });
+              eventos.push({ t: iniCalc, tipo: 'iniTotal' });
+              eventos.push({ t: fimCalc, tipo: 'fimTotal' });
+              eventos = eventos.sort((a, b) => a.t - b.t);
+
+              // 3. Percorrer timeline, marcando o que é cada fatia
+              let fatias = [];
+              let dentro = 0;
+              let cursor = iniCalc;
+              for (let i = 0; i < eventos.length; i++) {
+                const ev = eventos[i];
+                if (ev.t > cursor) {
+                  fatias.push([cursor, ev.t, dentro]);
+                  cursor = ev.t;
+                }
+                if (ev.tipo === 'ini') dentro++;
+                if (ev.tipo === 'fim') dentro--;
+              }
+
+              // 4. Classificar cada fatia: parada, baixa eficiência ou produção
+              let totalParada = 0;
+              let totalLowEff = 0;
+              let totalProd = 0;
+              fatias.forEach(([ini, fim, dentro]) => {
+                if (fim <= ini) return;
+                // Verifica se está dentro de algum intervalo de baixa eficiência
+                const isLowEff = lowEffIntervals.some(([leIni, leFim]) => ini < leFim && fim > leIni);
+                const isParada = paradaIntervals.some(([pIni, pFim]) => ini < pFim && fim > pIni);
+                if (isLowEff) {
+                  totalLowEff += fim - ini;
+                } else if (isParada) {
+                  totalParada += fim - ini;
+                } else {
+                  totalProd += fim - ini;
+                }
+              });
+              // 5. Atualizar totais
+              prodMs = totalProd;
+              paradaMsMaquina += totalParada;
+              totalLowEffMs += totalLowEff;
 
               // desconto de fim de semana (se necessário)
               const descontoFimDeSemana = descontarFimDeSemana(iniCalc, fimCalc);

@@ -390,7 +390,7 @@ export default function Pet01({
         </div>
 
         <div className={statusClass(ativa?.status)}>
-          <Etiqueta o={ativa} variant="painel" saldoCaixas={saldo} lidasCaixas={lidas} />
+          <Etiqueta o={ativa} variant="pet01" saldoCaixas={saldo} lidasCaixas={lidas} />
         </div>
 
         {paradaAberta?.reason && ativa?.status === "PARADA" && (

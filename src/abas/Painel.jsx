@@ -134,7 +134,14 @@ export default function Painel({
               {ativa ? (
                 <div className={statusClass(ativa.status)}>
                   {/* Detalhes da O.P */}
-                  <Etiqueta o={ativa.o || ativa} variant="painel" paradaReason={stopReason} paradaNotes={stopNotes} />
+                  <Etiqueta
+                   o={ativa.o || ativa}
+                   variant="painel"
+                   lidasCaixas={['P1','P2','P3'].includes(m) ? (ativa._scansCount || 0) : undefined}
+                   saldoCaixas={['P1','P2','P3'].includes(m) ? Math.max(0, (ativa.boxes || 0) - (ativa._scansCount || 0)) : undefined}
+                   paradaReason={stopReason}
+                   paradaNotes={stopNotes}
+                  />
                   {/* Motivo da PARADA, centralizado, sem cronômetro */}
                   {ativa?.status === "PARADA" && stopReason && (
                   <div className="stop-reason-below">{stopReason}</div>

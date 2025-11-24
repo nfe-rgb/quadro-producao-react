@@ -475,7 +475,40 @@ body:fullscreen .pet01-logo {
   color: #1051dd;
   font-size: 20px;
 }
-/* === PÍLULAS DE LIDAS / SALDO NAS ETIQUETAS FIXA EM ETIQUETAS.CSS === */
+
+/* === PÍLULAS DE LIDAS / SALDO NAS ETIQUETAS === */
+.pet-pill-row {
+  position: absolute !important;
+  bottom: 30px !important;
+  right: 0px !important;
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: flex-end !important;
+  width: auto !important;
+  gap: 6px !important;
+  margin: 0 !important;  /* remove o empurrão */
+  padding: 0 !important;
+  width: auto !important;
+  z-index: 10 !important;
+}
+
+.pet-pill {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 6px !important;
+  font-size: 1.25rem !important;
+  padding: 12px 25px !important;
+  border: 1px solid #ddd;
+  border-radius: 15px;
+  background: #fafafa;
+  color: #333;
+  box-shadow: 0 6px 14px rgba(2,8,23,0.06) !important;
+  white-space: nowrap;
+  font-weight: 800;
+  min-width: 84px;
+  transition: all 0.2s ease;
+}
 
 /* Toast (barra superior que sobe e some) */
 .pet01-toast {

@@ -1,6 +1,7 @@
 /* ===== Etiqueta (dentro dos cards) – otimizada para TV ===== */
 
 .etiqueta {
+  position: relative !important;
   font-size: clamp(19px, 1.9vw, 30px); /* um pouco maior que antes */
   line-height: 1.35;
   color: #0b1a26; /* texto bem escuro */
@@ -47,16 +48,21 @@
   font-weight: 600;
   margin-top: 4px;
 }
+
+.card {
+ position: relative !important;
+}
+
 /* === PÍLULAS DE LIDAS / SALDO NAS ETIQUETAS === */
 .pill-row {
   position: absolute !important;
-  bottom: 30px !important;
-  right: 0px !important;
+  top: 62px !important;
+  right: 5px !important;
   display: flex !important;
   flex-direction: column !important;
   align-items: flex-end !important;
   width: auto !important;
-  gap: 6px;
+  gap: 6px !important;
   margin: 0 !important;  /* remove o empurrão */
   padding: 0 !important;
   width: auto !important;
@@ -64,12 +70,12 @@
 }
 
 .pill {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  font-size: 1.25rem;
-  padding: 12px 25px;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 6px !important;
+  font-size: 1.0rem !important;
+  padding: 8px 15px !important;
   border: 1px solid #ddd;
   border-radius: 15px;
   background: #fafafa;

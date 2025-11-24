@@ -52,6 +52,46 @@ export default function Etiqueta({ o, variant = 'painel', saldoCaixas, lidasCaix
     )
   }
 
+    // ===== variante pet01 =====
+  if (variant === 'pet01') {
+  return (
+    <div className={`small ${isWeekendStop ? 'etiqueta-weekend' : ''}`}>
+      {interrompida && <div className="badge-interrompida">⚠️ Produção Interrompida</div>}
+
+      {o.customer && <div><b>Cliente:</b> {o.customer}</div>}
+      {o.product && <div><b>Produto:</b> {o.product}</div>}
+      {o.color && <div><b>Cor:</b> {o.color}</div>}
+      {o.qty && <div><b>Qtd:</b> {o.qty}</div>}
+
+      {o.boxes && (
+        <>
+          <div><b>Volumes:</b> {o.boxes}</div>
+          {(typeof lidasCaixas === 'number' || typeof saldoCaixas === 'number') && (
+            <div className="pet-pill-row">
+              {typeof lidasCaixas === 'number' && (
+                <span className="pet-pill" title="Caixas já bipadas">
+                  Apontadas: <b>{lidasCaixas}</b>
+                </span>
+              )}
+              {typeof saldoCaixas === 'number' && (
+                <span className={`pet-pill ${saldoClass}`} title={`Faltam ${saldoCaixas} caixas`}>
+                  Saldo: <b>{saldoCaixas}</b>
+                </span>
+              )}
+            </div>
+          )}
+        </>
+      )}
+
+      {o.standard && <div><b>Padrão:</b> {o.standard}</div>}
+      {o.due_date && <div><b>Prazo:</b> {fmtDate(o.due_date)}</div>}
+
+      {temObsLowEff && <div><b>Baixa Eficiência:</b> {o.loweff_notes}</div>}
+      {o.notes && <div className="muted">{o.notes}</div>}
+    </div>
+   )
+  }
+
   // ===== variante PAINEL =====
   return (
     <div className={`small ${isWeekendStop ? 'etiqueta-weekend' : ''}`}>
