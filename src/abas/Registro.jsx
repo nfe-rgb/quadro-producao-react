@@ -290,7 +290,13 @@ export default function Registro({ registroGrupos = [], openSet, toggleOpen }) {
         // Paradas (todas, não só abertas)
         const paradaIntervalsTodos = (g.stops || []).map(st => {
           const stIni = toTime(st.started_at);
-          const stFim = safe(st.resumed_at) ? toTime(st.resumed_at) : filtroEnd.getTime();
+          // Se a parada está em aberto, usa o horário atual (Date.now()), mas nunca ultrapassa filtroEnd
+          let stFim;
+          if (safe(st.resumed_at)) {
+            stFim = toTime(st.resumed_at);
+          } else {
+            stFim = Math.min(Date.now(), filtroEnd.getTime());
+          }
           const ini = Math.max(stIni, filtroStart.getTime());
           const fim = Math.min(stFim, filtroEnd.getTime());
           return ini < fim ? [ini, fim] : null;

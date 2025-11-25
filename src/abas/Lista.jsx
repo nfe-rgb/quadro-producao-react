@@ -92,7 +92,7 @@ await supabase.rpc('reorder_machine_queue', {
       <div className="grid">
         <div className="tablehead"><div>MÁQUINA</div><div>PAINEL</div><div>FILA</div></div>
 
-        {MAQUINAS.map(m => {
+        {MAQUINAS .filter((m) => m !== "P4") .map((m) => {
           const lista = ativosPorMaquina[m] || []
           const ativa = lista[0] || null
           const fila  = lista.slice(1)
