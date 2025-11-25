@@ -1,0 +1,73 @@
+/* Variáveis: altere --meta-speed para controlar a velocidade (ex: 8s, 12s) */
+:root {
+  --meta-height: 80px;        /* altura da faixa - aumente se quiser mais grande */
+  --meta-speed: 16s;         /* duração da animação (quanto menor, mais rápido) */
+  --meta-gradient-start: #ff8a00; /* cor de destaque */
+  --meta-gradient-end: #ff3d00;   /* cor de destaque 2 */
+  --meta-text-size: 32px;    /* tamanho do texto */
+}
+
+/* Faixa fixa no topo da tela */
+.meta-banner {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: var(--meta-height);
+  display: flex;
+  align-items: center;
+  background: linear-gradient(90deg, rgba(156, 87, 7, 0.95), rgba(243, 161, 8, 0.92));
+  color: #fff;
+  z-index: 99999;
+  overflow: hidden;
+  padding-left: 12px;
+  padding-right: 12px;
+  box-shadow: 0 4px 10px rgba(0,0,0,0.35);
+  border-bottom: 2px solid rgba(0,0,0,0.08);
+}
+/* quando estivermos no painel, afasta as abas para não ficarem atrás da faixa fixa */
+.app.has-meta .tabs {
+  margin-top: var(--meta-height); /* usa a mesma variável da faixa */
+  z-index: 10000; /* garante que as abas fiquem acima do conteúdo se necessário */
+  position: relative;
+}
+
+/* Texto interno que desliza — aumentei o tamanho e peso */
+.meta-banner-inner {
+  white-space: nowrap;
+  display: inline-flex;
+  will-change: transform;
+  padding-right: 12px;
+  font-weight: 800;
+  font-size: var(--meta-text-size);
+  align-items: center;
+  gap: 10px;
+  /* Animação: usa vw para garantir que percorra toda a viewport e depois volte instantaneamente */
+  animation: slide-lr var(--meta-speed) linear infinite;
+  text-shadow: 0 2px 6px rgba(0,0,0,0.35);
+}
+
+/* Destaque melhor para o percentual */
+.meta-percent {
+  background: linear-gradient(90deg, rgba(255,255,255,0.14), rgba(255,255,255,0.06));
+  color: #fff;
+  padding: 6px 12px;
+  border-radius: 10px;
+  font-weight: 900;
+  letter-spacing: 0.6px;
+  border: 1px solid rgba(255,255,255,0.12);
+  box-shadow: 0 2px 6px rgba(255,61,0,0.12);
+}
+
+/* Keyframes: usa unidades vw para garantir passagem completa e retorno imediato */
+@keyframes slide-lr {
+  0%   { transform: translateX(-110vw); } /* começa completamente fora à esquerda */
+  100% { transform: translateX(110vw);  } /* termina completamente fora à direita */
+}
+
+/* Responsivo: reduz tamanho em telas pequenas */
+@media (max-width: 900px) {
+  :root { --meta-text-size: 20px; --meta-height: 44px; }
+  .meta-banner-inner { font-size: var(--meta-text-size); }
+  .board-wrapper .board { margin-top: var(--meta-height); }
+}

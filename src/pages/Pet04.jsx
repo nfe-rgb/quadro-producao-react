@@ -5,9 +5,9 @@ import Etiqueta from "../components/Etiqueta";
 import { getTurnoAtual, statusClass } from "../lib/utils";
 import "../styles/Pet01.css";
 
-export default function Pet01({
+export default function Pet04({
   registroGrupos,
-  ativosP1,
+  ativosP4,
   paradas,
   tick,
   onStatusChange,
@@ -65,12 +65,12 @@ export default function Pet01({
     return () => document.removeEventListener("fullscreenchange", onFsChange);
   }, []);
 
-  // Atualiza ativa/proximo sempre que ativos mudam (somente P1)
+  // Atualiza ativa/proximo sempre que ativos mudam (somente P4)
   useEffect(() => {
-    if (!ativosP1) return;
-    setAtiva(ativosP1[0] || null);
-    setProximo(ativosP1[1] || null);
-  }, [ativosP1]);
+    if (!ativosP4) return;
+    setAtiva(ativosP4[0] || null);
+    setProximo(ativosP4[1] || null);
+  }, [ativosP4]);
 
   // carrega scans existentes da ordem ativa
   async function loadScans(id) {
@@ -180,7 +180,7 @@ export default function Pet01({
 
     const payload = {
       created_at: new Date().toISOString(),
-      machine_id: "P1",
+      machine_id: "P4",
       shift: String(currentShift || getTurnoAtual() || "Hora Extra"),
       order_id: ativa.id,
       op_code: String(ativa.code),
@@ -336,7 +336,7 @@ export default function Pet01({
         {toast.msg}
       </div>
 
-      <h1 className="pet01-title">Apontamento — Máquina P1</h1>
+      <h1 className="pet01-title">Apontamento — Máquina P4</h1>
 
       <img src="/Logotipo Savanti.png" alt="Savanti Plásticos" className="pet01-logo" onError={(e) => e.currentTarget.src = "/savanti-logo.png"} />
 
@@ -390,13 +390,13 @@ export default function Pet01({
         </div>
 
         <div className={statusClass(ativa?.status)}>
-          <Etiqueta o={ativa} variant="pet01" saldoCaixas={saldo} lidasCaixas={lidas} />
+          <Etiqueta o={ativa} variant="painel" saldoCaixas={saldo} lidasCaixas={lidas} />
         </div>
 
-                  {ativa?.status === "PARADA" && stopReason && (
-                  <div className="stop-reason-below">{stopReason}</div>
-                  )}
-                  
+        {paradaAberta?.reason && ativa?.status === "PARADA" && (
+          <div className="stop-reason-below">{paradaAberta.reason}</div>
+        )}
+
         <div className="sep" style={{ marginTop: 12 }} />
 
         <div className="pet01-field" style={{ marginTop: 10 }}>
@@ -447,7 +447,7 @@ export default function Pet01({
 
               const payload = {
                 created_at: new Date().toISOString(),
-                machine_id: "P1",
+                machine_id: "P4",
                 shift: turno.trim(),
                 operator: operador.trim(),
                 order_id: ativa.id,

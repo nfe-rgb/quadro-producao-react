@@ -13,6 +13,7 @@ import Registro from './abas/Registro'
 import Pet01 from './pages/Pet01'
 import Pet02 from './pages/Pet02'
 import Pet03 from './pages/Pet03'
+import Pet04 from './pages/Pet04'
 
 import useOrders from './hooks/useOrders'
 import useAuthAdmin from './hooks/useAuthAdmin'
@@ -191,20 +192,61 @@ export default function App(){
     );
   }
 
+      if (location && location.pathname === '/pet-04') {
+    const ativosP4 = ordens.filter(o => o.machine_id === 'P4' && !o.finalized).sort((a,b)=>(a.pos??999)-(b.pos??999))
+    return (
+      <>
+        <Pet04
+          registroGrupos={registroGrupos}
+          ativosP4={ativosP4}
+          tick={tick}
+          onStatusChange={handleStatusChange}
+          setStartModal={setStartModal}
+          setStopModal={setStopModal}
+          setLowEffModal={setLowEffModal}
+          setResumeModal={setResumeModal}
+          setFinalizando={setFinalizando}
+          setEditando={setEditando}
+        />
+        <GlobalModals
+          editando={editando} setEditando={setEditando}
+          finalizando={finalizando} setFinalizando={setFinalizando} confirmData={confirmData} setConfirmData={setConfirmData}
+          startModal={startModal} setStartModal={setStartModal}
+          stopModal={stopModal} setStopModal={setStopModal}
+          resumeModal={resumeModal} setResumeModal={setResumeModal}
+          lowEffModal={lowEffModal} setLowEffModal={setLowEffModal}
+          lowEffEndModal={lowEffEndModal} setLowEffEndModal={setLowEffEndModal}
+          onUpdateOrder={atualizar}
+          onFinalize={finalizar}
+          onConfirmStart={confirmarInicio}
+          onConfirmStop={confirmarParada}
+          onConfirmResume={confirmarRetomada}
+          onConfirmLowEffStart={confirmarBaixaEf}
+          onConfirmLowEffEnd={confirmarEncerrarBaixaEf}
+        />
+      </>
+    );
+  }
+
+
   const [openSet, setOpenSet] = useState(()=>new Set())
   function toggleOpen(id){ setOpenSet(prev=>{ const n=new Set(prev); if(n.has(id)) n.delete(id); else n.add(id); return n }) }
 
   return (
-    <div className="app">
+    <div className={`app ${tab === 'painel' ? 'has-meta' : ''}`}>
 
-      <div className="brand-bar">
-        <img src="/Logotipo Savanti.png" alt="Savanti Plásticos" className="brand-logo"
-             onError={(e)=>{ e.currentTarget.src='/savanti-logo.png'; }}/>
-        <div className="brand-titles">
-          <h1 className="brand-title">Painel de Produção</h1>
-          <div className="brand-sub">Savanti Plásticos • Controle de Ordens</div>
-        </div>
-      </div>
+
+{/* mostre a barra de marca apenas quando não estivermos no painel */}
+{tab !== 'painel' && (
+  <div className="brand-bar">
+    <img src="/Logotipo Savanti.png" alt="Savanti Plásticos" className="brand-logo"
+         onError={(e)=>{ e.currentTarget.src='/savanti-logo.png'; }}/>
+    <div className="brand-titles">
+      <h1 className="brand-title">Painel de Produção</h1>
+      <div className="brand-sub">Savanti Plásticos • Controle de Ordens</div>
+    </div>
+  </div>
+)}
 
       <div className="tabs">
         <button className={`tabbtn ${tab==='painel'?'active':''}`} onClick={()=>setTab('painel')}>Painel</button>

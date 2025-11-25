@@ -268,6 +268,7 @@ export default function Registro({ registroGrupos = [], openSet, toggleOpen }) {
         }
       }
 
+
       gruposOrdenados.forEach((g, idx) => {
         const o = g.ordem || {};
         const intervals = [];
@@ -286,25 +287,21 @@ export default function Registro({ registroGrupos = [], openSet, toggleOpen }) {
           if (fim > ini) intervals.push({ tipo: 'producao', ini, fim });
         }
 
-        // Paradas abertas (iniciadas e sem resumed_at) que afetam o filtro
-        const paradaIntervalsAbertas = (g.stops || []).map(st => {
+        // Paradas (todas, não só abertas)
+        const paradaIntervalsTodos = (g.stops || []).map(st => {
           const stIni = toTime(st.started_at);
-          const emAberto = !safe(st.resumed_at);
-          if (stIni && stIni < filtroEnd.getTime() && emAberto) {
-            const ini = Math.max(stIni, filtroStart.getTime());
-            const fim = filtroEnd.getTime();
-            return ini < fim ? [ini, fim] : null;
-          }
-          return null;
+          const stFim = safe(st.resumed_at) ? toTime(st.resumed_at) : filtroEnd.getTime();
+          const ini = Math.max(stIni, filtroStart.getTime());
+          const fim = Math.min(stFim, filtroEnd.getTime());
+          return ini < fim ? [ini, fim] : null;
         }).filter(Boolean);
-
-        const paradaUnidaAbertas = unirArrays(paradaIntervalsAbertas);
-        let deltaParadaAbertas = 0;
-        paradaUnidaAbertas.forEach(([ini, fim]) => {
-          deltaParadaAbertas += Math.max(0, fim - ini);
+        // Unir e somar todos os intervalos de parada
+        const paradaUnidaTodos = unirArrays(paradaIntervalsTodos);
+        let deltaParadaTodos = 0;
+        paradaUnidaTodos.forEach(([ini, fim]) => {
+          deltaParadaTodos += Math.max(0, fim - ini);
         });
-        paradaMsMaquina += deltaParadaAbertas;
-
+        paradaMsMaquina += deltaParadaTodos;
 
         // reinicios/interrupções/final
         const reinicios = [];
@@ -359,15 +356,7 @@ export default function Registro({ registroGrupos = [], openSet, toggleOpen }) {
             if (fimCalc > iniCalc) {
               let prodMs = fimCalc - iniCalc;
 
-              // Unir intervalos de parada e baixa eficiência para evitar sobreposição
-              const paradaIntervals = (g.stops || []).map(st => {
-                const stIni = toTime(st.started_at);
-                const stFim = !safe(st.resumed_at) ? filtroEnd.getTime() : toTime(st.resumed_at);
-                const stIniCalc = Math.max(stIni || iniCalc, filtroStart.getTime());
-                const stFimCalc = Math.min(stFim || fimCalc, filtroEnd.getTime());
-                return stIniCalc < stFimCalc ? [stIniCalc, stFimCalc] : null;
-              }).filter(Boolean);
-
+              // Unir intervalos de baixa eficiência para evitar sobreposição
               let lowEffIntervals = [];
               if (safe(o.loweff_started_at)) {
                 const leIni = toTime(o.loweff_started_at);
@@ -379,10 +368,9 @@ export default function Registro({ registroGrupos = [], openSet, toggleOpen }) {
                 }
               }
 
-
-              // Separar intervalos exclusivos de parada, baixa eficiência e produção
-              // 1. Unir todos os intervalos de parada e baixa eficiência
-              const allIntervals = unirArrays([...paradaIntervals, ...lowEffIntervals]);
+              // Separar intervalos exclusivos de baixa eficiência e produção
+              // 1. Unir todos os intervalos de baixa eficiência
+              const allIntervals = unirArrays([...lowEffIntervals]);
               // 2. Criar lista de "eventos" (início/fim de cada intervalo)
               let eventos = [];
               allIntervals.forEach(([ini, fim]) => {
@@ -407,26 +395,21 @@ export default function Registro({ registroGrupos = [], openSet, toggleOpen }) {
                 if (ev.tipo === 'fim') dentro--;
               }
 
-              // 4. Classificar cada fatia: parada, baixa eficiência ou produção
-              let totalParada = 0;
+              // 4. Classificar cada fatia: baixa eficiência ou produção
               let totalLowEff = 0;
               let totalProd = 0;
               fatias.forEach(([ini, fim, dentro]) => {
                 if (fim <= ini) return;
                 // Verifica se está dentro de algum intervalo de baixa eficiência
                 const isLowEff = lowEffIntervals.some(([leIni, leFim]) => ini < leFim && fim > leIni);
-                const isParada = paradaIntervals.some(([pIni, pFim]) => ini < pFim && fim > pIni);
                 if (isLowEff) {
                   totalLowEff += fim - ini;
-                } else if (isParada) {
-                  totalParada += fim - ini;
                 } else {
                   totalProd += fim - ini;
                 }
               });
               // 5. Atualizar totais
               prodMs = totalProd;
-              paradaMsMaquina += totalParada;
               totalLowEffMs += totalLowEff;
 
               // desconto de fim de semana (se necessário)
@@ -509,12 +492,24 @@ export default function Registro({ registroGrupos = [], openSet, toggleOpen }) {
     return `${pctNum.toFixed(1).replace('.', ',')}%`;
   }
 
-  const items = useMemo(() => [
-    { key: 'produzindo', label: 'Produzindo', valueH: totalProdH, color: '#0a7' },
-    { key: 'parada', label: 'Parada', valueH: totalParadaH, color: '#e74c3c' },
-    { key: 'loweff', label: 'Baixa Eficiência', valueH: totalLowEffH, color: '#ffc107' },
-    { key: 'semprog', label: 'Sem Programação', valueH: totalSemProgH, color: '#3498db' }
-  ], [totalProdH, totalParadaH, totalLowEffH, totalSemProgH, tick]);
+  // Ajuste: normaliza os valores se a soma ultrapassar o totalDisponivelH
+  const items = useMemo(() => {
+    const raw = [
+      { key: 'produzindo', label: 'Produzindo', valueH: totalProdH, color: '#0a7' },
+      { key: 'parada', label: 'Parada', valueH: totalParadaH, color: '#e74c3c' },
+      { key: 'loweff', label: 'Baixa Eficiência', valueH: totalLowEffH, color: '#ffc107' },
+      { key: 'semprog', label: 'Sem Programação', valueH: totalSemProgH, color: '#3498db' }
+    ];
+    const soma = raw.reduce((acc, it) => acc + it.valueH, 0);
+    if (totalDisponivelH > 0 && soma > totalDisponivelH) {
+      // Normaliza proporcionalmente
+      return raw.map(it => ({
+        ...it,
+        valueH: (it.valueH / soma) * totalDisponivelH
+      }));
+    }
+    return raw;
+  }, [totalProdH, totalParadaH, totalLowEffH, totalSemProgH, totalDisponivelH, tick]);
 
   // === Toggle individual de máquina ===
   function toggleMachine(m) {
