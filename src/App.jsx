@@ -283,6 +283,7 @@ export default function App(){
           setStartModal={setStartModal}
           setFinalizando={setFinalizando}
           lastFinalizadoPorMaquina={lastFinalizadoPorMaquina}
+          onScanned={fetchOrdensAbertas}
         />
       )}
 

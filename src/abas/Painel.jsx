@@ -1,8 +1,12 @@
-import React from "react";
+// src/pages/Painel.jsx
+// Referência imagem (seu upload): /mnt/data/45ae41a0-02b0-40d7-8afc-a887077261a1.png
+
+import React, { useEffect, useState } from "react";
 import Etiqueta from "../components/Etiqueta";
 import { MAQUINAS, STATUS } from "../lib/constants";
 import { statusClass, jaIniciou } from "../lib/utils";
 import "../styles/Barrademeta.css";
+import { supabase } from "../lib/supabaseClient";
 
 // Helper para formatar HH:MM:SS
 function formatHHMMSS(totalSeconds) {
@@ -22,124 +26,242 @@ export default function Painel({
   setFinalizando,
   lastFinalizadoPorMaquina,
   metaPercent = 67,
+  onScanned, // opcional: callback do pai para re-fetch geral
 }) {
-  // Normaliza metaPercent para 0..100 e adiciona formatação
   const pct = Math.max(0, Math.min(100, Math.round(metaPercent)));
   const pctText = `${pct}%`;
 
+  // localAtivos é o estado usado para render e será atualizado via realtime
+  const [localAtivos, setLocalAtivos] = useState(ativosPorMaquina || {});
+
+  // Sincroniza props -> localAtivos, mas preservando scanned_count vindo do realtime (merge)
+  useEffect(() => {
+    const incoming = ativosPorMaquina || {};
+    setLocalAtivos((prev) => {
+      if (!prev || Object.keys(prev).length === 0) return incoming;
+
+      const merged = {};
+      for (const m of Object.keys(incoming)) {
+        const incomingList = incoming[m] || [];
+        const prevList = prev[m] || [];
+        merged[m] = incomingList.map((inItem) => {
+          const match = prevList.find(
+            (p) =>
+              String(p?.id) === String(inItem?.id) ||
+              String(p?.code) === String(inItem?.code) ||
+              String(p?.op_code) === String(inItem?.op_code)
+          );
+          if (match && typeof match.scanned_count !== "undefined") {
+            return { ...inItem, scanned_count: match.scanned_count };
+          }
+          // normalize scanned_count to number (0 if missing)
+          return { ...inItem, scanned_count: typeof inItem.scanned_count === "number" ? inItem.scanned_count : Number(inItem.scanned_count || 0) };
+        });
+      }
+      // keep previous machines not present in incoming (rare)
+      for (const m of Object.keys(prev)) {
+        if (!(m in merged)) merged[m] = prev[m];
+      }
+      return merged;
+    });
+  }, [ativosPorMaquina]);
+
+  // util helper para testar se um item corresponde a um order_id / code
+  function matchesOrder(item, orderIdOrCode) {
+    if (!item || !orderIdOrCode) return false;
+    const candidates = [
+      item?.id,
+      item?.order_id,
+      item?.ordem?.id,
+      item?.order?.id,
+      item?.o?.id,
+      item?.op_code,
+      item?.code,
+      item?.ordem?.code,
+    ]
+      .filter(Boolean)
+      .map(String);
+    const target = String(orderIdOrCode);
+    return candidates.includes(target);
+  }
+
+  // Realtime subscription: quando houver INSERT em production_scans, atualiza counted scans e chama onScanned
+  useEffect(() => {
+    const channel = supabase
+      .channel("scans-ch")
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "production_scans" },
+        async (payload) => {
+          try {
+            const newRow = payload.new;
+            if (!newRow) return;
+
+            // prefer machine_id informado no scan; se não vier, deixamos procurar em todas
+            const scanOrderId = newRow.order_id;
+            const scanMachineId = newRow.machine_id;
+
+            // obtém count atual de production_scans para essa order_id
+            let scannedCount = 0;
+            try {
+              const { error: countErr, count } = await supabase
+                .from("production_scans")
+                .select("*", { head: true, count: "exact" })
+                .eq("order_id", scanOrderId);
+
+              if (!countErr) scannedCount = Number(count || 0);
+              else {
+                console.warn("Painel: falha ao calcular scanned_count:", countErr);
+              }
+            } catch (err) {
+              console.error("Painel: erro ao consultar scanned_count:", err);
+            }
+
+            // Atualiza localAtivos apenas na máquina afetada (se souber) ou procura em todas
+            setLocalAtivos((prev) => {
+              if (!prev) return prev;
+              const copy = { ...prev };
+              const orderIdStr = String(scanOrderId);
+              let found = false;
+
+              // prioridade: aplicar apenas na machine informada pelo scan (evita percorrer tudo)
+              const machinesToCheck = scanMachineId && copy[scanMachineId] ? [scanMachineId] : Object.keys(copy);
+
+              for (const machine of machinesToCheck) {
+                copy[machine] = (copy[machine] || []).map((item) => {
+                  if (matchesOrder(item, orderIdStr)) {
+                    found = true;
+                    return { ...item, scanned_count: scannedCount };
+                  }
+                  return item;
+                });
+              }
+
+              // fallback: se não encontrou e scan não informou machine_id, tente procurar em todas
+              if (!found) {
+                for (const machine of Object.keys(copy)) {
+                  copy[machine] = (copy[machine] || []).map((item) => {
+                    if (matchesOrder(item, orderIdStr)) {
+                      found = true;
+                      return { ...item, scanned_count: scannedCount };
+                    }
+                    return item;
+                  });
+                }
+              }
+
+              // se nada for encontrado, retorna prev (sem alteração)
+              return found ? copy : prev;
+            });
+
+            // opcional: avisa o pai (App) para, se quiser, refazer fetch completo
+            if (typeof onScanned === "function") {
+              try {
+                onScanned(newRow);
+              } catch (err) {
+                console.warn("onScanned callback falhou:", err);
+              }
+            }
+          } catch (err) {
+            console.error("Erro no handler realtime scans:", err);
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      try {
+        supabase.removeChannel(channel);
+      } catch (err) {
+        console.warn("Falha ao remover canal realtime:", err);
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const source = localAtivos || {};
+
   return (
     <div className="board-wrapper">
-      {/* Faixa fixa no topo (aparece somente nesta tela - como este é o componente Painel) */}
       <div className="meta-banner" role="status" aria-live="polite">
-        <div className="meta-banner-inner" aria-hidden="false">
-          <span className="meta-msg">🚀 Estamos a&nbsp;</span>
+        <div className="meta-banner-inner">
+          <span className="meta-msg">🚀 Alcançamos&nbsp;</span>
           <span className="meta-percent">{pctText}</span>
           <span className="meta-msg">&nbsp;da meta! 🚀</span>
         </div>
       </div>
 
       <div className="board">
-        {MAQUINAS .filter((m) => m !== "P4") .map((m) => {
-          const lista = ativosPorMaquina[m] ?? [];
+        {MAQUINAS.filter((m) => m !== "P4").map((m) => {
+          const lista = source[m] ?? [];
           const ativa = lista[0] || null;
 
-          // Parada aberta -> cronômetro vermelho no cabeçalho
           const openStop = ativa
-            ? paradas.find((p) => p.order_id === ativa.id && !p.resumed_at)
+            ? paradas.find((p) => p.order_id === String(ativa.id) && !p.resumed_at)
             : null;
+
           const sinceMs = openStop ? new Date(openStop.started_at).getTime() : null;
-          const stopReason = openStop?.reason || null;
-          const stopNotes = openStop?.notes || null;
+
           const durText = sinceMs
             ? (() => {
-                // força re-render pelo tick
-                // eslint-disable-next-line no-unused-vars
                 const _ = tick;
-                const total = Math.max(
-                  0,
-                  Math.floor((Date.now() - sinceMs) / 1000)
-                );
-                const h = String(Math.floor(total / 3600)).padStart(2, "0");
-                const mn = String(Math.floor((total % 3600) / 60)).padStart(2, "0");
-                const s = String(total % 60).padStart(2, "0");
-                return `${h}:${mn}:${s}`;
+                const total = Math.max(0, Math.floor((Date.now() - sinceMs) / 1000));
+                return formatHHMMSS(total);
               })()
             : null;
 
-          // Baixa eficiência -> cronômetro amarelo no cabeçalho (igual ao de parada)
           const lowEffText =
             ativa?.status === "BAIXA_EFICIENCIA" && ativa?.loweff_started_at
               ? (() => {
-                  // força re-render pelo tick
-                  // eslint-disable-next-line no-unused-vars
                   const _ = tick;
                   const secs =
-                    (Date.now() -
-                      new Date(ativa.loweff_started_at).getTime()) / 1000;
+                    (Date.now() - new Date(ativa.loweff_started_at).getTime()) / 1000;
                   return formatHHMMSS(secs);
                 })()
               : null;
 
-          // ⬇️ NOVO: cronômetro “Sem programação” (azul) no cabeçalho
           let semProgText = null;
           if (!ativa) {
             const lastFinISO = lastFinalizadoPorMaquina?.[m] || null;
             if (lastFinISO) {
-              // força re-render pelo tick
-              // eslint-disable-next-line no-unused-vars
               const _ = tick;
-              const sinceMs = new Date(lastFinISO).getTime();
-              const total = Math.max(0, Math.floor((Date.now() - sinceMs) / 1000));
+              const since = new Date(lastFinISO).getTime();
+              const total = Math.max(0, Math.floor((Date.now() - since) / 1000));
               semProgText = formatHHMMSS(total);
             }
           }
 
-          // O.P no cabeçalho (lado direito)
-          const opCode =
-            ativa?.o?.code ??
-            ativa?.code ??
-            ativa?.ordem?.code ??
-            ativa?.order?.code ??
-            "";
+          const opCode = ativa?.code || ativa?.o?.code || ativa?.op_code || "";
+
+          // lidas / saldo: scanned_count agora pode vir do fetch inicial ou do realtime
+          const lidas = Number(ativa?.scanned_count || 0);
+          const saldo = ativa ? Math.max(0, (Number(ativa.boxes) || 0) - lidas) : 0;
 
           return (
             <div key={m} className="column">
-              {/* ===== Cabeçalho: máquina, cronômetros e O.P ===== */}
               <div
                 className={
-                  "column-header " + (ativa?.status === "PARADA" && stopReason !== "FIM DE SEMANA" ? "blink-red" : "")
+                  "column-header " +
+                  (ativa?.status === "PARADA" ? "blink-red" : "")
                 }
                 style={{ display: "flex", alignItems: "center", gap: 8 }}
               >
-                <div
-                  className="hdr-left"
-                  style={{ display: "flex", alignItems: "center", gap: 8 }}
-                >
+                <div className="hdr-left" style={{ display: "flex", gap: 8 }}>
                   {m}
 
-                  {/* Cronômetro de PARADA (vermelho) */}
                   {ativa?.status === "PARADA" && durText && (
                     <span className="parada-timer">{durText}</span>
                   )}
 
-                  {/* Cronômetro de BAIXA_EFICIENCIA (amarelo) — mesmo lugar e formato */}
                   {lowEffText && (
-                    <span
-                      className="loweff-timer"
-                      title={ativa?.loweff_by ? `Operador: ${ativa.loweff_by}` : ""}
-                    >
-                      {lowEffText}
-                    </span>
+                    <span className="loweff-timer">{lowEffText}</span>
                   )}
-                  {/* ⬇️ NOVO: Cronômetro SEM PROGRAMAÇÃO (azul) */}
+
                   {!ativa && semProgText && (
-                    <span className="semprog-timer" title="Sem programação desde a última finalização">
-                      {semProgText}
-                    </span>
+                    <span className="semprog-timer">{semProgText}</span>
                   )}
                 </div>
 
-                {/* lado direito: O.P */}
                 {opCode && (
                   <div className="hdr-right op-inline" style={{ marginLeft: "auto" }}>
                     O.P - {opCode}
@@ -147,27 +269,28 @@ export default function Painel({
                 )}
               </div>
 
-              {/* ===== Corpo ===== */}
               <div className="column-body">
                 {ativa ? (
                   <div className={statusClass(ativa.status)}>
-                    {/* Detalhes da O.P */}
                     <Etiqueta
-                      o={ativa.o || ativa}
+                      o={ativa}
                       variant="painel"
-                      lidasCaixas={['P1','P2','P3'].includes(m) ? (ativa._scansCount || 0) : undefined}
-                      saldoCaixas={['P1','P2','P3'].includes(m) ? Math.max(0, (ativa.boxes || 0) - (ativa._scansCount || 0)) : undefined}
-                      paradaReason={stopReason}
-                      paradaNotes={stopNotes}
+                      lidasCaixas={["P1", "P2", "P3"].includes(m) ? lidas : undefined}
+                      saldoCaixas={["P1", "P2", "P3"].includes(m) ? saldo : undefined}
+                      paradaReason={openStop?.reason}
+                      paradaNotes={openStop?.notes}
                     />
-                    {/* Motivo da PARADA, centralizado, sem cronômetro */}
-                    {ativa?.status === "PARADA" && stopReason && (
-                      <div className="stop-reason-below">{stopReason}</div>
+
+                    {ativa?.status === "PARADA" && openStop?.reason && (
+                      <div className="stop-reason-below">{openStop.reason}</div>
                     )}
-                    <div className="sep"></div>
+
+                    <div className="sep" />
+
                     <div className="grid2">
                       <div>
                         <div className="label">Situação</div>
+
                         <select
                           className="select"
                           value={ativa.status}
@@ -190,10 +313,7 @@ export default function Painel({
                         </select>
                       </div>
 
-                      <div
-                        className="flex"
-                        style={{ justifyContent: "flex-end", gap: 8 }}
-                      >
+                      <div className="flex" style={{ justifyContent: "flex-end", gap: 8 }}>
                         {ativa.status === "AGUARDANDO" ? (
                           <button
                             className="btn"
@@ -210,14 +330,9 @@ export default function Painel({
                             Iniciar Produção
                           </button>
                         ) : (
-                          <>
-                            <button
-                              className="btn"
-                              onClick={() => setFinalizando(ativa)}
-                            >
-                              Finalizar
-                            </button>
-                          </>
+                          <button className="btn" onClick={() => setFinalizando(ativa)}>
+                            Finalizar
+                          </button>
                         )}
                       </div>
                     </div>
