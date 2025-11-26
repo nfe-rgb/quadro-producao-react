@@ -92,6 +92,7 @@ export default function Pet02({
 
     // cronômetros
   const paradaAberta = paradas?.find((p) => p.order_id === ativa?.id && !p.resumed_at);
+  const stopReason = paradaAberta?.reason || "";
   const tempoParada = useMemo(() => {
     if (!paradaAberta) return null;
     const _ = tick;
