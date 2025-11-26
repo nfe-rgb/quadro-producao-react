@@ -94,14 +94,16 @@ export default function Pet02({
   const paradaAberta = paradas?.find((p) => p.order_id === ativa?.id && !p.resumed_at);
   const stopReason = paradaAberta?.reason || "";
   const tempoParada = useMemo(() => {
-    if (!paradaAberta) return null;
+    if (!ativa) return null;
+    if (ativa.status !== "PARADA") return null;
+    if (!ativa.started_at) return null;
     const _ = tick;
-    const diff = Math.floor((Date.now() - new Date(paradaAberta.started_at).getTime()) / 1000);
+    const diff = Math.floor((Date.now() - new Date(ativa.started_at).getTime()) / 1000);
     const hh = String(Math.floor(diff / 3600)).padStart(2, "0");
     const mm = String(Math.floor((diff % 3600) / 60)).padStart(2, "0");
     const ss = String(diff % 60).padStart(2, "0");
     return `${hh}:${mm}:${ss}`;
-  }, [paradaAberta, tick]);
+  }, [ativa, tick]);
 
   const tempoLow = useMemo(() => {
     if (!ativa) return null;
