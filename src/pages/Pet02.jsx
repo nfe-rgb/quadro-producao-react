@@ -1,4 +1,4 @@
-// src/pages/Pet01.jsx
+// src/pages/Pet02.jsx
 import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "../lib/supabaseClient";
 import Etiqueta from "../components/Etiqueta";
@@ -390,13 +390,13 @@ export default function Pet02({
         </div>
 
         <div className={statusClass(ativa?.status)}>
-          <Etiqueta o={ativa} variant="painel" saldoCaixas={saldo} lidasCaixas={lidas} />
+          <Etiqueta o={ativa} variant="pet01" saldoCaixas={saldo} lidasCaixas={lidas} />
         </div>
 
-        {paradaAberta?.reason && ativa?.status === "PARADA" && (
-          <div className="stop-reason-below">{paradaAberta.reason}</div>
-        )}
-
+                  {ativa?.status === "PARADA" && stopReason && (
+                  <div className="stop-reason-below">{stopReason}</div>
+                  )}
+                  
         <div className="sep" style={{ marginTop: 12 }} />
 
         <div className="pet01-field" style={{ marginTop: 10 }}>
@@ -434,53 +434,110 @@ export default function Pet02({
         )}
       </div>
 
-      {/* MODAL — REFUGO (mantive para registrar refugos) */}
-      {showRefugo && (
-        <div className="pet01-modal-bg" role="dialog" aria-modal>
-          <div className="pet01-modal">
-            <h3>Apontar Refugo</h3>
-            <form onSubmit={async (e) => {
-              e.preventDefault();
-              if (!ativa) { showToast("Nenhuma ordem ativa.", "err"); return; }
-              const { operador, turno, quantidade, motivo } = refugoForm;
-              if (!operador?.trim() || !turno?.trim() || !quantidade) { showToast("Preencha os campos.", "err"); return; }
+{/* MODAL — REFUGO (FINAL E CORRIGIDO) */}
+{showRefugo && (
+  <div className="pet01-modal-bg" role="dialog" aria-modal>
+    <div className="pet01-modal">
+      <h3>Apontar Refugo</h3>
+      <form
+        onSubmit={async (e) => {
+          e.preventDefault();
+          if (!ativa) {
+            showToast("Nenhuma ordem ativa.", "err");
+            return;
+          }
 
-              const payload = {
-                created_at: new Date().toISOString(),
-                machine_id: "P2",
-                shift: turno.trim(),
-                operator: operador.trim(),
-                order_id: ativa.id,
-                op_code: String(ativa.code),
-                qty_pieces: Number(quantidade),
-                reason: motivo,
-              };
+          const { operador, quantidade, motivo } = refugoForm;
 
-              const { error } = await supabase.from("scrap_logs").insert([payload]);
-              if (error) { console.error(error); showToast("Erro ao registrar refugo.", "err"); return; }
+          if (!operador?.trim()) {
+            showToast("Preencha o operador.", "err");
+            return;
+          }
+          if (!quantidade || Number(quantidade) <= 0) {
+            showToast("Informe uma quantidade válida.", "err");
+            return;
+          }
 
-              setShowRefugo(false);
-              setRefugoForm({ operador: "", turno: "", quantidade: "", motivo: REFUGO_MOTIVOS[0] });
-              showToast("Refugo registrado.", "ok");
-            }}>
-              <label>Operador *</label>
-              <input className="input" value={refugoForm.operador} onChange={e => setRefugoForm(f => ({ ...f, operador: e.target.value }))} />
-              <label>Turno *</label>
-              <input className="input" value={refugoForm.turno} onChange={e => setRefugoForm(f => ({ ...f, turno: e.target.value }))} />
-              <label>Quantidade (peças) *</label>
-              <input className="input" type="number" value={refugoForm.quantidade} onChange={e => setRefugoForm(f => ({ ...f, quantidade: e.target.value }))} />
-              <label>Motivo *</label>
-              <select className="input" value={refugoForm.motivo} onChange={e => setRefugoForm(f => ({ ...f, motivo: e.target.value }))}>
-                {REFUGO_MOTIVOS.map(m => <option key={m} value={m}>{m}</option>)}
-              </select>
-              <div className="pet01-modal-buttons" style={{ marginTop: 12 }}>
-                <button type="button" className="gray" onClick={() => setShowRefugo(false)}>Cancelar</button>
-                <button type="submit" className="orange">Registrar</button>
-              </div>
-            </form>
-          </div>
+          // payload final compatível com scrap_logs
+          const payload = {
+            created_at: new Date().toISOString(),
+            machine_id: ativa.machine_id, // agora correto
+            shift: String(currentShift || getTurnoAtual() || "Hora Extra"),
+            operator: operador.trim(),
+            order_id: ativa.id,
+            op_code: String(ativa.code),
+            qty: Number(quantidade),  // <-- coluna correta
+            reason: motivo,
+          };
+
+          console.log("Payload Refugo:", payload);
+
+          const { error } = await supabase.from("scrap_logs").insert([payload]);
+
+          if (error) {
+            console.error("Erro insert scrap_logs:", error);
+            showToast("Erro ao registrar refugo: " + error.message, "err");
+            return;
+          }
+
+          setShowRefugo(false);
+          setRefugoForm({ operador: "", quantidade: "", motivo: REFUGO_MOTIVOS[0] });
+          showToast("Refugo registrado.", "ok");
+        }}
+      >
+
+        <label>Operador *</label>
+        <input
+          className="input"
+          value={refugoForm.operador}
+          onChange={(e) =>
+            setRefugoForm((f) => ({ ...f, operador: e.target.value }))
+          }
+          autoFocus
+        />
+
+        <label>Quantidade (peças) *</label>
+        <input
+          className="input"
+          type="number"
+          min="1"
+          value={refugoForm.quantidade}
+          onChange={(e) =>
+            setRefugoForm((f) => ({ ...f, quantidade: e.target.value }))
+          }
+        />
+
+        <label>Motivo *</label>
+        <select
+          className="input"
+          value={refugoForm.motivo}
+          onChange={(e) =>
+            setRefugoForm((f) => ({ ...f, motivo: e.target.value }))
+          }
+        >
+          {REFUGO_MOTIVOS.map((m) => (
+            <option key={m} value={m}>
+              {m}
+            </option>
+          ))}
+        </select>
+
+        <div className="pet01-modal-buttons" style={{ marginTop: 12 }}>
+          <button
+            type="button"
+            className="gray"
+            onClick={() => setShowRefugo(false)}
+          >
+            Cancelar
+          </button>
+          <button type="submit" className="orange">
+            Registrar
+          </button>
         </div>
-      )}
+      </form>
+    </div>
+  </div>
+)}
 
     </div>
   );
