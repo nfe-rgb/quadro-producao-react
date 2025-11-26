@@ -90,12 +90,13 @@ export default function Pet02({
   const lidas = scans.length;
   const saldo = ativa ? Math.max(0, Number(ativa.boxes) - lidas) : 0;
 
+
     // cronômetros
   const paradaAberta = paradas?.find((p) => p.order_id === ativa?.id && !p.resumed_at);
   const stopReason = paradaAberta?.reason || "";
   const tempoParada = useMemo(() => {
     if (!ativa) return null;
-    if (ativa.status !== "PARADA") return null;
+    if (ativa.paradaAberta?.status !== "PARADA") return null;
     if (!ativa.started_at) return null;
     const _ = tick;
     const diff = Math.floor((Date.now() - new Date(ativa.started_at).getTime()) / 1000);
@@ -104,6 +105,7 @@ export default function Pet02({
     const ss = String(diff % 60).padStart(2, "0");
     return `${hh}:${mm}:${ss}`;
   }, [ativa, tick]);
+
 
   const tempoLow = useMemo(() => {
     if (!ativa) return null;

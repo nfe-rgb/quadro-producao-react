@@ -360,62 +360,82 @@ export default function Registro({ registroGrupos = [], openSet, toggleOpen }) {
             const iniCalc = Math.max(intervalo.ini, filtroStart.getTime());
             const fimCalc = Math.min(intervalo.fim, filtroEnd.getTime());
             if (fimCalc > iniCalc) {
-              let prodMs = fimCalc - iniCalc;
-
-              // Unir intervalos de baixa eficiência para evitar sobreposição
-              let lowEffIntervals = [];
-              if (safe(o.loweff_started_at)) {
-                const leIni = toTime(o.loweff_started_at);
-                const leFim = toTime(o.loweff_ended_at) || intervalo.fim;
-                const leIniCalc = Math.max(leIni, filtroStart.getTime(), iniCalc);
-                const leFimCalc = Math.min(leFim, filtroEnd.getTime(), fimCalc);
-                if (leIniCalc < leFimCalc) {
-                  lowEffIntervals.push([leIniCalc, leFimCalc]);
+              // 1. Coletar todos os intervalos de parada (inclusive abertas) dentro deste intervalo de produção
+              const paradaIntervals = (g.stops || []).map(st => {
+                const stIni = toTime(st.started_at);
+                let stFim;
+                if (safe(st.resumed_at)) {
+                  stFim = toTime(st.resumed_at);
+                } else {
+                  stFim = Math.min(Date.now(), filtroEnd.getTime());
                 }
-              }
-
-              // Separar intervalos exclusivos de baixa eficiência e produção
-              // 1. Unir todos os intervalos de baixa eficiência
-              const allIntervals = unirArrays([...lowEffIntervals]);
-              // 2. Criar lista de "eventos" (início/fim de cada intervalo)
-              let eventos = [];
-              allIntervals.forEach(([ini, fim]) => {
-                eventos.push({ t: ini, tipo: 'ini' });
-                eventos.push({ t: fim, tipo: 'fim' });
-              });
-              eventos.push({ t: iniCalc, tipo: 'iniTotal' });
-              eventos.push({ t: fimCalc, tipo: 'fimTotal' });
-              eventos = eventos.sort((a, b) => a.t - b.t);
-
-              // 3. Percorrer timeline, marcando o que é cada fatia
-              let fatias = [];
-              let dentro = 0;
+                const ini = Math.max(stIni, iniCalc);
+                const fim = Math.min(stFim, fimCalc);
+                return ini < fim ? [ini, fim] : null;
+              }).filter(Boolean);
+              // 2. Unir intervalos de parada
+              const paradaUnida = unirArrays(paradaIntervals);
+              // 3. Gerar intervalos "livres de parada" dentro do intervalo de produção
+              let livres = [];
               let cursor = iniCalc;
-              for (let i = 0; i < eventos.length; i++) {
-                const ev = eventos[i];
-                if (ev.t > cursor) {
-                  fatias.push([cursor, ev.t, dentro]);
-                  cursor = ev.t;
-                }
-                if (ev.tipo === 'ini') dentro++;
-                if (ev.tipo === 'fim') dentro--;
+              for (let i = 0; i < paradaUnida.length; i++) {
+                const [pIni, pFim] = paradaUnida[i];
+                if (pIni > cursor) livres.push([cursor, pIni]);
+                cursor = Math.max(cursor, pFim);
               }
+              if (cursor < fimCalc) livres.push([cursor, fimCalc]);
 
-              // 4. Classificar cada fatia: baixa eficiência ou produção
+              // 4. Para cada intervalo livre de parada, separar produção e baixa eficiência
               let totalLowEff = 0;
               let totalProd = 0;
-              fatias.forEach(([ini, fim, dentro]) => {
-                if (fim <= ini) return;
-                // Verifica se está dentro de algum intervalo de baixa eficiência
-                const isLowEff = lowEffIntervals.some(([leIni, leFim]) => ini < leFim && fim > leIni);
-                if (isLowEff) {
-                  totalLowEff += fim - ini;
-                } else {
-                  totalProd += fim - ini;
+              livres.forEach(([livreIni, livreFim]) => {
+                if (livreFim <= livreIni) return;
+                // Unir intervalos de baixa eficiência dentro deste intervalo livre
+                let lowEffIntervals = [];
+                if (safe(o.loweff_started_at)) {
+                  const leIni = toTime(o.loweff_started_at);
+                  const leFim = toTime(o.loweff_ended_at) || livreFim;
+                  const leIniCalc = Math.max(leIni, filtroStart.getTime(), livreIni);
+                  const leFimCalc = Math.min(leFim, filtroEnd.getTime(), livreFim);
+                  if (leIniCalc < leFimCalc) {
+                    lowEffIntervals.push([leIniCalc, leFimCalc]);
+                  }
                 }
+                // Unir intervalos de baixa eficiência
+                const allIntervals = unirArrays([...lowEffIntervals]);
+                // Gerar "fatias" de produção e baixa eficiência
+                let eventos = [];
+                allIntervals.forEach(([ini, fim]) => {
+                  eventos.push({ t: ini, tipo: 'ini' });
+                  eventos.push({ t: fim, tipo: 'fim' });
+                });
+                eventos.push({ t: livreIni, tipo: 'iniTotal' });
+                eventos.push({ t: livreFim, tipo: 'fimTotal' });
+                eventos = eventos.sort((a, b) => a.t - b.t);
+                let fatias = [];
+                let dentro = 0;
+                let cursorF = livreIni;
+                for (let i = 0; i < eventos.length; i++) {
+                  const ev = eventos[i];
+                  if (ev.t > cursorF) {
+                    fatias.push([cursorF, ev.t, dentro]);
+                    cursorF = ev.t;
+                  }
+                  if (ev.tipo === 'ini') dentro++;
+                  if (ev.tipo === 'fim') dentro--;
+                }
+                fatias.forEach(([ini, fim, dentro]) => {
+                  if (fim <= ini) return;
+                  const isLowEff = lowEffIntervals.some(([leIni, leFim]) => ini < leFim && fim > leIni);
+                  if (isLowEff) {
+                    totalLowEff += fim - ini;
+                  } else {
+                    totalProd += fim - ini;
+                  }
+                });
               });
               // 5. Atualizar totais
-              prodMs = totalProd;
+              let prodMs = totalProd;
               totalLowEffMs += totalLowEff;
 
               // desconto de fim de semana (se necessário)
