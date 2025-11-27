@@ -6,6 +6,7 @@ import Etiqueta from "../components/Etiqueta";
 import { MAQUINAS, STATUS } from "../lib/constants";
 import { statusClass, jaIniciou } from "../lib/utils";
 import "../styles/Barrademeta.css";
+import { DateTime } from "luxon";
 import { supabase } from "../lib/supabaseClient";
 
 // Helper para formatar HH:MM:SS
@@ -192,7 +193,7 @@ export default function Painel({
       </div>
 
       <div className="board">
-        {MAQUINAS.filter((m) => m !== "P4").map((m) => {
+        {MAQUINAS.map((m) => {
           const lista = source[m] ?? [];
           const ativa = lista[0] || null;
 
@@ -318,12 +319,12 @@ export default function Painel({
                           <button
                             className="btn"
                             onClick={() => {
-                              const now = new Date();
+                              const nowBr = DateTime.now().setZone("America/Sao_Paulo");
                               setStartModal({
                                 ordem: ativa,
                                 operador: "",
-                                data: now.toISOString().slice(0, 10),
-                                hora: now.toTimeString().slice(0, 5),
+                                data: nowBr.toISODate(), 
+                                hora: nowBr.toFormat("HH:mm"),
                               });
                             }}
                           >

@@ -1,7 +1,7 @@
 // src/lib/constants.js
 export const ADMIN_EMAILS = ['nfe@savantiplasticos.com.br'];
 
-export const MAQUINAS = ['P1','P2','P3','P4','I1','I2','I3','I4','I5','I6']
+export const MAQUINAS = ['P1','P2','P3','I1','I2','I3','I4','I5','I6']
 
 export const STATUS = ['AGUARDANDO','PRODUZINDO','BAIXA_EFICIENCIA','PARADA']
 
