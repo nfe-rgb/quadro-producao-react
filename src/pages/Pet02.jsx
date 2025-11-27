@@ -1,8 +1,9 @@
-// src/pages/Pet02.jsx
+// src/pages/Pet01.jsx
 import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "../lib/supabaseClient";
 import Etiqueta from "../components/Etiqueta";
 import { getTurnoAtual, statusClass } from "../lib/utils";
+import { toBrazilTime } from "../lib/timezone";
 import "../styles/Pet01.css";
 
 export default function Pet02({
@@ -53,7 +54,11 @@ export default function Pet02({
   const lastKeyTimeRef = useRef(0);
 
   // turno atual (usado para gravar)
-  const [currentShift, setCurrentShift] = useState(() => getTurnoAtual() ?? "Hora Extra");
+const [currentShift, setCurrentShift] = useState(() => {
+  // pega o instante atual e converte para horário de São Paulo antes de decidir o turno
+  const nowBr = toBrazilTime(new Date().toISOString());
+  return getTurnoAtual(nowBr) ?? "Hora Extra";
+});
 
   // fullscreen ref + state (se usar)
   const wrapperRef = useRef(null);
@@ -89,7 +94,6 @@ export default function Pet02({
 
   const lidas = scans.length;
   const saldo = ativa ? Math.max(0, Number(ativa.boxes) - lidas) : 0;
-
 
     // cronômetros
   const paradaAberta = paradas?.find((p) => p.order_id === ativa?.id && !p.resumed_at);
@@ -186,7 +190,7 @@ export default function Pet02({
     const payload = {
       created_at: new Date().toISOString(),
       machine_id: "P2",
-      shift: String(currentShift || getTurnoAtual() || "Hora Extra"),
+      shift: String( currentShift || getTurnoAtual(toBrazilTime(new Date().toISOString())) || "Hora Extra" ),
       order_id: ativa.id,
       op_code: String(ativa.code),
       scanned_box: caixa,
@@ -210,6 +214,11 @@ export default function Pet02({
       setFinalizando && setFinalizando(ativa);
     }
   }
+
+// DEBUG: permitir bipagem manual pelo console
+if (typeof window !== "undefined") {
+  window.biparManual = biparWithCode;
+}
 
   // ---------- Global scanner listener (HID) ----------
   useEffect(() => {
