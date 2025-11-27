@@ -1,40 +1,58 @@
-// Determina o turno atual com base no horário e dia da semana
-export function getTurnoAtual(date = new Date()) {
-  const dia = date.getDay(); // 0=Dom, 1=Seg, ..., 6=Sáb
-  const hora = date.getHours();
-  const min = date.getMinutes();
-  const minutos = hora * 60 + min;
+import { DateTime } from "luxon";
+
+// Retorna 1, 2, 3 ou 'Hora Extra'
+// Aceita: nothing (usa agora), ISO string, JS Date, ou Luxon DateTime
+export function getTurnoAtual(dateInput = null) {
+  // normalize para um Luxon DateTime no fuso de São Paulo
+  let dt;
+  if (!dateInput) {
+    dt = DateTime.now().setZone("America/Sao_Paulo");
+  } else if (typeof dateInput === "string") {
+    // aceita ISO com ou sem offset
+    dt = DateTime.fromISO(dateInput, { setZone: true }).setZone("America/Sao_Paulo");
+  } else if (dateInput instanceof Date) {
+    dt = DateTime.fromJSDate(dateInput).setZone("America/Sao_Paulo");
+  } else if (dateInput && typeof dateInput === "object" && dateInput.isLuxonDateTime) {
+    dt = dateInput.setZone("America/Sao_Paulo");
+  } else {
+    // fallback seguro
+    dt = DateTime.now().setZone("America/Sao_Paulo");
+  }
+
+  // Luxon.weekday: 1 = Monday ... 7 = Sunday
+  // queremos dia estilo JS getDay(): 0 = Sunday, 1 = Monday, ..., 6 = Saturday
+  const dia = dt.weekday % 7; // (7 % 7 = 0 -> Domingo)
+  const minutos = dt.hour * 60 + dt.minute;
+
+  const inRange = (startMin, endMin, m) => {
+    if (startMin <= endMin) return m >= startMin && m < endMin;
+    return m >= startMin || m < endMin;
+  };
 
   // Domingo
   if (dia === 0) {
-    // 23:00 às 23:59 Turno 3
-    if (minutos >= 23 * 60) return 3;
-    // 00:00 às 04:59 Turno 3 (continuação)
+    if (inRange(23 * 60, 24 * 60, minutos)) return 3;
     if (minutos < 5 * 60) return 3;
-    // 05:00 às 22:59 = Hora Extra
-    return 'Hora Extra';
+    return "Hora Extra";
   }
+
   // Segunda a Sexta
   if (dia >= 1 && dia <= 5) {
-    if (minutos >= 5 * 60 && minutos < 13 * 60 + 30) return 1;
-    if (minutos >= 13 * 60 + 30 && minutos < 22 * 60) return 2;
-    // 22:00 às 23:59 Turno 3
-    if (minutos >= 22 * 60) return 3;
-    // 00:00 às 04:59 Turno 3 (continuação)
-    if (minutos < 5 * 60) return 3;
+    if (inRange(5 * 60, 13 * 60 + 30, minutos)) return 1;
+    if (inRange(13 * 60 + 30, 22 * 60, minutos)) return 2;
+    if (inRange(22 * 60, 5 * 60, minutos)) return 3;
   }
+
   // Sábado
   if (dia === 6) {
-    if (minutos >= 5 * 60 && minutos < 9 * 60) return 1;
-    if (minutos >= 9 * 60 && minutos < 13 * 60) return 2;
-    // 13:00 às 23:59 = Hora Extra
-    if (minutos >= 13 * 60) return 'Hora Extra';
-    // 00:00 às 04:59 = Fora de turno (considerar Hora Extra)
-    if (minutos < 5 * 60) return 'Hora Extra';
+    if (inRange(5 * 60, 9 * 60, minutos)) return 1;
+    if (inRange(9 * 60, 13 * 60, minutos)) return 2;
+    return "Hora Extra";
   }
-  // Fora de qualquer turno (deve ser Hora Extra)
-  return 'Hora Extra';
+
+  return "Hora Extra";
 }
+
 // src/lib/utils.js
 export function statusClass(s){
   if(s==='AGUARDANDO') return 'card gray'

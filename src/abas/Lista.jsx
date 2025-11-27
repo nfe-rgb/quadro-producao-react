@@ -133,12 +133,12 @@ await supabase.rpc('reorder_machine_queue', {
                         {ativa.status === 'AGUARDANDO' ? (
                           <>
                             <button className="btn" onClick={()=>{
-                              const now = new Date()
+                              const nowBr = DateTime.now().setZone("America/Sao_Paulo");
                               setStartModal({
                                 ordem: ativa,
-                                operador: '',
-                                data: now.toISOString().slice(0,10),
-                                hora: now.toTimeString().slice(0,5)
+                                operador: "",
+                                data: nowBr.toISODate(), 
+                                hora: nowBr.toFormat("HH:mm"),
                               })
                             }}>Iniciar Produção</button>
                             <button className="btn" onClick={() => setEditando(ativa)}>Editar</button>

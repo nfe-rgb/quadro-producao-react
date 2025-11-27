@@ -4,6 +4,7 @@ import { supabase } from "../lib/supabaseClient";
 import Etiqueta from "../components/Etiqueta";
 import { getTurnoAtual, statusClass } from "../lib/utils";
 import { toBrazilTime } from "../lib/timezone";
+import { DateTime } from "luxon";
 import "../styles/Pet01.css";
 
 export default function Pet02({
@@ -139,83 +140,104 @@ const [currentShift, setCurrentShift] = useState(() => {
     setTimeout(() => setToast((t) => ({ ...t, visible: false })), ms);
   }
 
-  // ---------- bipagem (registro) ----------
-  async function biparWithCode(code) {
-    // code example: "OS 753 - 001"
-    const value = (code || "").trim();
-    if (!ativa) {
-      showToast("Nenhuma ordem ativa.", "err");
-      return;
-    }
-
-    const reg = /^OS\s+(\d+)\s*-\s*(\d{3})$/i;
-    const m = value.match(reg);
-    if (!m) {
-      showToast("Formato inválido. Use: OS 753 - 001", "err");
-      return;
-    }
-    const op = m[1];
-    const caixa = Number(m[2]);
-
-    if (String(op) !== String(ativa.code)) {
-      showToast(`Código não pertence à O.P ${ativa.code}`, "err");
-      return;
-    }
-    if (caixa < 1 || caixa > Number(ativa.boxes)) {
-      showToast("Caixa fora do intervalo.", "err");
-      return;
-    }
-
-    // verifica duplicidade
-    const { data: dup, error: dupErr } = await supabase
-      .from("production_scans")
-      .select("id")
-      .eq("order_id", ativa.id)
-      .eq("scanned_box", caixa)
-      .maybeSingle();
-
-    if (dupErr) {
-      console.error(dupErr);
-      showToast("Erro ao verificar bipagem.", "err");
-      return;
-    }
-    if (dup) {
-      showToast("Caixa já bipada.", "err");
-      return;
-    }
-
-    // qty_pieces = padrão (peças por caixa) OR 0 if missing
-    const qtyPiecesPerBox = Number(ativa.standard || 0);
-
-    const payload = {
-      created_at: new Date().toISOString(),
-      machine_id: "P2",
-      shift: String( currentShift || getTurnoAtual(toBrazilTime(new Date().toISOString())) || "Hora Extra" ),
-      order_id: ativa.id,
-      op_code: String(ativa.code),
-      scanned_box: caixa,
-      qty_pieces: qtyPiecesPerBox,
-      code: value,
-    };
-
-    const { error } = await supabase.from("production_scans").insert([payload]);
-    if (error) {
-      console.error("Erro insert production_scans:", error);
-      showToast("Erro ao registrar bipagem.", "err");
-      return;
-    }
-
-    // atualiza local e mostra sucesso (mantém fluxo aberto)
-    await loadScans(ativa.id);
-    showToast(`Caixa ${String(caixa).padStart(3, "0")} registrada • Turno ${payload.shift}`, "ok");
-
-    // se zerou -> chama finalização (o App abre modal de finalização)
-    if (saldo - 1 <= 0) {
-      setFinalizando && setFinalizando(ativa);
-    }
+// Substitua sua função biparWithCode por esta (coloque no mesmo escopo)
+async function biparWithCode(code) {
+  const value = (code || "").trim();
+  if (!ativa) {
+    showToast("Nenhuma ordem ativa.", "err");
+    return;
   }
 
-// DEBUG: permitir bipagem manual pelo console
+  const reg = /^OS\s+(\d+)\s*-\s*(\d{3})$/i;
+  const m = value.match(reg);
+  if (!m) {
+    showToast("Formato inválido. Use: OS 753 - 001", "err");
+    return;
+  }
+  const op = m[1];
+  const caixa = Number(m[2]);
+
+  if (String(op) !== String(ativa.code)) {
+    showToast(`Código não pertence à O.P ${ativa.code}`, "err");
+    return;
+  }
+  if (caixa < 1 || caixa > Number(ativa.boxes)) {
+    showToast("Caixa fora do intervalo.", "err");
+    return;
+  }
+
+  // duplicidade
+  const { data: dup, error: dupErr } = await supabase
+    .from("production_scans")
+    .select("id")
+    .eq("order_id", ativa.id)
+    .eq("scanned_box", caixa)
+    .maybeSingle();
+
+  if (dupErr) {
+    console.error("Erro ao verificar duplicidade:", dupErr);
+    showToast("Erro ao verificar bipagem.", "err");
+    return;
+  }
+  if (dup) {
+    showToast("Caixa já bipada.", "err");
+    return;
+  }
+
+  const qtyPiecesPerBox = Number(ativa.standard || 0);
+
+  // --- FORÇA horário BR e calcula turno com BR ---
+  const nowBr = DateTime.now().setZone("America/Sao_Paulo");
+  const createdAtUtcIso = nowBr.toUTC().toISO(); // será gravado no supabase
+  // sempre calcular com base no nowBr (não usar currentShift)
+  const turnoCalc = String(getTurnoAtual(nowBr) || "Hora Extra");
+
+  // logs detalhados antes do insert
+  console.info("[biparWithCode] nowBr (BR):", nowBr.toISO());
+  console.info("[biparWithCode] createdAtUtcIso (UTC):", createdAtUtcIso);
+  console.info("[biparWithCode] turnoCalc (getTurnoAtual):", turnoCalc);
+
+  const payload = {
+    created_at: createdAtUtcIso,
+    machine_id: "P2",
+    shift: turnoCalc,
+    order_id: ativa.id,
+    op_code: String(ativa.code),
+    scanned_box: caixa,
+    qty_pieces: qtyPiecesPerBox,
+    code: value,
+  };
+
+  console.info("[biparWithCode] payload -> antes do insert:", payload);
+
+  const { data: insertData, error } = await supabase
+    .from("production_scans")
+    .insert([payload])
+    .select("*"); // retorna a linha inserida se permitido
+
+  if (error) {
+    console.error("Erro insert production_scans:", error);
+    showToast("Erro ao registrar bipagem.", "err");
+    return;
+  }
+
+  // Se o insert retornou dados, logue o que o banco devolveu
+  if (Array.isArray(insertData) && insertData.length) {
+    console.info("[biparWithCode] resposta do insert (db retornou):", insertData[0]);
+  } else {
+    console.warn("[biparWithCode] insert concluído, mas sem row retornada (verifique permissões SELECT).");
+  }
+
+  // Atualiza UI
+  await loadScans(ativa.id);
+  showToast(`Caixa ${String(caixa).padStart(3, "0")} registrada • Turno ${turnoCalc}`, "ok");
+
+  if (saldo - 1 <= 0) {
+    setFinalizando && setFinalizando(ativa);
+  }
+}
+
+  // DEBUG: permitir bipagem manual pelo console
 if (typeof window !== "undefined") {
   window.biparManual = biparWithCode;
 }
