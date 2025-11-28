@@ -1,8 +1,10 @@
 import { useEffect, useState, useMemo } from 'react';
 import { supabase } from '../lib/supabaseClient';
-import { MAQUINAS } from '../lib/constants';
+// import { MAQUINAS } from '../lib/constants'; // removido pois não é usado
 import { fmtDateTime, getTurnoAtual } from '../lib/utils';
-import '../styles/registro.css';
+import '../styles/Apontamento.css';
+// Se você depende de estilos globais de registro.css, descomente a linha abaixo
+// import '../styles/registro.css';
 
 // Turnos padrão (apenas para labels)
 const TURNOS = [
@@ -19,7 +21,6 @@ export default function Apontamento() {
   const [periodo, setPeriodo] = useState('hoje');
   const [customStart, setCustomStart] = useState('');
   const [customEnd, setCustomEnd] = useState('');
-  // Removido filtro por máquina
   const [caixasAbertas, setCaixasAbertas] = useState({}); // { [turno+maquina]: boolean }
   const [bipadasAnim, setBipadasAnim] = useState({}); // { [turno+maquina]: boolean }
   const [refugoAnim, setRefugoAnim] = useState({}); // { [turno+maquina]: boolean }
@@ -58,32 +59,43 @@ export default function Apontamento() {
   const filtroEnd = periodoRange.end;
 
   useEffect(() => {
+    let mounted = true;
     async function fetchData() {
       setLoading(true);
       if (!filtroStart || !filtroEnd) {
+        if (!mounted) return;
         setBipagens([]);
         setRefugos([]);
         setLoading(false);
         return;
       }
-      // Busca todas as máquinas
-      let bipQuery = supabase
-        .from('production_scans')
-        .select('*')
-        .gte('created_at', filtroStart.toISOString())
-        .lte('created_at', filtroEnd.toISOString());
-      let refQuery = supabase
-        .from('scrap_logs')
-        .select('*')
-        .gte('created_at', filtroStart.toISOString())
-        .lte('created_at', filtroEnd.toISOString());
-      const { data: bip } = await bipQuery;
-      const { data: ref } = await refQuery;
-      setBipagens(bip || []);
-      setRefugos(ref || []);
-      setLoading(false);
+      try {
+        const bipQuery = supabase
+          .from('production_scans')
+          .select('*')
+          .gte('created_at', filtroStart.toISOString())
+          .lte('created_at', filtroEnd.toISOString());
+        const refQuery = supabase
+          .from('scrap_logs')
+          .select('*')
+          .gte('created_at', filtroStart.toISOString())
+          .lte('created_at', filtroEnd.toISOString());
+        const [{ data: bip }, { data: ref }] = await Promise.all([bipQuery, refQuery]);
+        if (!mounted) return;
+        setBipagens(bip || []);
+        setRefugos(ref || []);
+      } catch (err) {
+        console.error('Erro ao buscar apontamentos:', err);
+        if (mounted) {
+          setBipagens([]);
+          setRefugos([]);
+        }
+      } finally {
+        if (mounted) setLoading(false);
+      }
     }
     fetchData();
+    return () => { mounted = false; };
   }, [filtroStart, filtroEnd]);
 
   // Agrupa por turno e máquina
@@ -118,12 +130,11 @@ export default function Apontamento() {
   }, [bipagens, refugos]);
 
   return (
-    <div className="card registro-wrap">
-      <div className="card">
-        <div className="label" style={{ marginBottom: 8 }}>
-          Apontamentos por Turno
-        </div>
-        <div style={{ display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
+    <div className="apontamento-card card registro-wrap">
+      <div className="card-inner">
+        <div className="apontamento-title label">Apontamentos por Turno</div>
+
+        <div className="apontamento-controls">
           <div className="select-wrap">
             <select
               className="period-select"
@@ -139,12 +150,14 @@ export default function Apontamento() {
               <option value="custom">Intervalo personalizado</option>
             </select>
           </div>
+
           {periodo === 'custom' && (
-            <>
-              <input type="date" value={customStart} onChange={e => setCustomStart(e.target.value)} />
-              <input type="date" value={customEnd} onChange={e => setCustomEnd(e.target.value)} />
-            </>
+            <div className="custom-dates">
+              <input className="date-input" type="date" value={customStart} onChange={e => setCustomStart(e.target.value)} />
+              <input className="date-input" type="date" value={customEnd} onChange={e => setCustomEnd(e.target.value)} />
+            </div>
           )}
+
           <div className="select-wrap">
             <select
               className="period-select"
@@ -158,61 +171,72 @@ export default function Apontamento() {
             </select>
           </div>
         </div>
+
         {loading ? (
-          <div className="row muted" style={{ padding: 32, textAlign: 'center' }}>Carregando...</div>
+          <div className="row muted loading">Carregando...</div>
         ) : (
-          <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap' }}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+          <div className="apontamento-content">
+            <div className="maquinas-column">
               {['P1','P2','P3'].map(maq => (
-                <div key={maq} className="card" style={{ marginBottom: 0, padding: 0, background: '#f9f9f9', boxShadow: '0 1px 4px #0001' }}>
-                  <div style={{ fontWeight: 700, fontSize: 25, textAlign: 'center', padding: '12px 20px 8px 20px', borderBottom: '1px solid #eee', background: '#f5f5f5' }}>{maq}</div>
-                  <div style={{ display: 'flex', flexDirection: 'row', gap: 24, padding: '24px 20px', justifyContent: 'center', alignItems: 'stretch' }}>
+                <div key={maq} className="maquina-card card">
+                  <div className="maquina-header">{maq}</div>
+
+                  <div className="turnos-row">
                     {TURNOS.filter(t => turnoFiltro === 'todos' || turnoFiltro === t.key).map(t => {
                       const dados = agrupadoPorTurno[t.key][maq];
-                      const caixasSorted = [...dados.caixas].sort((a, b) => a.num - b.num);
-                      const key = maq + '-' + t.key;
+                      const caixasSorted = [...(dados.caixas || [])].sort((a, b) => (Number(a.num) || 0) - (Number(b.num) || 0));
+                      const key = `${maq}-${t.key}`;
                       const isOpen = caixasAbertas[key] || false;
                       const isBipadasAnim = bipadasAnim[key] || false;
                       const isRefugoAnim = refugoAnim[key] || false;
+
                       const handleClickBipadas = () => {
-                        setCaixasAbertas(prev => ({ ...prev, [key]: !isOpen }));
+                        setCaixasAbertas(prev => ({ ...prev, [key]: !prev[key] }));
                         setBipadasAnim(prev => ({ ...prev, [key]: true }));
                         setTimeout(() => setBipadasAnim(prev => ({ ...prev, [key]: false })), 250);
                       };
                       const handleClickRefugo = () => {
-                        setCaixasAbertas(prev => ({ ...prev, [key]: !isOpen }));
+                        setCaixasAbertas(prev => ({ ...prev, [key]: !prev[key] }));
                         setRefugoAnim(prev => ({ ...prev, [key]: true }));
                         setTimeout(() => setRefugoAnim(prev => ({ ...prev, [key]: false })), 250);
                       };
+
                       return (
-                        <div key={t.key} className="card turno-card" style={{ minWidth: 220, flex: 1, background: '#fff', border: '1px solid #eee', boxShadow: 'none', margin: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-start' }}>
-                          <div className="label" style={{ fontWeight: 600, marginBottom: 8, fontSize: 25 }}>{t.label}</div>
+                        <div key={t.key} className="turno-card">
+                          <div className="turno-label">{t.label}</div>
+
                           <div
-                            className={`destaque-bipadas${isBipadasAnim ? ' anim-clicado' : ''}`}
-                            style={{ fontWeight: 800, fontSize: 20, color: '#0a7', marginBottom: 2, cursor: 'pointer', transition: 'transform 0.2s' }}
+                            className={`destaque destaque-bipadas ${isBipadasAnim ? 'anim-clicado' : ''}`}
                             tabIndex={0}
                             onClick={handleClickBipadas}
                             onKeyDown={e => { if (e.key === 'Enter') handleClickBipadas(); }}
                             title="Clique para ver registros por hora"
+                            role="button"
                           >
-                            Caixas bipadas: {dados.bipadas}
+                            Caixas bipadas: <span className="destaque-value">{dados.bipadas}</span>
                           </div>
+
                           <div
-                            className={`destaque-refugo${isRefugoAnim ? ' anim-clicado' : ''}`}
-                            style={{ fontWeight: 800, fontSize: 20, color: '#e67e22', marginBottom: 8, cursor: 'pointer', transition: 'transform 0.2s' }}
+                            className={`destaque destaque-refugo ${isRefugoAnim ? 'anim-clicado' : ''}`}
                             tabIndex={0}
                             onClick={handleClickRefugo}
                             onKeyDown={e => { if (e.key === 'Enter') handleClickRefugo(); }}
                             title="Clique para ver registros por hora"
+                            role="button"
                           >
-                            Refugo: {dados.refugo}
+                            Refugo: <span className="destaque-value">{dados.refugo}</span>
                           </div>
+
                           {isOpen && (
-                            <div style={{ width: '100%', marginBottom: 8 }}>
-                              <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 4 }}>Registros por hora:</div>
-                              <div style={{ fontSize: 13, color: '#555' }}>
-                                <b>Caixas:</b> {caixasSorted.length === 0 ? '—' : (
-                                  <ul style={{ margin: '8px 0 0 0', paddingLeft: 18 }}>
+                            <div className="registros">
+                              <div className="registros-title">Registros por hora:</div>
+
+                              <div className="registros-section">
+                                <div className="sub-title"><b>Caixas:</b></div>
+                                {caixasSorted.length === 0 ? (
+                                  <div className="empty">—</div>
+                                ) : (
+                                  <ul className="caixas-list">
                                     {caixasSorted.map((c, i) => (
                                       <li key={i}>
                                         Caixa {c.num}: {fmtDateTime(c.hora)}
@@ -221,10 +245,11 @@ export default function Apontamento() {
                                   </ul>
                                 )}
                               </div>
-                              {dados.refugos.length > 0 && (
-                                <div style={{ marginTop: 8 }}>
-                                  <b>Refugos:</b>
-                                  <ul style={{ margin: 0, paddingLeft: 18 }}>
+
+                              {dados.refugos && dados.refugos.length > 0 && (
+                                <div className="registros-section">
+                                  <div className="sub-title"><b>Refugos:</b></div>
+                                  <ul className="refugos-list">
                                     {dados.refugos.map((r, i) => (
                                       <li key={i}>
                                         {fmtDateTime(r.created_at)} — {r.qty} peças ({r.reason})
@@ -239,8 +264,6 @@ export default function Apontamento() {
                       );
                     })}
                   </div>
-
-
                 </div>
               ))}
             </div>
