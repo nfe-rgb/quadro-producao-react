@@ -496,32 +496,39 @@ if (typeof window !== "undefined") {
             return;
           }
 
+          // calcula aqui o instante em São Paulo e converte para UTC para gravar
+          const nowBr = DateTime.now().setZone('America/Sao_Paulo');
+          const createdAtUtcIso = nowBr.toUTC().toISO();
+
+          // calcula o turno com base em nowBr (sempre recalculado no submit)
+          const turnoCalc = String(getTurnoAtual(nowBr) || "Hora Extra");
+
           // payload final compatível com scrap_logs
-          const payload = {
-            created_at: new Date().toISOString(),
-            machine_id: ativa.machine_id, // agora correto
-            shift: String(currentShift || getTurnoAtual(nowBr) || "Hora Extra"),
-            operator: operador.trim(),
-            order_id: ativa.id,
-            op_code: String(ativa.code),
-            qty: Number(quantidade),  // <-- coluna correta
-            reason: motivo,
-          };
+        const payload = {
+    created_at: createdAtUtcIso,           // grava o UTC correspondente ao horário BR
+    machine_id: ativa.machine_id,
+    shift: turnoCalc,
+    operator: operador.trim(),
+    order_id: ativa.id,
+    op_code: String(ativa.code),
+    qty: Number(quantidade),
+    reason: motivo,
+  };
 
-          console.log("Payload Refugo:", payload);
+   console.log("Payload Refugo:", payload);
 
-          const { error } = await supabase.from("scrap_logs").insert([payload]);
+   const { error } = await supabase.from("scrap_logs").insert([payload]);
 
-          if (error) {
+       if (error) {
             console.error("Erro insert scrap_logs:", error);
             showToast("Erro ao registrar refugo: " + error.message, "err");
-            return;
-          }
+          return;
+         } 
 
-          setShowRefugo(false);
-          setRefugoForm({ operador: "", quantidade: "", motivo: REFUGO_MOTIVOS[0] });
-          showToast("Refugo registrado.", "ok");
-        }}
+           setShowRefugo(false);
+           setRefugoForm({ operador: "", quantidade: "", motivo: REFUGO_MOTIVOS[0] });
+           showToast("Refugo registrado.", "ok");
+       }}
       >
 
         <label>Operador *</label>
