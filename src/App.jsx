@@ -17,6 +17,7 @@ import useOrders from './hooks/useOrders'
 import useAuthAdmin from './hooks/useAuthAdmin'
 import GlobalModals from './components/GlobalModals'
 import Apontamento from './abas/Apontamento'
+import { DateTime } from 'luxon';
 
 export default function App(){
   const [tab,setTab] = useState('painel')
@@ -53,9 +54,13 @@ export default function App(){
   } = useOrders()
 
   useEffect(()=>{
-    const now = new Date()
-    setConfirmData({ por:'', data: now.toISOString().slice(0,10), hora: now.toTimeString().slice(0,5) })
-  },[finalizando?.id])
+     const nowBR = DateTime.now().setZone('America/Sao_Paulo')
+    setConfirmData({
+    por: '',
+    data: nowBR.toISODate(),       // 'YYYY-MM-DD' correto para <input type="date">
+    hora: nowBR.toFormat('HH:mm')  // 'HH:mm' correto para <input type="time">
+    })
+  }, [finalizando?.id])
 
   const location = useLocation();
 

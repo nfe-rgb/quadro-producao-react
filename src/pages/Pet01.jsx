@@ -305,39 +305,35 @@ if (typeof window !== "undefined") {
     }
 
     if (targetStatus === "BAIXA_EFICIENCIA" && before !== "BAIXA_EFICIENCIA") {
-      const now = new Date();
-      setLowEffModal && setLowEffModal({
-        ordem: ativa,
-        operador: "",
-        obs: "",
-        data: now.toISOString().slice(0,10),
-        hora: now.toTimeString().slice(0,5),
-      });
+                              const nowBr = DateTime.now().setZone("America/Sao_Paulo");
+                              setStartModal({
+                                ordem: ativa,
+                                operador: "",
+                                data: nowBr.toISODate(), 
+                                hora: nowBr.toFormat("HH:mm"),
+                              })
       return;
     }
 
     if (targetStatus === "PARADA" && before !== "PARADA") {
-      const now = new Date();
-      setStopModal && setStopModal({
-        ordem: ativa,
-        operador: "",
-        motivo: "SET UP",
-        obs: "",
-        data: now.toISOString().slice(0,10),
-        hora: now.toTimeString().slice(0,5),
-      });
+                              const nowBr = DateTime.now().setZone("America/Sao_Paulo");
+                              setStartModal({
+                                ordem: ativa,
+                                operador: "",
+                                data: nowBr.toISODate(), 
+                                hora: nowBr.toFormat("HH:mm"),
+                              })
       return;
     }
 
     if (before === "PARADA" && targetStatus !== "PARADA") {
-      const now = new Date();
-      setResumeModal && setResumeModal({
-        ordem: ativa,
-        operador: "",
-        data: now.toISOString().slice(0,10),
-        hora: now.toTimeString().slice(0,5),
-        targetStatus,
-      });
+                              const nowBr = DateTime.now().setZone("America/Sao_Paulo");
+                              setStartModal({
+                                ordem: ativa,
+                                operador: "",
+                                data: nowBr.toISODate(), 
+                                hora: nowBr.toFormat("HH:mm"),
+                              })
       return;
     }
 
@@ -445,12 +441,18 @@ if (typeof window !== "undefined") {
 
           <div style={{ marginLeft: 12 }}>
             {ativa?.status === "AGUARDANDO" && (
-              <button className="btn small primary" onClick={() => setStartModal && setStartModal({
-                ordem: ativa,
-                operador: "",
-                data: new Date().toISOString().slice(0,10),
-                hora: new Date().toTimeString().slice(0,5),
-              })}>
+          <button
+              className="btn small primary"
+                onClick={() => {
+                 if (!setStartModal) return;
+                  const n = DateTime.now().setZone("America/Sao_Paulo");
+                   setStartModal({
+                     ordem: ativa,
+                     operador: "",
+                     data: n.toISODate(),          // YYYY-MM-DD
+                     hora: n.toFormat("HH:mm"),    // HH:mm
+                   });
+                 }}>
                 Iniciar Produção
               </button>
             )}

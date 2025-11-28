@@ -8,6 +8,7 @@ import Modal from '../components/Modal'
 import { MAQUINAS, STATUS } from '../lib/constants'
 import { statusClass, jaIniciou } from '../lib/utils'
 import { supabase } from '../lib/supabaseClient.js' // ✅ ESM correto
+import { DateTime } from 'luxon';
 
 export default function Lista({
   ativosPorMaquina,
@@ -24,13 +25,13 @@ export default function Lista({
   // confirmInt = { ordem, operador, data, hora }
 
   const abrirModalInterromper = (ordem) => {
-    const now = new Date()
-    setConfirmInt({
-      ordem,
-      operador: '',
-      data: now.toISOString().slice(0,10),
-      hora: now.toTimeString().slice(0,5)
-    })
+                              const nowBr = DateTime.now().setZone("America/Sao_Paulo");
+                              setStartModal({
+                                ordem: ativa,
+                                operador: "",
+                                data: nowBr.toISODate(), 
+                                hora: nowBr.toFormat("HH:mm"),
+                              })
   }
 
   const confirmarInterromper = async () => {

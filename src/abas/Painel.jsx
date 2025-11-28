@@ -325,7 +325,7 @@ export default function Painel({
                                 operador: "",
                                 data: nowBr.toISODate(), 
                                 hora: nowBr.toFormat("HH:mm"),
-                              });
+                              })
                             }}
                           >
                             Iniciar Produção
