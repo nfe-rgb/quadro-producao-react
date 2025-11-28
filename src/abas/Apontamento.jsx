@@ -1,12 +1,10 @@
 import { useEffect, useState, useMemo } from 'react';
 import { supabase } from '../lib/supabaseClient';
-// import { MAQUINAS } from '../lib/constants'; // removido pois não é usado
+import { MAQUINAS } from '../lib/constants';
 import { fmtDateTime, getTurnoAtual } from '../lib/utils';
 import '../styles/Apontamento.css';
-// Se você depende de estilos globais de registro.css, descomente a linha abaixo
-// import '../styles/registro.css';
+// import '../styles/registro.css'; // mantenha se necessário
 
-// Turnos padrão (apenas para labels)
 const TURNOS = [
   { key: '1', label: 'Turno 1' },
   { key: '2', label: 'Turno 2' },
@@ -16,16 +14,16 @@ const TURNOS = [
 export default function Apontamento() {
   const [bipagens, setBipagens] = useState([]);
   const [refugos, setRefugos] = useState([]);
+  const [orders, setOrders] = useState([]); // O.S relevantes
   const [loading, setLoading] = useState(true);
   const [turnoFiltro, setTurnoFiltro] = useState('todos');
   const [periodo, setPeriodo] = useState('hoje');
   const [customStart, setCustomStart] = useState('');
   const [customEnd, setCustomEnd] = useState('');
-  const [caixasAbertas, setCaixasAbertas] = useState({}); // { [turno+maquina]: boolean }
-  const [bipadasAnim, setBipadasAnim] = useState({}); // { [turno+maquina]: boolean }
-  const [refugoAnim, setRefugoAnim] = useState({}); // { [turno+maquina]: boolean }
+  const [caixasAbertas, setCaixasAbertas] = useState({});
+  const [bipadasAnim, setBipadasAnim] = useState({});
+  const [refugoAnim, setRefugoAnim] = useState({});
 
-  // Função para obter range de datas do filtro
   function getPeriodoRange(p) {
     const now = new Date();
     let start = null, end = null;
@@ -60,45 +58,91 @@ export default function Apontamento() {
 
   useEffect(() => {
     let mounted = true;
+
     async function fetchData() {
       setLoading(true);
+
       if (!filtroStart || !filtroEnd) {
         if (!mounted) return;
         setBipagens([]);
         setRefugos([]);
+        setOrders([]);
         setLoading(false);
         return;
       }
+
       try {
         const bipQuery = supabase
           .from('production_scans')
           .select('*')
           .gte('created_at', filtroStart.toISOString())
           .lte('created_at', filtroEnd.toISOString());
+
         const refQuery = supabase
           .from('scrap_logs')
           .select('*')
           .gte('created_at', filtroStart.toISOString())
           .lte('created_at', filtroEnd.toISOString());
+
+        // fetch bipagens e refugos primeiro
         const [{ data: bip }, { data: ref }] = await Promise.all([bipQuery, refQuery]);
+
         if (!mounted) return;
-        setBipagens(bip || []);
-        setRefugos(ref || []);
+        const bipagensData = bip || [];
+        const refugosData = ref || [];
+
+        setBipagens(bipagensData);
+        setRefugos(refugosData);
+
+        // extrair order_id únicos de ambas as tabelas
+        const orderIdsSet = new Set();
+        bipagensData.forEach(b => { if (b.order_id != null) orderIdsSet.add(String(b.order_id)); });
+        refugosData.forEach(r => { if (r.order_id != null) orderIdsSet.add(String(r.order_id)); });
+
+        const orderIds = Array.from(orderIdsSet);
+        let ordersData = [];
+        if (orderIds.length > 0) {
+          // consultar apenas orders relevantes
+          const { data: ords, error } = await supabase
+            .from('orders')
+            .select('id,code,standard,created_at,boxes') // traga campos úteis
+            .in('id', orderIds);
+          if (error) {
+            console.warn('Erro ao buscar orders por ids:', error);
+            ordersData = [];
+          } else {
+            ordersData = ords || [];
+          }
+        } else {
+          ordersData = [];
+        }
+
+        if (!mounted) return;
+        setOrders(ordersData);
       } catch (err) {
-        console.error('Erro ao buscar apontamentos:', err);
+        console.error('Erro ao buscar dados:', err);
         if (mounted) {
           setBipagens([]);
           setRefugos([]);
+          setOrders([]);
         }
       } finally {
         if (mounted) setLoading(false);
       }
     }
+
     fetchData();
     return () => { mounted = false; };
   }, [filtroStart, filtroEnd]);
 
-  // Agrupa por turno e máquina
+  // mapa por id para lookup rápido
+  const ordersMap = useMemo(() => {
+    const map = {};
+    (orders || []).forEach(o => { if (o && o.id != null) map[String(o.id)] = o; });
+    return map;
+  }, [orders]);
+
+  // Agrupa por turno e máquina e calcula refugo %
   const agrupadoPorTurno = useMemo(() => {
     const porTurno = {};
     TURNOS.forEach(t => {
@@ -107,18 +151,34 @@ export default function Apontamento() {
         porTurno[t.key][maq] = {
           bipadas: 0,
           refugo: 0,
-          caixas: [], // [{num, hora}]
-          refugos: []
+          caixas: [], // { num, hora, order_id, order }
+          refugos: [],
+          producaoPecas: 0,
+          refugoPct: 0,
+          padraoPorCaixa: 1
         };
       });
     });
+
+    // popular bipagens
     (bipagens || []).forEach(b => {
       const turno = b.shift || String(getTurnoAtual(b.created_at));
       const maq = b.machine_id;
       if (!porTurno[turno] || !porTurno[turno][maq]) return;
       porTurno[turno][maq].bipadas += 1;
-      porTurno[turno][maq].caixas.push({ num: b.scanned_box, hora: b.created_at });
+
+      const orderId = b.order_id != null ? String(b.order_id) : null;
+      const matchedOrder = orderId ? ordersMap[orderId] : null;
+
+      porTurno[turno][maq].caixas.push({
+        num: b.scanned_box,
+        hora: b.created_at,
+        order_id: orderId,
+        order: matchedOrder || null
+      });
     });
+
+    // popular refugos
     (refugos || []).forEach(r => {
       const turno = r.shift || String(getTurnoAtual(r.created_at));
       const maq = r.machine_id;
@@ -126,9 +186,51 @@ export default function Apontamento() {
       porTurno[turno][maq].refugo += Number(r.qty) || 0;
       porTurno[turno][maq].refugos.push(r);
     });
-    return porTurno;
-  }, [bipagens, refugos]);
 
+    // calcular produção e percentual usando padrão da O.S quando disponível
+    Object.keys(porTurno).forEach(turnoKey => {
+      Object.keys(porTurno[turnoKey]).forEach(maq => {
+        const dados = porTurno[turnoKey][maq];
+
+        // primeiro, tenta pegar padrão a partir de alguma O.S associada às caixas (usa a primeira com standard)
+        let padraoFromOrder = null;
+        for (const c of (dados.caixas || [])) {
+          if (c.order && (c.order.standard !== undefined && c.order.standard !== null)) {
+            padraoFromOrder = c.order.standard;
+            break;
+          }
+        }
+
+        // fallback: procurar em ordersMap por heurística (p.ex. se existe uma order com boxes que combine)
+        // (normalmente não necessário porque buscamos por order_id, mas mantemos a lógica)
+        if (padraoFromOrder == null && Object.keys(ordersMap).length > 0) {
+          const maybe = Object.values(ordersMap).find(o => o && (o.standard !== undefined && o.standard !== null));
+          if (maybe) padraoFromOrder = maybe.standard;
+        }
+
+        // fallback: MAQUINAS constantes
+        const maqDef = MAQUINAS && MAQUINAS[maq];
+        const padraoFromConst = (maqDef && (maqDef.padrao_por_caixa ?? maqDef.padrao ?? maqDef.piecesPerBox ?? maqDef.pieces_per_box)) ?? null;
+
+        const padrao = Number(padraoFromOrder ?? padraoFromConst ?? 1) || 1;
+        dados.padraoPorCaixa = padrao;
+
+        const caixasCount = (dados.caixas || []).length;
+        const producaoPecas = caixasCount * dados.padraoPorCaixa;
+        dados.producaoPecas = producaoPecas;
+
+        const refugoPecas = Number(dados.refugo) || 0;
+        let pct = 0;
+        if (producaoPecas > 0) pct = (refugoPecas / producaoPecas) * 100;
+        pct = Math.max(0, Math.min(100, pct));
+        dados.refugoPct = Number.isFinite(pct) ? Number(pct.toFixed(2)) : 0;
+      });
+    });
+
+    return porTurno;
+  }, [bipagens, refugos, ordersMap]);
+
+  // RENDER
   return (
     <div className="apontamento-card card registro-wrap">
       <div className="card-inner">
@@ -173,7 +275,7 @@ export default function Apontamento() {
         </div>
 
         {loading ? (
-          <div className="row muted loading">Carregando...</div>
+          <div className="loading-row">Carregando...</div>
         ) : (
           <div className="apontamento-content">
             <div className="maquinas-column">
@@ -184,7 +286,7 @@ export default function Apontamento() {
                   <div className="turnos-row">
                     {TURNOS.filter(t => turnoFiltro === 'todos' || turnoFiltro === t.key).map(t => {
                       const dados = agrupadoPorTurno[t.key][maq];
-                      const caixasSorted = [...(dados.caixas || [])].sort((a, b) => (Number(a.num) || 0) - (Number(b.num) || 0));
+                      const caixasSorted = [...(dados.caixas || [])].sort((a,b) => (Number(a.num)||0) - (Number(b.num)||0));
                       const key = `${maq}-${t.key}`;
                       const isOpen = caixasAbertas[key] || false;
                       const isBipadasAnim = bipadasAnim[key] || false;
@@ -225,6 +327,7 @@ export default function Apontamento() {
                             role="button"
                           >
                             Refugo: <span className="destaque-value">{dados.refugo}</span>
+                            <span className="destaque-pct"> ({dados.refugoPct}%)</span>
                           </div>
 
                           {isOpen && (
@@ -240,10 +343,15 @@ export default function Apontamento() {
                                     {caixasSorted.map((c, i) => (
                                       <li key={i}>
                                         Caixa {c.num}: {fmtDateTime(c.hora)}
+                                        {c.order ? ` — O.S: ${c.order.code || c.order.id} (Padrão: ${c.order.standard})` : ''}
                                       </li>
                                     ))}
                                   </ul>
                                 )}
+
+                                <div style={{ marginTop: 8, fontSize: 13, color: '#444' }}>
+                                  <b>Produção estimada (peças):</b> {dados.producaoPecas} (padrão {dados.padraoPorCaixa}/caixa)
+                                </div>
                               </div>
 
                               {dados.refugos && dados.refugos.length > 0 && (
