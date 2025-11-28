@@ -16,6 +16,7 @@ import Pet03 from './pages/Pet03'
 import useOrders from './hooks/useOrders'
 import useAuthAdmin from './hooks/useAuthAdmin'
 import GlobalModals from './components/GlobalModals'
+import Apontamento from './abas/Apontamento'
 
 export default function App(){
   const [tab,setTab] = useState('painel')
@@ -214,6 +215,7 @@ export default function App(){
         <button className={`tabbtn ${tab==='lista'?'active':''}`} onClick={()=>setTab('lista')}>Lista</button>
         <button className={`tabbtn ${tab==='nova'?'active':''}`} onClick={()=>setTab('nova')}>Nova Ordem</button>
         <button className={`tabbtn ${tab==='registro'?'active':''}`} onClick={()=>setTab('registro')}>Registro</button>
+        <button className={`tabbtn ${tab==='apontamento'?'active':''}`} onClick={()=>setTab('apontamento')}>Apontamento</button>
       </div>
 
       {tab === 'login' && <Login />}
@@ -267,6 +269,10 @@ export default function App(){
 
       {tab === 'registro' && (
         <Registro registroGrupos={registroGrupos} openSet={openSet} toggleOpen={toggleOpen} />
+      )}
+
+      {tab === 'apontamento' && (
+        <Apontamento />
       )}
 
       {/* Modais centralizados */}
