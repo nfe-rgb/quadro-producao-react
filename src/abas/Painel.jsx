@@ -26,7 +26,7 @@ export default function Painel({
   setStartModal,
   setFinalizando,
   lastFinalizadoPorMaquina,
-  metaPercent = 67,
+  metaPercent = 74,
   onScanned, // opcional: callback do pai para re-fetch geral
 }) {
   const pct = Math.max(0, Math.min(100, Math.round(metaPercent)));
