@@ -498,7 +498,7 @@ if (typeof window !== "undefined") {
           const payload = {
             created_at: new Date().toISOString(),
             machine_id: ativa.machine_id, // agora correto
-            shift: String(currentShift || getTurnoAtual() || "Hora Extra"),
+            shift: String(currentShift || getTurnoAtual(nowBr) || "Hora Extra"),
             operator: operador.trim(),
             order_id: ativa.id,
             op_code: String(ativa.code),
