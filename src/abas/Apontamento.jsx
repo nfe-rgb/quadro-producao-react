@@ -272,11 +272,7 @@ export default function Apontamento() {
               ))}
             </select>
           </div>
-        </div>
-
-        {loading ? (
-          <div className="loading-row">Carregando...</div>
-        ) : (
+        </div> 
           <div className="apontamento-content">
             <div className="maquinas-column">
               {['P1','P2','P3'].map(maq => (
@@ -376,7 +372,6 @@ export default function Apontamento() {
               ))}
             </div>
           </div>
-        )}
       </div>
     </div>
   );
