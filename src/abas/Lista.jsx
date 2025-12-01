@@ -25,13 +25,13 @@ export default function Lista({
   // confirmInt = { ordem, operador, data, hora }
 
   const abrirModalInterromper = (ordem) => {
-                              const nowBr = DateTime.now().setZone("America/Sao_Paulo");
-                              setStartModal({
-                                ordem: ativa,
-                                operador: "",
-                                data: nowBr.toISODate(), 
-                                hora: nowBr.toFormat("HH:mm"),
-                              })
+    const nowBr = DateTime.now().setZone("America/Sao_Paulo");
+    setConfirmInt({
+      ordem,
+      operador: "",
+      data: nowBr.toISODate(), 
+      hora: nowBr.toFormat("HH:mm"),
+    })
   }
 
   const confirmarInterromper = async () => {
