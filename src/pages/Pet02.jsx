@@ -29,6 +29,8 @@ export default function Pet02({
   // Motivos padrão de refugo
   // --------------------------
   const REFUGO_MOTIVOS = [
+    "Troca de Cor",
+    "Regulagem",
     "Rebarba",
     "Bolha",
     "Contaminação ou Caídas no Chão",
