@@ -160,7 +160,7 @@ export default function App(){
     );
   }
 
-  if (location && location.pathname === '/pet-03') {
+    if (location && location.pathname === '/pet-03') {
     const ativosP3 = ordens.filter(o => o.machine_id === 'P3' && !o.finalized).sort((a,b)=>(a.pos??999)-(b.pos??999))
     return (
       <>
@@ -195,6 +195,8 @@ export default function App(){
       </>
     );
   }
+
+  // controle de abas e renderização
 
   const [openSet, setOpenSet] = useState(()=>new Set())
   function toggleOpen(id){ setOpenSet(prev=>{ const n=new Set(prev); if(n.has(id)) n.delete(id); else n.add(id); return n }) }
