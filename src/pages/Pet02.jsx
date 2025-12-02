@@ -308,7 +308,7 @@ if (typeof window !== "undefined") {
 
     if (targetStatus === "BAIXA_EFICIENCIA" && before !== "BAIXA_EFICIENCIA") {
                               const nowBr = DateTime.now().setZone("America/Sao_Paulo");
-                              setStartModal({
+                              setLowEffModal({
                                 ordem: ativa,
                                 operador: "",
                                 data: nowBr.toISODate(), 
@@ -319,7 +319,7 @@ if (typeof window !== "undefined") {
 
     if (targetStatus === "PARADA" && before !== "PARADA") {
                               const nowBr = DateTime.now().setZone("America/Sao_Paulo");
-                              setStartModal({
+                              setStopModal({
                                 ordem: ativa,
                                 operador: "",
                                 data: nowBr.toISODate(), 
@@ -330,7 +330,7 @@ if (typeof window !== "undefined") {
 
     if (before === "PARADA" && targetStatus !== "PARADA") {
                               const nowBr = DateTime.now().setZone("America/Sao_Paulo");
-                              setStartModal({
+                              setResumeModal({
                                 ordem: ativa,
                                 operador: "",
                                 data: nowBr.toISODate(), 
