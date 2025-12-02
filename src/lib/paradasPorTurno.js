@@ -6,33 +6,32 @@ function inRange(minIni, minFim, minutos) {
   return minutos >= minIni || minutos < minFim;
 }
 
-// Retorna array de intervalos [{ini, fim, turnoKey}] para um dia específico
+// Retorna array de intervalos [{ini, fim, turnoKey}] para um dia específico, com tolerância de 15 minutos
 function getTurnoIntervalsDia(date) {
   const dia = date.getDay();
-  // minutos desde 00:00
-  const base = d => d.getHours() * 60 + d.getMinutes();
-  // Domingo
-  if (dia === 0) {
+  // Tolerância de 15 minutos aplicada a todos os dias
+  // Turno 1: 05:15 às 13:45
+  // Turno 2: 13:45 às 22:15
+  // Turno 3: 22:15 às 05:15
+  if (dia === 0) { // Domingo
     return [
-      { ini: 23 * 60, fim: 24 * 60, turnoKey: '3' },
-      { ini: 0, fim: 5 * 60, turnoKey: '3' },
+      { ini: 22 * 60 + 15, fim: 24 * 60, turnoKey: '3' }, // 22:15 até 00:00
+      { ini: 0, fim: 5 * 60 + 15, turnoKey: '3' },         // 00:00 até 05:15
       // resto é hora extra
     ];
   }
-  // Segunda a Sexta
-  if (dia >= 1 && dia <= 5) {
+  if (dia >= 1 && dia <= 5) { // Segunda a Sexta
     return [
-      { ini: 5 * 60, fim: 13 * 60 + 30, turnoKey: '1' },
-      { ini: 13 * 60 + 30, fim: 22 * 60, turnoKey: '2' },
-      { ini: 22 * 60, fim: 24 * 60, turnoKey: '3' },
-      { ini: 0, fim: 5 * 60, turnoKey: '3' },
+      { ini: 5 * 60 + 15, fim: 13 * 60 + 45, turnoKey: '1' },   // 05:15 até 13:45
+      { ini: 13 * 60 + 45, fim: 22 * 60 + 15, turnoKey: '2' },  // 13:45 até 22:15
+      { ini: 22 * 60 + 15, fim: 24 * 60, turnoKey: '3' },       // 22:15 até 00:00
+      { ini: 0, fim: 5 * 60 + 15, turnoKey: '3' },              // 00:00 até 05:15
     ];
   }
-  // Sábado
-  if (dia === 6) {
+  if (dia === 6) { // Sábado
     return [
-      { ini: 5 * 60, fim: 9 * 60, turnoKey: '1' },
-      { ini: 9 * 60, fim: 13 * 60, turnoKey: '2' },
+      { ini: 5 * 60 + 15, fim: 9 * 60 + 15, turnoKey: '1' },   // 05:15 até 09:15
+      { ini: 9 * 60 + 15, fim: 13 * 60 + 15, turnoKey: '2' },  // 09:15 até 13:15
       // resto é hora extra
     ];
   }

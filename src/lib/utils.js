@@ -31,22 +31,22 @@ export function getTurnoAtual(dateInput = null) {
 
   // Domingo
   if (dia === 0) {
-    if (inRange(23 * 60, 24 * 60, minutos)) return 3;
-    if (minutos < 5 * 60) return 3;
+    if (inRange(23 * 60 + 15, 24 * 60, minutos)) return 3;
+    if (minutos < 5 * 60 + 15) return 3;
     return "Hora Extra";
   }
 
   // Segunda a Sexta
   if (dia >= 1 && dia <= 5) {
-    if (inRange(5 * 60, 13 * 60 + 30, minutos)) return 1;
-    if (inRange(13 * 60 + 30, 22 * 60, minutos)) return 2;
-    if (inRange(22 * 60, 5 * 60, minutos)) return 3;
+    if (inRange(5 * 60 + 15, 13 * 60 + 45, minutos)) return 1;
+    if (inRange(13 * 60 + 45, 22 * 60 + 15, minutos)) return 2;
+    if (inRange(22 * 60 + 15, 5 * 60 + 15, minutos)) return 3;
   }
 
   // Sábado
   if (dia === 6) {
-    if (inRange(5 * 60, 9 * 60, minutos)) return 1;
-    if (inRange(9 * 60, 13 * 60, minutos)) return 2;
+    if (inRange(5 * 60 + 15, 9 * 60 + 15, minutos)) return 1;
+    if (inRange(9 * 60 + 15, 13 * 60 + 15, minutos)) return 2;
     return "Hora Extra";
   }
 
