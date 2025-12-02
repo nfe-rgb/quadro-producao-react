@@ -2,6 +2,7 @@ import { useEffect, useState, useMemo } from 'react';
 import { supabase } from '../lib/supabaseClient';
 import { MAQUINAS } from '../lib/constants';
 import { fmtDateTime, getTurnoAtual } from '../lib/utils';
+import { calcularHorasParadasPorTurno, formatMsToHHmm } from '../lib/paradasPorTurno';
 import '../styles/Apontamento.css';
 // import '../styles/registro.css'; // mantenha se necessário
 
@@ -15,7 +16,7 @@ export default function Apontamento() {
   const [bipagens, setBipagens] = useState([]);
   const [refugos, setRefugos] = useState([]);
   const [orders, setOrders] = useState([]); // O.S relevantes
-  const [loading, setLoading] = useState(true);
+  const [paradas, setParadas] = useState([]); // Paradas de máquina
   const [turnoFiltro, setTurnoFiltro] = useState('todos');
   const [periodo, setPeriodo] = useState('hoje');
   const [customStart, setCustomStart] = useState('');
@@ -23,6 +24,7 @@ export default function Apontamento() {
   const [caixasAbertas, setCaixasAbertas] = useState({});
   const [bipadasAnim, setBipadasAnim] = useState({});
   const [refugoAnim, setRefugoAnim] = useState({});
+  const [paradasAnim, setParadasAnim] = useState({});
 
   function getPeriodoRange(p) {
     const now = new Date();
@@ -60,14 +62,13 @@ export default function Apontamento() {
     let mounted = true;
 
     async function fetchData() {
-      setLoading(true);
 
       if (!filtroStart || !filtroEnd) {
         if (!mounted) return;
         setBipagens([]);
         setRefugos([]);
         setOrders([]);
-        setLoading(false);
+        setParadas([]);
         return;
       }
 
@@ -84,15 +85,23 @@ export default function Apontamento() {
           .gte('created_at', filtroStart.toISOString())
           .lte('created_at', filtroEnd.toISOString());
 
-        // fetch bipagens e refugos primeiro
-        const [{ data: bip }, { data: ref }] = await Promise.all([bipQuery, refQuery]);
+        const paradaQuery = supabase
+          .from('machine_stops')
+          .select('*')
+          .gte('started_at', filtroStart.toISOString())
+          .lte('started_at', filtroEnd.toISOString());
+
+        // fetch bipagens, refugos e paradas
+        const [{ data: bip }, { data: ref }, { data: par }] = await Promise.all([bipQuery, refQuery, paradaQuery]);
 
         if (!mounted) return;
         const bipagensData = bip || [];
         const refugosData = ref || [];
+        const paradasData = par || [];
 
         setBipagens(bipagensData);
         setRefugos(refugosData);
+        setParadas(paradasData);
 
         // extrair order_id únicos de ambas as tabelas
         const orderIdsSet = new Set();
@@ -125,15 +134,17 @@ export default function Apontamento() {
           setBipagens([]);
           setRefugos([]);
           setOrders([]);
+          setParadas([]);
         }
       } finally {
-        if (mounted) setLoading(false);
       }
     }
 
     fetchData();
     return () => { mounted = false; };
   }, [filtroStart, filtroEnd]);
+  // Calcular horas paradas por turno/máquina
+  const horasParadasPorTurno = useMemo(() => calcularHorasParadasPorTurno(paradas, TURNOS, filtroStart, filtroEnd), [paradas, filtroStart, filtroEnd]);
 
   // mapa por id para lookup rápido
   const ordersMap = useMemo(() => {
@@ -287,6 +298,7 @@ export default function Apontamento() {
                       const isOpen = caixasAbertas[key] || false;
                       const isBipadasAnim = bipadasAnim[key] || false;
                       const isRefugoAnim = refugoAnim[key] || false;
+                      const isParadasAnim = paradasAnim[key] || false; 
 
                       const handleClickBipadas = () => {
                         setCaixasAbertas(prev => ({ ...prev, [key]: !prev[key] }));
@@ -298,6 +310,11 @@ export default function Apontamento() {
                         setRefugoAnim(prev => ({ ...prev, [key]: true }));
                         setTimeout(() => setRefugoAnim(prev => ({ ...prev, [key]: false })), 250);
                       };
+                      const handleClickParadas = () => {
+                        setCaixasAbertas(prev => ({ ...prev, [key]: !prev[key] }));
+                        setParadasAnim(prev => ({ ...prev, [key]: true }));
+                        setTimeout(() => setParadasAnim(prev => ({ ...prev, [key]: false })), 250);
+                      }
 
                       return (
                         <div key={t.key} className="turno-card">
@@ -314,6 +331,7 @@ export default function Apontamento() {
                             Caixas bipadas: <span className="destaque-value">{dados.bipadas}</span>
                           </div>
 
+
                           <div
                             className={`destaque destaque-refugo ${isRefugoAnim ? 'anim-clicado' : ''}`}
                             tabIndex={0}
@@ -324,6 +342,18 @@ export default function Apontamento() {
                           >
                             Refugo: <span className="destaque-value">{dados.refugo}</span>
                             <span className="destaque-pct"> ({dados.refugoPct}%)</span>
+                          </div>
+
+                          {/* Horas Paradas */}
+                          <div
+                            className={`destaque destaque-paradas ${isParadasAnim ? 'anim-clicado' : ''}`}
+                            tabIndex={0}
+                            onClick={handleClickParadas}
+                            onKeyDown={e => { if (e.key === 'Enter') handleClickParadas(); }}
+                            title="Clique para ver registros por hora"
+                            role="button"
+                          >
+                            Horas Paradas: <span className="destaque-value">{formatMsToHHmm(horasParadasPorTurno[t.key]?.[maq] || 0)}</span>
                           </div>
 
                           {isOpen && (

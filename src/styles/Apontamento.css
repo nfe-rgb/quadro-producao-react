@@ -151,6 +151,9 @@
 .destaque-refugo {
   color: #e67e22; /* laranja */
 }
+.destaque-paradas {
+  color: #e74c3c; /* vermelho */
+}
 
 /* animação de clique (aplicável adicionando .anim-clicado) */
 .anim-clicado {

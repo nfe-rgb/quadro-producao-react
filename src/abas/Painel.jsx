@@ -56,7 +56,13 @@ export default function Painel({
             return { ...inItem, scanned_count: match.scanned_count };
           }
           // normalize scanned_count to number (0 if missing)
-          return { ...inItem, scanned_count: typeof inItem.scanned_count === "number" ? inItem.scanned_count : Number(inItem.scanned_count || 0) };
+          return {
+            ...inItem,
+            scanned_count:
+              typeof inItem.scanned_count === "number"
+                ? inItem.scanned_count
+                : Number(inItem.scanned_count || 0),
+          };
         });
       }
       // keep previous machines not present in incoming (rare)
@@ -126,7 +132,10 @@ export default function Painel({
               let found = false;
 
               // prioridade: aplicar apenas na machine informada pelo scan (evita percorrer tudo)
-              const machinesToCheck = scanMachineId && copy[scanMachineId] ? [scanMachineId] : Object.keys(copy);
+              const machinesToCheck =
+                scanMachineId && copy[scanMachineId]
+                  ? [scanMachineId]
+                  : Object.keys(copy);
 
               for (const machine of machinesToCheck) {
                 copy[machine] = (copy[machine] || []).map((item) => {
@@ -179,6 +188,59 @@ export default function Painel({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Helpers para gravar/encerrar baixa eficiência na tabela low_efficiency_logs
+  async function insertLowEfficiencyLog({ order_id = null, machine_id, started_by = null, notes = null }) {
+    try {
+      const payload = {
+        order_id: order_id || null,
+        machine_id,
+        started_at: new Date().toISOString(),
+        started_by,
+        notes,
+      };
+      const { data, error } = await supabase.from("low_efficiency_logs").insert(payload).select();
+      if (error) {
+        console.error("Erro inserindo low_efficiency_logs:", error);
+        return { error };
+      }
+      return { data };
+    } catch (err) {
+      console.error("Exception insertLowEfficiencyLog:", err);
+      return { error: err };
+    }
+  }
+
+  async function endLowEfficiencyLog({ order_id = null, machine_id, ended_by = null, notes = null }) {
+    try {
+      const updates = {
+        ended_at: new Date().toISOString(),
+        ended_by,
+        notes,
+      };
+
+      // Se order_id estiver disponível, preferimos usá-lo para encontrar o log aberto.
+      // Caso contrário, usamos machine_id e ended_at IS NULL.
+      let query = supabase.from("low_efficiency_logs").update(updates).is("ended_at", null);
+
+      if (order_id) {
+        query = query.eq("order_id", order_id);
+      } else {
+        query = query.eq("machine_id", machine_id);
+      }
+
+      // Executa update
+      const { data, error } = await query.select();
+      if (error) {
+        console.error("Erro ao encerrar low_efficiency_logs:", error);
+        return { error };
+      }
+      return { data };
+    } catch (err) {
+      console.error("Exception endLowEfficiencyLog:", err);
+      return { error: err };
+    }
+  }
 
   const source = localAtivos || {};
 
@@ -295,7 +357,46 @@ export default function Painel({
                         <select
                           className="select"
                           value={ativa.status}
-                          onChange={(e) => onStatusChange(ativa, e.target.value)}
+                          onChange={async (e) => {
+                            const novoStatus = e.target.value;
+                            const prevStatus = ativa?.status;
+
+                            // Se entrou em BAIXA_EFICIENCIA -> INSERE log
+                            if (prevStatus !== "BAIXA_EFICIENCIA" && novoStatus === "BAIXA_EFICIENCIA") {
+                              try {
+                                // started_by poderia ser o usuário logado; aqui deixamos null (ajuste se tiver user context)
+                                await insertLowEfficiencyLog({
+                                  order_id: ativa?.id ?? null,
+                                  machine_id: m,
+                                  started_by: null,
+                                  notes: null,
+                                });
+                              } catch (err) {
+                                console.error("Falha ao inserir baixa eficiência:", err);
+                              }
+                            }
+
+                            // Se saiu de BAIXA_EFICIENCIA -> ENCERRA log(s)
+                            if (prevStatus === "BAIXA_EFICIENCIA" && novoStatus !== "BAIXA_EFICIENCIA") {
+                              try {
+                                await endLowEfficiencyLog({
+                                  order_id: ativa?.id ?? null,
+                                  machine_id: m,
+                                  ended_by: null,
+                                  notes: null,
+                                });
+                              } catch (err) {
+                                console.error("Falha ao encerrar baixa eficiência:", err);
+                              }
+                            }
+
+                            // chama callback pai para atualizar status (mantém comportamento atual)
+                            try {
+                              onStatusChange(ativa, novoStatus);
+                            } catch (err) {
+                              console.warn("onStatusChange falhou:", err);
+                            }
+                          }}
                           disabled={ativa.status === "AGUARDANDO"}
                         >
                           {STATUS.filter((s) =>
@@ -323,9 +424,9 @@ export default function Painel({
                               setStartModal({
                                 ordem: ativa,
                                 operador: "",
-                                data: nowBr.toISODate(), 
+                                data: nowBr.toISODate(),
                                 hora: nowBr.toFormat("HH:mm"),
-                              })
+                              });
                             }}
                           >
                             Iniciar Produção

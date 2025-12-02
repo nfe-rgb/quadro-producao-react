@@ -9,6 +9,9 @@ export default function useOrders(){
   const [finalizadas, setFinalizadas] = useState([])
   const [paradas, setParadas] = useState([])
 
+  // map local para guardar session id dos logs de baixa eficiência (key = `order_<order_id>`)
+  const [lowEffSessions, setLowEffSessions] = useState({})
+
   // basic fetchers
   async function fetchOrdensAbertas(){
     // NOTE: scanned_count:production_scans(count) -> agrega o count de production_scans por order_id
@@ -23,11 +26,7 @@ export default function useOrders(){
       .order('created_at',{ascending:true})
 
     if(!res.error) {
-      // `scanned_count` vem como array com objeto {count: X} em alguns SDKs; se for o caso,
-      // transformar para número simples. Entretanto Supabase com `count` retorna diretamente o número no campo
-      // Quando vem um array (por alguma configuração), você pode normalizar aqui.
       const normalized = (res.data || []).map(row => {
-        // Se scanned_count chegar como objeto/array, tente normalizar; se já for número, mantém.
         const sc = row.scanned_count;
         if (Array.isArray(sc) && sc.length > 0 && typeof sc[0].count !== 'undefined') {
           return { ...row, scanned_count: Number(sc[0].count || 0) };
@@ -51,13 +50,12 @@ export default function useOrders(){
     if(!res.error) setParadas(res.data||[])
   }
 
-  useEffect(()=>{
+  useEffect(()=>{ 
     fetchOrdensAbertas(); fetchOrdensFinalizadas(); fetchParadas()
     const chOrders = supabase.channel('orders-rt')
       .on('postgres_changes', { event:'*', schema:'public', table:'orders' }, (p)=>{
         const r = p.new; if(!r) return;
 
-        // Observação: evento realtime pode não trazer scanned_count — preservamos do estado local quando existir
         setOrdens(prev=>{
           const i=prev.findIndex(o=>o.id===r.id)
           const preservedScanned = i>=0 ? prev[i].scanned_count : undefined
@@ -166,8 +164,7 @@ export default function useOrders(){
       started_at: ordemParcial.started_at ?? null, started_by: ordemParcial.started_by ?? null,
       restarted_at: ordemParcial.restarted_at ?? null, restarted_by: ordemParcial.restarted_by ?? null,
       interrupted_at: ordemParcial.interrupted_at ?? null, interrupted_by: ordemParcial.interrupted_by ?? null,
-      loweff_started_at: ordemParcial.loweff_started_at ?? null, loweff_ended_at: ordemParcial.loweff_ended_at ?? null,
-      loweff_by: ordemParcial.loweff_by ?? null, loweff_notes: ordemParcial.loweff_notes ?? null,
+      // NOTE: não alteramos mais campos relacionados a baixa eficiência na tabela `orders`
     }).eq('id', ordemParcial.id).select('*').maybeSingle()
 
     if (res.error) { alert('Erro ao atualizar: ' + res.error.message); if (before) patchOrdemLocal(before.id, before); return }
@@ -285,11 +282,6 @@ export default function useOrders(){
   }
 
   // ========================= Confirmadores (agora recebem payloads) =========================
-  // ... restante do arquivo permanece exatamente igual ...
-  // (mantive o restante inalterado para brevidade no snippet anterior; tudo continua funcionando)
-
-  // (o resto das funções confirmarInicio, confirmarParada, confirmarRetomada,
-  // confirmarBaixaEf, confirmarEncerrarBaixaEf e onStatusChange seguem inalteradas e são retornadas abaixo)
 
   async function confirmarInicio({ ordem, operador, data, hora }) {
     if (!operador || !data || !hora) { alert('Preencha operador, data e hora.'); return }
@@ -304,8 +296,7 @@ export default function useOrders(){
           status: 'PRODUZINDO',
           restarted_by: operador,
           restarted_at: iso,
-          // ao retomar normal, zera possíveis campos de baixa eficiência abertos
-          loweff_started_at: null, loweff_ended_at: null, loweff_by: null, loweff_notes: null
+          // ao retomar normal, zera possíveis campos de baixa eficiência abertos (apenas localmente)
         }
       : {
           // primeiro início
@@ -313,7 +304,6 @@ export default function useOrders(){
           started_at: iso,
           status: 'PRODUZINDO',
           interrupted_at: null, interrupted_by: null,
-          loweff_started_at: null, loweff_ended_at: null, loweff_by: null, loweff_notes: null
         }
 
     patchOrdemLocal(ordem.id, payload)
@@ -326,12 +316,23 @@ export default function useOrders(){
     if (!operador || !data || !hora) { alert('Preencha operador, data e hora.'); return }
     const started_at = localDateTimeToISO(data, hora)
 
-    // 1) Se vier de baixa eficiência, encerra-a neste mesmo timestamp + limpa observação
+    // 1) Se vier de baixa eficiência, encerra-a neste mesmo timestamp + limpa observação NO LOG NOVO
     if (endLowEffAtStopStart) {
-      const patchLow = { loweff_ended_at: started_at, loweff_notes: null }
-      patchOrdemLocal(ordem.id, patchLow)
-      const upLow = await supabase.from('orders').update(patchLow).eq('id', ordem.id)
-      if (upLow.error) { alert('Erro ao encerrar baixa eficiência: ' + upLow.error.message); return }
+      // tenta encerrar log associado
+      try {
+        const key = `order_${ordem.id}`
+        const sessionId = lowEffSessions?.[key]
+        if (sessionId) {
+          await supabase.from('low_efficiency_logs').update({ ended_at: started_at }).eq('id', sessionId)
+          // remove mapping
+          setLowEffSessions(prev => { const c={...prev}; delete c[key]; return c })
+        } else {
+          // fallback: encerra registros abertos para essa ordem
+          await supabase.from('low_efficiency_logs').update({ ended_at: started_at }).eq('order_id', ordem.id).is('ended_at', null)
+        }
+      } catch (e) {
+        console.warn('Erro ao encerrar baixa eficiência automaticamente ao iniciar parada:', e)
+      }
     }
 
     // 2) Registra parada
@@ -360,10 +361,13 @@ export default function useOrders(){
     await setStatus(ordem, targetStatus || 'PRODUZINDO')
   }
 
+  // ========================= NOVA LÓGICA: Baixa Eficiência no low_efficiency_logs =========================
+
   async function confirmarBaixaEf({ ordem, operador, data, hora, obs }) {
     if (!operador || !data || !hora) { alert('Preencha operador, data e hora.'); return }
     const started_at = localDateTimeToISO(data, hora);
-    // Se status anterior era PARADA, encerra-a usando operador/hora do início da baixa eficiência
+
+    // Se status anterior era PARADA, encerra-a neste mesmo timestamp + limpa observação
     if (ordem.status === 'PARADA') {
       const sel = await supabase.from('machine_stops').select('*')
         .eq('order_id', ordem.id).is('resumed_at', null)
@@ -374,16 +378,43 @@ export default function useOrders(){
           .eq('id', sel.data.id);
       }
     }
-    const patch = {
+
+    // 1) Inserir registro na tabela nova low_efficiency_logs
+    try {
+      const payload = {
+        order_id: ordem.id,
+        machine_id: ordem.machine_id,
+        started_at,
+        started_by: operador,
+        notes: obs || null
+      }
+      const ins = await supabase.from('low_efficiency_logs').insert([payload]).select('*').maybeSingle()
+      if (ins.error) {
+        alert('Erro ao registrar baixa eficiência no log: ' + ins.error.message);
+        return;
+      }
+      // salva id da sessão localmente para podermos encerrar exatamente esse registro depois
+      if (ins.data && ins.data.id) {
+        const key = `order_${ordem.id}`
+        setLowEffSessions(prev => ({ ...prev, [key]: ins.data.id }))
+      }
+    } catch (e) {
+      console.error('Erro ao inserir low_efficiency_logs:', e)
+      alert('Erro ao gravar baixa eficiência.')
+      return
+    }
+
+    // 2) Atualiza somente o status da order no banco (não grava campos de baixa no orders)
+    patchOrdemLocal(ordem.id, {
       status: 'BAIXA_EFICIENCIA',
+      // atualiza localmente campos para UI (não persistimos estes campos em orders)
       loweff_started_at: started_at,
       loweff_ended_at: null,
       loweff_by: operador,
       loweff_notes: obs || null
-    };
-    patchOrdemLocal(ordem.id, patch);
-    const res = await supabase.from('orders').update(patch).eq('id', ordem.id).select('*').maybeSingle();
-    if (res.error) { alert('Erro ao registrar baixa eficiência: ' + res.error.message); return; }
+    })
+    const res = await supabase.from('orders').update({ status: 'BAIXA_EFICIENCIA' }).eq('id', ordem.id).select('*').maybeSingle()
+    if (res.error) { alert('Erro ao registrar baixa eficiência (status): ' + res.error.message); return; }
     if (res.data) patchOrdemLocal(res.data.id, res.data);
   }
 
@@ -391,15 +422,39 @@ export default function useOrders(){
     if (!data || !hora) { alert('Preencha data e hora.'); return }
     const ended_at = localDateTimeToISO(data, hora)
 
+    // 1) Encerrar o registro em low_efficiency_logs
+    try {
+      const key = `order_${ordem.id}`
+      const sessionId = lowEffSessions?.[key]
+      if (sessionId) {
+        const upd = await supabase.from('low_efficiency_logs').update({ ended_at }).eq('id', sessionId)
+        if (upd.error) {
+          console.warn('Falha ao encerrar log por id, tentando fallback:', upd.error)
+          // fallback: encerrar por order_id
+          await supabase.from('low_efficiency_logs').update({ ended_at }).eq('order_id', ordem.id).is('ended_at', null)
+        } else {
+          // remove mapping local
+          setLowEffSessions(prev => { const c = { ...prev }; delete c[key]; return c })
+        }
+      } else {
+        // fallback: encerra por order_id registros abertos
+        await supabase.from('low_efficiency_logs').update({ ended_at }).eq('order_id', ordem.id).is('ended_at', null)
+      }
+    } catch (e) {
+      console.warn('Erro ao encerrar baixa eficiência no log:', e)
+      // não interrompe o fluxo — apenas loga
+    }
+
+    // 2) Atualiza localmente para UI e atualiza status na tabela orders (sem tocar campos loweff_* no banco)
     const patch = {
       status: targetStatus || 'PRODUZINDO',
       loweff_ended_at: ended_at,
-      loweff_notes: null // limpa observações conforme solicitado
+      loweff_notes: null
     }
     const before = ordens.find(o=>o.id===ordem.id)
     patchOrdemLocal(ordem.id, patch)
-    const res = await supabase.from('orders').update(patch).eq('id', ordem.id).select('*').maybeSingle()
-    if (res.error) { alert('Erro ao encerrar baixa eficiência: ' + res.error.message); if(before) patchOrdemLocal(before.id, before) }
+    const res = await supabase.from('orders').update({ status: patch.status }).eq('id', ordem.id).select('*').maybeSingle()
+    if (res.error) { alert('Erro ao encerrar baixa eficiência (status): ' + res.error.message); if(before) patchOrdemLocal(before.id, before) }
     if (res.data) patchOrdemLocal(res.data.id, res.data)
   }
 
