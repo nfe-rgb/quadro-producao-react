@@ -16,6 +16,7 @@ export default function Pet02({
   setStartModal,
   setStopModal,
   setLowEffModal,
+  setLowEffEndModal,
   setResumeModal,
   setFinalizando,
 }) {
@@ -312,6 +313,17 @@ if (typeof window !== "undefined") {
                                 ordem: ativa,
                                 operador: "",
                                 data: nowBr.toISODate(), 
+                                hora: nowBr.toFormat("HH:mm"),
+                              })
+      return;
+    }
+    
+    if (before === "BAIXA_EFICIENCIA" && targetStatus !== "BAIXA_EFICIENCIA") {
+                              const nowBr = DateTime.now().setZone("America/Sao_Paulo");
+                              setLowEffEndModal({
+                                ordem: ativa,
+                                operador: "",
+                                data: nowBr.toISODate(),
                                 hora: nowBr.toFormat("HH:mm"),
                               })
       return;
