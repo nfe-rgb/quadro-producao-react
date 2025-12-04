@@ -232,8 +232,9 @@ export default function Apontamento() {
 
         const refugoPecas = Number(dados.refugo) || 0;
         let pct = 0;
-        if (producaoPecas > 0) pct = (refugoPecas / producaoPecas) * 100;
-        pct = Math.max(0, Math.min(100, pct));
+        if (producaoPecas > 0) {
+          pct = ((refugoPecas + producaoPecas) / producaoPecas) * 100;
+        }
         dados.refugoPct = Number.isFinite(pct) ? Number(pct.toFixed(2)) : 0;
       });
     });
