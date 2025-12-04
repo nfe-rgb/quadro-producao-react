@@ -189,7 +189,36 @@ export default function Painel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Helpers para gravar/encerrar baixa eficiência na tabela low_efficiency_logs
+  // Estado para armazenar o started_at do log aberto de baixa eficiência por máquina
+  const [lowEffStartedAt, setLowEffStartedAt] = useState({});
+
+  // Efeito para buscar o log aberto de baixa eficiência para cada máquina ativa
+  useEffect(() => {
+    async function fetchLowEffLogs() {
+      const result = {};
+      for (const m of MAQUINAS) {
+        const lista = (localAtivos && localAtivos[m]) || [];
+        const ativa = lista[0] || null;
+        if (ativa && ativa.status === "BAIXA_EFICIENCIA") {
+          // Busca log aberto para essa ordem/máquina
+          let query = supabase
+            .from("low_efficiency_logs")
+            .select("started_at")
+            .is("ended_at", null)
+            .eq("machine_id", m);
+          if (ativa.id) query = query.eq("order_id", ativa.id);
+          const { data, error } = await query;
+          if (!error && data && data.length > 0) {
+            result[m] = data[0].started_at;
+          }
+        }
+      }
+      setLowEffStartedAt(result);
+    }
+    fetchLowEffLogs();
+    // Executa sempre que localAtivos ou status mudam
+  }, [localAtivos, tick]);
+  
   async function insertLowEfficiencyLog({ order_id = null, machine_id, started_by = null, notes = null }) {
     try {
       const payload = {
@@ -273,12 +302,13 @@ export default function Painel({
               })()
             : null;
 
+          // Timer de baixa eficiência usando started_at do log aberto
           const lowEffText =
-            ativa?.status === "BAIXA_EFICIENCIA" && ativa?.loweff_started_at
+            ativa?.status === "BAIXA_EFICIENCIA" && lowEffStartedAt[m]
               ? (() => {
                   const _ = tick;
                   const secs =
-                    (Date.now() - new Date(ativa.loweff_started_at).getTime()) / 1000;
+                    (Date.now() - new Date(lowEffStartedAt[m]).getTime()) / 1000;
                   return formatHHMMSS(secs);
                 })()
               : null;

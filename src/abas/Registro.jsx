@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react'
+import { supabase } from '../lib/supabaseClient'
 import PieChartIndicadores from '../components/PieChartIndicadores'
 import { fmtDateTime, fmtDuracao } from '../lib/utils'
 import { MAQUINAS } from '../lib/constants'
@@ -68,8 +69,12 @@ function nextStartForMachine(machineGroups = [], refTime) {
   return sorted.length ? sorted[0].g : null
 }
 
+/**
+ * calculateAggregates - versão corrigida e centralizada
+ * Retorna:
+ *  { totalProdH, totalParadaH, totalLowEffH, totalSemProgH, totalH, totalDisponivelH, pct, totalMaquinasParadas, machineParadaMs }
+ */
 function calculateAggregates({ gruposPorMaquina, filtroStart, filtroEnd, maquinasConsideradas }) {
-  // Retorna { totalProdH, totalParadaH, totalLowEffH, totalSemProgH, totalH, totalDisponivelH, pct, totalMaquinasParadas, machineParadaMs }
   let totalProdMs = 0, totalParadaMs = 0, totalLowEffMs = 0, totalSemProgMs = 0
   const machineParadaMs = {}
 
@@ -87,6 +92,10 @@ function calculateAggregates({ gruposPorMaquina, filtroStart, filtroEnd, maquina
     }
   }
 
+  const filtroStartMs = filtroStart.getTime()
+  const filtroEndMs = filtroEnd.getTime()
+  const nowClamp = Math.min(Date.now(), filtroEndMs)
+
   for (const m of maquinasConsideradas) {
     const gruposOrdenados = (gruposPorMaquina[m] || []).slice().sort((a, b) => {
       const ta = toTime(a?.ordem?.started_at) || 0
@@ -94,208 +103,181 @@ function calculateAggregates({ gruposPorMaquina, filtroStart, filtroEnd, maquina
       return ta - tb
     })
 
-    let paradaMsMaquina = 0
-    let prodMsMaquina = 0
-
-    // Sem O.P. -> sem programação no período inteiro
+    // Se nenhuma OP no período -> sem programação total
     if (gruposOrdenados.length === 0) {
-      totalSemProgMs += filtroEnd.getTime() - filtroStart.getTime()
+      const horasPeriodoMs = Math.max(0, filtroEndMs - filtroStartMs)
+      totalSemProgMs += horasPeriodoMs
       machineParadaMs[m] = 0
       continue
     }
 
-    // Ajustes de sem programação antes/apos O.P.
-    const firstOP = gruposOrdenados[0]?.ordem
-    const lastOP = gruposOrdenados[gruposOrdenados.length - 1]?.ordem
-    const firstOPStart = toTime(firstOP?.started_at)
-    const lastOPEnd = toTime(lastOP?.finalized_at)
-
-    if (!lastOP || (lastOPEnd && lastOPEnd < filtroStart.getTime())) {
-      const proxOP = gruposOrdenados.find(g => toTime(g?.ordem?.started_at) > filtroStart.getTime())
-      const inicioSemProg = filtroStart.getTime()
-      const fimSemProg = proxOP ? toTime(proxOP?.ordem?.started_at) : filtroEnd.getTime()
-      if (fimSemProg > inicioSemProg) totalSemProgMs += fimSemProg - inicioSemProg
-    } else if (lastOPEnd && lastOPEnd < filtroEnd.getTime()) {
-      const inicioSemProg = lastOPEnd
-      const fimSemProg = filtroEnd.getTime()
-      if (fimSemProg > inicioSemProg) totalSemProgMs += fimSemProg - inicioSemProg
-    }
-
-    // Percorre cada O.P. para gerar intervalos de produção descontando paradas e baixa eficiência
-    gruposOrdenados.forEach((g) => {
-      const o = g.ordem || {}
-      const intervals = []
-      const lastStart = toTime(o.started_at)
-      if (!lastStart) return
-
-      // Se finalizada -> cria intervalo (com clipping)
-      if (safe(o.finalized_at)) {
-        const ini = Math.max(toTime(o.started_at) || filtroStart.getTime(), filtroStart.getTime())
-        const fim = Math.min(toTime(o.finalized_at), filtroEnd.getTime())
-        if (fim > ini) intervals.push({ tipo: 'producao', ini, fim })
-      }
-
-      // Paradas: gerar lista de [ini,fim] (clipped ao filtro)
-      const paradaIntervalsTodos = (g.stops || []).map(st => {
+    // --- 1) calcular paradas (stops) da máquina para o período, com clipping e unificação ---
+    const allStops = []
+    for (const g of gruposOrdenados) {
+      const stops = g.stops || []
+      for (const st of stops) {
         const stIni = toTime(st.started_at)
-        let stFim
-        if (safe(st.resumed_at)) stFim = toTime(st.resumed_at)
-        else stFim = Math.min(Date.now(), filtroEnd.getTime())
-        const ini = Math.max(stIni, filtroStart.getTime())
-        const fim = Math.min(stFim, filtroEnd.getTime())
-        return ini < fim ? [ini, fim] : null
-      }).filter(Boolean)
+        if (!stIni) continue
+        const stFim = safe(st.resumed_at) ? toTime(st.resumed_at) : nowClamp
+        const ini = Math.max(stIni, filtroStartMs)
+        const fim = Math.min(stFim, filtroEndMs)
+        if (ini < fim) allStops.push([ini, fim])
+      }
+    }
+    const stopsUnidos = unirArrays(allStops)
+    let paradaMsMaquina = 0
+    stopsUnidos.forEach(([ini, fim]) => { paradaMsMaquina += Math.max(0, fim - ini) })
+    machineParadaMs[m] = paradaMsMaquina
+    totalParadaMs += paradaMsMaquina
 
-      const paradaUnidaTodos = unirArrays(paradaIntervalsTodos)
-      let deltaParadaTodos = 0
-      paradaUnidaTodos.forEach(([ini, fim]) => deltaParadaTodos += Math.max(0, fim - ini))
-      paradaMsMaquina += deltaParadaTodos
+    // --- 2) produção / baixa eficiência ---
+    let prodMsMaquina = 0
+    let lowEffMsMaquina = 0
 
-      // Eventos de reinicio/interrupcao/final
-      const reinicios = []
-      if (safe(o.restarted_at)) reinicios.push({ t: toTime(o.restarted_at), type: 'restart' })
-      if (safe(o.interrupted_at)) reinicios.push({ t: toTime(o.interrupted_at), type: 'interrupt' })
-      if (safe(o.finalized_at)) reinicios.push({ t: toTime(o.finalized_at), type: 'final' })
-      reinicios.sort((a, b) => a.t - b.t)
+    // acumulador de ocupação para calcular sem programação por complemento
+    const ocupados = []
+    // adicionar paradas como ocupação (já unidas)
+    stopsUnidos.forEach(([i, f]) => ocupados.push([i, f]))
 
-      if (reinicios.length === 0) {
-        let lastEnd = safe(o.finalized_at) ? toTime(o.finalized_at) : Date.now()
-        if (filtroEnd && lastEnd > filtroEnd.getTime()) lastEnd = filtroEnd.getTime()
-        if (lastEnd > lastStart) intervals.push({ tipo: 'producao', ini: lastStart, fim: lastEnd })
-      } else {
-        let cursor = lastStart
-        for (let i = 0; i < reinicios.length; i++) {
-          const r = reinicios[i]
-          if (r.type === 'interrupt' || r.type === 'final') {
-            if (r.t > cursor) intervals.push({ tipo: 'producao', ini: cursor, fim: r.t })
-            const nextRestart = reinicios.find(x => x.type === 'restart' && x.t > r.t)
-            if (nextRestart) cursor = nextRestart.t
-            else {
-              cursor = null
-              if (r.type === 'final' && r.t < toTime(o.finalized_at)) {
-                const finalTime = toTime(o.finalized_at)
-                if (finalTime > r.t) intervals.push({ tipo: 'producao', ini: r.t, fim: finalTime })
-              }
-            }
+    for (const g of gruposOrdenados) {
+      const o = g.ordem || {}
+      const startMs = toTime(o.started_at)
+      if (!startMs) continue
+
+      // coletar eventos importantes (start, interrupt, restart, final)
+      const eventos = []
+      // garantir que started_at apareça como 'start' se existir
+      if (safe(o.started_at)) eventos.push({ t: toTime(o.started_at), type: 'start' })
+      if (safe(o.restarted_at)) eventos.push({ t: toTime(o.restarted_at), type: 'restart' })
+      if (safe(o.interrupted_at)) eventos.push({ t: toTime(o.interrupted_at), type: 'interrupt' })
+      if (safe(o.finalized_at)) eventos.push({ t: toTime(o.finalized_at), type: 'final' })
+
+      // ordenar por timestamp
+      eventos.sort((a, b) => a.t - b.t)
+
+      // === NOVA LÓGICA: scan linear com estado "running" ===
+      const prodBaseIntervals = []
+      let running = false
+      let runStart = null
+
+      // Se houver um started_at (inventário), mas nenhum evento posterior de start/restart, tratamos via eventos já inseridos.
+      // Iteramos os eventos em ordem; quando encontramos start/restart abrimos, ao encontrar interrupt/final fechamos.
+      for (let i = 0; i < eventos.length; i++) {
+        const ev = eventos[i]
+        if ((ev.type === 'start' || ev.type === 'restart')) {
+          // abrir apenas se não estiver rodando
+          if (!running) {
+            running = true
+            runStart = ev.t
+          } else {
+            // se já estava rodando, ignorar (evita sobreposição)
+          }
+        } else if (ev.type === 'interrupt' || ev.type === 'final') {
+          if (running) {
+            const ini = Math.max(runStart, filtroStartMs)
+            const fim = Math.min(ev.t, filtroEndMs)
+            if (ini < fim) prodBaseIntervals.push([ini, fim])
+            running = false
+            runStart = null
+          } else {
+            // se não estava rodando, ignoramos este interrupt/final
           }
         }
-        if (cursor) {
-          let inicioProducao = cursor
-          if (inicioProducao < filtroStart.getTime()) inicioProducao = filtroStart.getTime()
-          let fimAberto = filtroEnd.getTime()
-          if (safe(o.finalized_at)) fimAberto = Math.min(fimAberto, toTime(o.finalized_at))
-          if (fimAberto > inicioProducao) intervals.push({ tipo: 'producao', ini: inicioProducao, fim: fimAberto })
+      }
+
+      // se ao final o estado estiver "running", fechar até finalized_at (se existir) ou nowClamp
+      if (running) {
+        let fimAberto = safe(o.finalized_at) ? toTime(o.finalized_at) : nowClamp
+        fimAberto = Math.min(fimAberto, filtroEndMs)
+        const ini = Math.max(runStart || startMs, filtroStartMs)
+        if (ini < fimAberto) prodBaseIntervals.push([ini, fimAberto])
+      } else {
+        // se não havia eventos de start/restart mas existe started_at e possivelmente finalized_at,
+        // considerar o intervalo entre started_at e finalized_at/nowClamp
+        const hasStartEvent = eventos.some(e => e.type === 'start' || e.type === 'restart')
+        if (!hasStartEvent) {
+          const lastEnd = safe(o.finalized_at) ? toTime(o.finalized_at) : nowClamp
+          const ini = Math.max(startMs, filtroStartMs)
+          const fim = Math.min(lastEnd, filtroEndMs)
+          if (ini < fim) prodBaseIntervals.push([ini, fim])
         }
       }
 
-      // Processa os intervals gerados para esta O.P.
-      intervals.forEach((intervalo) => {
-        if (!intervalo || intervalo.tipo !== 'producao') return
-        const iniCalc = Math.max(intervalo.ini, filtroStart.getTime())
-        const fimCalc = Math.min(intervalo.fim, filtroEnd.getTime())
-        if (fimCalc <= iniCalc) return
+      // Agora, para cada base, remover paradas (stopsUnidos) e aplicar loweff
+      for (const [iniBase, fimBase] of prodBaseIntervals) {
+        // calcular paradas dentro do base
+        const paradaClipped = stopsUnidos
+          .map(([pIni, pFim]) => {
+            const ini = Math.max(pIni, iniBase)
+            const fim = Math.min(pFim, fimBase)
+            return ini < fim ? [ini, fim] : null
+          })
+          .filter(Boolean)
+        const paradaUnida = unirArrays(paradaClipped)
 
-        // 1) paradas dentro do intervalo (clipped)
-        const paradaIntervals = (g.stops || []).map(st => {
-          const stIni = toTime(st.started_at)
-          let stFim
-          if (safe(st.resumed_at)) stFim = toTime(st.resumed_at)
-          else stFim = Math.min(Date.now(), filtroEnd.getTime())
-          const ini = Math.max(stIni, iniCalc)
-          const fim = Math.min(stFim, fimCalc)
-          return ini < fim ? [ini, fim] : null
-        }).filter(Boolean)
-
-        const paradaUnida = unirArrays(paradaIntervals)
-
-        // 2) intervalos "livres" dentro do intervalo de producao
+        // gerar fatias livres (livres = porções de base sem parada)
         let livres = []
-        let cursor = iniCalc
+        let cursorLiv = iniBase
         for (let i = 0; i < paradaUnida.length; i++) {
           const [pIni, pFim] = paradaUnida[i]
-          if (pIni > cursor) livres.push([cursor, pIni])
-          cursor = Math.max(cursor, pFim)
+          if (pIni > cursorLiv) livres.push([cursorLiv, pIni])
+          cursorLiv = Math.max(cursorLiv, pFim)
         }
-        if (cursor < fimCalc) livres.push([cursor, fimCalc])
+        if (cursorLiv < fimBase) livres.push([cursorLiv, fimBase])
 
-        // 3) para cada livre, separar loweff/producao
-        let totalLowEff = 0
-        let totalProd = 0
+        // dentro de cada livre, separar loweff e produção
+        for (const [livreIni, livreFim] of livres) {
+          if (livreFim <= livreIni) continue
 
-        livres.forEach(([livreIni, livreFim]) => {
-          if (livreFim <= livreIni) return
-
-          // baixa eficiencia (apenas uma janela por O.P. no modelo original)
-          let lowEffIntervals = []
+          const lowEffIntervals = []
           if (safe(o.loweff_started_at)) {
             const leIni = toTime(o.loweff_started_at)
-            const leFim = toTime(o.loweff_ended_at) || livreFim
-            const leIniCalc = Math.max(leIni, filtroStart.getTime(), livreIni)
-            const leFimCalc = Math.min(leFim, filtroEnd.getTime(), livreFim)
+            const leFim = safe(o.loweff_ended_at) ? toTime(o.loweff_ended_at) : livreFim
+            const leIniCalc = Math.max(leIni, filtroStartMs, livreIni)
+            const leFimCalc = Math.min(leFim, filtroEndMs, livreFim)
             if (leIniCalc < leFimCalc) lowEffIntervals.push([leIniCalc, leFimCalc])
           }
+          const lowUnidos = unirArrays(lowEffIntervals)
 
-          const allIntervals = unirArrays([...lowEffIntervals])
-
-          // gerar fatias entre eventos para decidir loweff x prod
-          let eventos = []
-          allIntervals.forEach(([ini, fim]) => {
-            eventos.push({ t: ini, tipo: 'ini' })
-            eventos.push({ t: fim, tipo: 'fim' })
-          })
-          eventos.push({ t: livreIni, tipo: 'iniTotal' })
-          eventos.push({ t: livreFim, tipo: 'fimTotal' })
-          eventos = eventos.sort((a, b) => a.t - b.t)
-
-          let fatias = []
-          let dentro = 0
-          let cursorF = livreIni
-          for (let i = 0; i < eventos.length; i++) {
-            const ev = eventos[i]
-            if (ev.t > cursorF) {
-              fatias.push([cursorF, ev.t, dentro])
-              cursorF = ev.t
+          if (lowUnidos.length === 0) {
+            prodMsMaquina += Math.max(0, livreFim - livreIni)
+            ocupados.push([livreIni, livreFim])
+          } else {
+            let cursorF = livreIni
+            for (let i = 0; i < lowUnidos.length; i++) {
+              const [leIni, leFim] = lowUnidos[i]
+              if (leIni > cursorF) {
+                prodMsMaquina += Math.max(0, leIni - cursorF)
+                ocupados.push([cursorF, leIni])
+              }
+              const lowIni = Math.max(leIni, livreIni)
+              const lowFim = Math.min(leFim, livreFim)
+              if (lowFim > lowIni) {
+                lowEffMsMaquina += Math.max(0, lowFim - lowIni)
+                ocupados.push([lowIni, lowFim])
+              }
+              cursorF = Math.max(cursorF, leFim)
             }
-            if (ev.tipo === 'ini') dentro++
-            if (ev.tipo === 'fim') dentro--
-          }
-
-          fatias.forEach(([ini, fim]) => {
-            if (fim <= ini) return
-            const isLowEff = lowEffIntervals.some(([leIni, leFim]) => ini < leFim && fim > leIni)
-            if (isLowEff) totalLowEff += fim - ini
-            else totalProd += fim - ini
-          })
-        })
-
-        // adicionar produção (sem descontos de fim de semana)
-        prodMsMaquina += Math.max(0, totalProd)
-        totalLowEffMs += totalLowEff
-      })
-
-      // sem programação entre finalized e próxima OP (dentro do filtro)
-      const finalizedMs = toTime(o.finalized_at)
-      if (finalizedMs) {
-        const prox = nextStartForMachine(gruposPorMaquina[m], finalizedMs)
-        if (prox) {
-          const proxIni = toTime(prox.ordem.started_at) || filtroEnd.getTime()
-          if (proxIni > finalizedMs && finalizedMs >= filtroStart.getTime() && proxIni <= filtroEnd.getTime()) {
-            totalSemProgMs += Math.max(0, proxIni - finalizedMs)
+            if (cursorF < livreFim) {
+              prodMsMaquina += Math.max(0, livreFim - cursorF)
+              ocupados.push([cursorF, livreFim])
+            }
           }
         }
-      }
-    })
-
-    const horasPeriodoMs = (filtroEnd.getTime() - filtroStart.getTime())
-    let somaMs = prodMsMaquina + paradaMsMaquina
-    if (somaMs > horasPeriodoMs) {
-      paradaMsMaquina = Math.max(0, horasPeriodoMs - prodMsMaquina)
-    }
+      } // fim prodBaseIntervals loop
+    } // fim for each OP
 
     totalProdMs += prodMsMaquina
-    totalParadaMs += paradaMsMaquina
-    machineParadaMs[m] = paradaMsMaquina
-  }
+    totalLowEffMs += lowEffMsMaquina
+
+    // --- 3) sem programação por complemento ---
+    const ocupadosUnidos = unirArrays(ocupados)
+    let ocupadoTotalMs = 0
+    ocupadosUnidos.forEach(([i, f]) => { ocupadoTotalMs += Math.max(0, f - i) })
+    const horasPeriodoMs = Math.max(0, filtroEndMs - filtroStartMs)
+    const semProgMsMaquina = Math.max(0, horasPeriodoMs - ocupadoTotalMs)
+    totalSemProgMs += semProgMsMaquina
+  } // fim maquinas loop
 
   const totalProdH = totalProdMs / 1000 / 60 / 60
   const totalParadaH = totalParadaMs / 1000 / 60 / 60
@@ -307,7 +289,7 @@ function calculateAggregates({ gruposPorMaquina, filtroStart, filtroEnd, maquina
   const totalDisponivelH = maquinasConsideradas.length * horasPeriodo
 
   const pct = v => totalDisponivelH ? ((v / totalDisponivelH) * 100).toFixed(1) : '0.0'
-  const totalMaquinasParadas = Object.keys(gruposPorMaquina).filter(m => (machineParadaMs[m] || 0) > 0).length
+  const totalMaquinasParadas = maquinasConsideradas.filter(m => (machineParadaMs[m] || 0) > 0).length
 
   return {
     totalProdH,
@@ -360,11 +342,42 @@ function Filters({ periodo, setPeriodo, customStart, setCustomStart, customEnd, 
 // Componente principal (refatorado e com pontos de extensão claros)
 // =========================
 export default function Registro({ registroGrupos = [], openSet, toggleOpen }) {
+  // Estado para armazenar logs de baixa eficiência por ordem
+  // ...existing code...
+  // Estado para armazenar logs de baixa eficiência por ordem
+  const [lowEffLogsByOrder, setLowEffLogsByOrder] = useState({});
   const [tick, setTick] = useState(0)
   useEffect(() => {
     const id = setInterval(() => setTick(t => t + 1), 1000)
     return () => clearInterval(id)
   }, [])
+
+  // Buscar logs de baixa eficiência para as ordens exibidas
+  useEffect(() => {
+    async function fetchLowEffLogs() {
+      const orderIds = registroGrupos.map(g => g?.ordem?.id).filter(Boolean);
+      if (!orderIds.length) {
+        setLowEffLogsByOrder({});
+        return;
+      }
+      const { data, error } = await supabase
+        .from('low_efficiency_logs')
+        .select('*')
+        .in('order_id', orderIds);
+      if (error) {
+        setLowEffLogsByOrder({});
+        return;
+      }
+      // Agrupa por order_id
+      const logsByOrder = {};
+      for (const log of data) {
+        if (!logsByOrder[log.order_id]) logsByOrder[log.order_id] = [];
+        logsByOrder[log.order_id].push(log);
+      }
+      setLowEffLogsByOrder(logsByOrder);
+    }
+    fetchLowEffLogs();
+  }, [registroGrupos]);
 
   const [hoveredIndicador, setHoveredIndicador] = useState(null)
   const [localOpenSet, setLocalOpenSet] = useState(() => new Set())
@@ -402,25 +415,35 @@ export default function Registro({ registroGrupos = [], openSet, toggleOpen }) {
       const iniMs = toTime(o.started_at)
       const fimMs = toTime(o.finalized_at)
       const restartedMs = toTime(o.restarted_at)
+      const interruptedMs = toTime(o.interrupted_at)
+      const filtroStartMs = filtroStart.getTime();
+      const filtroEndMs = filtroEnd.getTime();
 
       const hasOpenStop = (g.stops || []).some(st => {
         const stIni = toTime(st.started_at)
         const stFim = toTime(st.resumed_at)
-        return stIni && stIni < filtroEnd.getTime() && (!stFim || stFim >= filtroStart.getTime())
+        return stIni && stIni < filtroEndMs && (!stFim || stFim >= filtroStartMs)
       })
 
-      const cruzouInicioFiltro = iniMs && iniMs < filtroStart.getTime() && fimMs && fimMs >= filtroStart.getTime()
+      // Considera OPs que cruzam o início do filtro
+      const cruzouInicioFiltro = iniMs && iniMs < filtroStartMs && fimMs && fimMs >= filtroStartMs
 
-      const abertaPorRestart = restartedMs && restartedMs < filtroStart.getTime() && !fimMs && (!o.interrupted_at || toTime(o.interrupted_at) >= filtroStart.getTime())
+      // Considera OPs reiniciadas que cruzam o início do filtro
+      const cruzouRestartFiltro = restartedMs && restartedMs < filtroStartMs && (!fimMs || fimMs >= filtroStartMs)
 
-      const interruptedMs = toTime(o.interrupted_at)
-      const endedBeforeFilter = (fimMs && fimMs < filtroStart.getTime() && !cruzouInicioFiltro) || (interruptedMs && interruptedMs < filtroStart.getTime())
+      // Considera OPs abertas por restart
+      const abertaPorRestart = restartedMs && restartedMs < filtroStartMs && !fimMs && (!o.interrupted_at || interruptedMs >= filtroStartMs)
+
+      // Se finalizou/interrompeu antes do filtro, ignora
+      const endedBeforeFilter = (fimMs && fimMs < filtroStartMs && !cruzouInicioFiltro && !cruzouRestartFiltro) || (interruptedMs && interruptedMs < filtroStartMs)
       if (endedBeforeFilter) return false
 
-      const startedInRange = iniMs && iniMs < filtroEnd.getTime() && (!fimMs || fimMs >= filtroStart.getTime())
-      const finalizedInRange = fimMs && fimMs >= filtroStart.getTime() && fimMs <= filtroEnd.getTime()
-      const openInRange = !fimMs && iniMs < filtroEnd.getTime()
-      const resultado = startedInRange || finalizedInRange || openInRange || cruzouInicioFiltro || hasOpenStop || abertaPorRestart
+      // OPs iniciadas ou reiniciadas dentro do range
+      const startedInRange = iniMs && iniMs < filtroEndMs && (!fimMs || fimMs >= filtroStartMs)
+      const restartedInRange = restartedMs && restartedMs < filtroEndMs && (!fimMs || fimMs >= filtroStartMs)
+      const finalizedInRange = fimMs && fimMs >= filtroStartMs && fimMs <= filtroEndMs
+      const openInRange = !fimMs && (iniMs < filtroEndMs || (restartedMs && restartedMs < filtroEndMs))
+      const resultado = startedInRange || restartedInRange || finalizedInRange || openInRange || cruzouInicioFiltro || cruzouRestartFiltro || hasOpenStop || abertaPorRestart
       return resultado
     })
   }, [registroGrupos, filtroStart, filtroEnd, periodo, customStart, customEnd, tick])
@@ -442,10 +465,118 @@ export default function Registro({ registroGrupos = [], openSet, toggleOpen }) {
     return map
   }, [gruposFiltradosMaquina])
 
-  // 5) Calcular agregados (delegado para a função core)
-  const aggregates = useMemo(() => calculateAggregates({ gruposPorMaquina, filtroStart, filtroEnd, maquinasConsideradas }), [gruposPorMaquina, filtroStart, filtroEnd, maquinasConsideradas.length, tick])
+  // 5) Calcular agregados, somando baixa eficiência dos logs reais
+  const aggregates = useMemo(() => {
+    // Calcula intervalos de parada e baixa eficiência por máquina, sem sobreposição
+    const filtroStartMs = filtroStart ? filtroStart.getTime() : null;
+    const filtroEndMs = filtroEnd ? filtroEnd.getTime() : null;
+    const machineLowEffMs = {};
+    const machineParadaMs = {};
+    let totalLowEffMs = 0;
+    let totalParadaMs = 0;
+    for (const m of maquinasConsideradas) {
+      // Busca ordens dessa máquina
+      const grupos = gruposPorMaquina[m] || [];
+      // Coleta intervalos de parada
+      const paradaIntervals = [];
+      for (const gr of grupos) {
+        const stops = gr.stops || [];
+        for (const st of stops) {
+          let ini = toTime(st.started_at);
+          let fim = safe(st.resumed_at) ? toTime(st.resumed_at) : Date.now();
+          if (filtroStartMs !== null && ini < filtroStartMs) ini = filtroStartMs;
+          if (filtroEndMs !== null && fim > filtroEndMs) fim = filtroEndMs;
+          if (ini && fim && fim > ini) paradaIntervals.push([ini, fim]);
+        }
+      }
+      // Coleta intervalos de baixa eficiência
+      const lowEffIntervals = [];
+      for (const gr of grupos) {
+        const o = gr.ordem || {};
+        const logs = lowEffLogsByOrder[o.id] || [];
+        for (const log of logs) {
+          let ini = toTime(log.started_at);
+          let fim = log.ended_at ? toTime(log.ended_at) : Date.now();
+          if (filtroStartMs !== null && ini < filtroStartMs) ini = filtroStartMs;
+          if (filtroEndMs !== null && fim > filtroEndMs) fim = filtroEndMs;
+          if (ini && fim && fim > ini) lowEffIntervals.push([ini, fim]);
+        }
+      }
+      // Unir intervalos de parada e baixa eficiência
+      function unir(arr) {
+        if (!arr.length) return [];
+        arr.sort((a, b) => a[0] - b[0]);
+        const unidos = [arr[0].slice()];
+        for (let i = 1; i < arr.length; i++) {
+          const ultimo = unidos[unidos.length - 1];
+          const atual = arr[i];
+          if (atual[0] <= ultimo[1]) {
+            ultimo[1] = Math.max(ultimo[1], atual[1]);
+          } else {
+            unidos.push([atual[0], atual[1]]);
+          }
+        }
+        return unidos;
+      }
+      const paradaUnida = unir(paradaIntervals);
+      const lowEffUnida = unir(lowEffIntervals);
+      // 1. Baixa eficiência: desconta trechos de parada
+      let lowEffMs = 0;
+      for (const [leIni, leFim] of lowEffUnida) {
+        let fatias = [[leIni, leFim]];
+        for (const [pIni, pFim] of paradaUnida) {
+          const novasFatias = [];
+          for (const [fIni, fFim] of fatias) {
+            if (pFim <= fIni || pIni >= fFim) {
+              novasFatias.push([fIni, fFim]);
+              continue;
+            }
+            if (pIni > fIni && pIni < fFim) novasFatias.push([fIni, pIni]);
+            if (pFim > fIni && pFim < fFim) novasFatias.push([pFim, fFim]);
+          }
+          fatias = novasFatias;
+        }
+        for (const [fIni, fFim] of fatias) {
+          if (fFim > fIni) lowEffMs += Math.max(0, fFim - fIni);
+        }
+      }
+      // 2. Parada: desconta trechos de baixa eficiência
+      let paradaMs = 0;
+      for (const [pIni, pFim] of paradaUnida) {
+        let fatias = [[pIni, pFim]];
+        for (const [leIni, leFim] of lowEffUnida) {
+          const novasFatias = [];
+          for (const [fIni, fFim] of fatias) {
+            if (leFim <= fIni || leIni >= fFim) {
+              novasFatias.push([fIni, fFim]);
+              continue;
+            }
+            if (leIni > fIni && leIni < fFim) novasFatias.push([fIni, leIni]);
+            if (leFim > fIni && leFim < fFim) novasFatias.push([leFim, fFim]);
+          }
+          fatias = novasFatias;
+        }
+        for (const [fIni, fFim] of fatias) {
+          if (fFim > fIni) paradaMs += Math.max(0, fFim - fIni);
+        }
+      }
+      machineLowEffMs[m] = lowEffMs;
+      machineParadaMs[m] = paradaMs;
+      totalLowEffMs += lowEffMs;
+      totalParadaMs += paradaMs;
+    }
+    // Chama agregador original, mas ignora os campos de parada e baixa eficiência dele
+    const aggs = calculateAggregates({ gruposPorMaquina, filtroStart, filtroEnd, maquinasConsideradas });
+    return {
+      ...aggs,
+      totalLowEffH: totalLowEffMs / 1000 / 60 / 60,
+      machineLowEffH: Object.fromEntries(Object.entries(machineLowEffMs).map(([k, v]) => [k, v / 1000 / 60 / 60])),
+      totalParadaH: totalParadaMs / 1000 / 60 / 60,
+      machineParadaH: Object.fromEntries(Object.entries(machineParadaMs).map(([k, v]) => [k, v / 1000 / 60 / 60]))
+    };
+  }, [gruposPorMaquina, filtroStart, filtroEnd, maquinasConsideradas.length, tick, lowEffLogsByOrder]);
 
-  const { totalProdH, totalParadaH, totalLowEffH, totalSemProgH, totalDisponivelH, pct, totalMaquinasParadas, machineParadaMs } = aggregates
+  const { totalProdH, totalParadaH, totalLowEffH, totalSemProgH, totalDisponivelH, pct, totalMaquinasParadas, machineParadaMs } = aggregates;
 
   const items = useMemo(() => {
     const raw = [
@@ -454,10 +585,7 @@ export default function Registro({ registroGrupos = [], openSet, toggleOpen }) {
       { key: 'loweff', label: 'Baixa Eficiência', valueH: totalLowEffH, color: '#ffc107' },
       { key: 'semprog', label: 'Sem Programação', valueH: totalSemProgH, color: '#3498db' }
     ]
-    const soma = raw.reduce((acc, it) => acc + it.valueH, 0)
-    if (totalDisponivelH > 0 && soma > totalDisponivelH) {
-      return raw.map(it => ({ ...it, valueH: (it.valueH / soma) * totalDisponivelH }))
-    }
+    // NÃO fazer rescaling silencioso — manter números reais e tratar visualmente se necessário
     return raw
   }, [totalProdH, totalParadaH, totalLowEffH, totalSemProgH, totalDisponivelH, tick])
 
@@ -515,6 +643,12 @@ export default function Registro({ registroGrupos = [], openSet, toggleOpen }) {
                     <span style={{ color: '#666' }}> - {formatPctFromHours(it.valueH)}</span>
                   </div>
                 ))}
+                {/* Exibir aviso se soma exceder a disponibilidade */}
+                {totalDisponivelH > 0 && Math.abs((totalProdH + totalParadaH + totalLowEffH + totalSemProgH) - totalDisponivelH) > 0.01 && (
+                  <div className="muted" style={{ marginTop: 8, color: '#a00' }}>
+                    Atenção: soma das categorias diferente do total disponível — revise o período/filtros ou verifique eventos com timestamps fora do intervalo.
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -555,7 +689,19 @@ export default function Registro({ registroGrupos = [], openSet, toggleOpen }) {
                         if (safe(o.started_at)) events.push({ id: `start-${o.id}`, type: 'start', title: 'Início da produção', when: o.started_at, who: o.started_by || '-' })
                         if (safe(o.interrupted_at)) events.push({ id: `interrupt-${o.id}`, type: 'interrupt', title: 'Produção interrompida', when: o.interrupted_at, who: o.interrupted_by || '-' })
                         if (safe(o.restarted_at)) events.push({ id: `restart-${o.id}`, type: 'restart', title: 'Reinício da produção', when: o.restarted_at, who: o.restarted_by || '-' })
-                        if (safe(o.loweff_started_at)) events.push({ id: `loweff-${o.id}`, type: 'loweff', title: 'Baixa eficiência', when: o.loweff_started_at, end: safe(o.loweff_ended_at) ? o.loweff_ended_at : null, who: o.loweff_by || '-', notes: o.loweff_notes || '' })
+                        // Adiciona eventos de baixa eficiência vindos dos logs
+                        const lowEffLogs = lowEffLogsByOrder[o.id] || [];
+                        for (const log of lowEffLogs) {
+                          events.push({
+                            id: `lowefflog-${log.id}`,
+                            type: 'loweff',
+                            title: 'Baixa eficiência',
+                            when: log.started_at,
+                            end: log.ended_at || null,
+                            who: log.started_by || '-',
+                            notes: log.notes || ''
+                          });
+                        }
                         ;(gr.stops || []).forEach(st => { if (safe(st.started_at)) events.push({ id: `stop-${st.id}`, type: 'stop', title: 'Parada', when: st.started_at, end: safe(st.resumed_at) ? st.resumed_at : null, who: st.started_by || '-', reason: st.reason || '-', notes: st.notes || '' }) })
                         if (safe(o.finalized_at)) events.push({ id: `end-${o.id}`, type: 'end', title: 'Fim da produção', when: o.finalized_at, who: o.finalized_by || '-' })
                         if (!events.length) events.push({ id: `empty-${o.id}`, type: 'empty', title: 'Sem eventos', when: null })
