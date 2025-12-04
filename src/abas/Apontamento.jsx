@@ -233,7 +233,7 @@ export default function Apontamento() {
         const refugoPecas = Number(dados.refugo) || 0;
         let pct = 0;
         if (producaoPecas > 0) {
-          pct = ((refugoPecas + producaoPecas) / producaoPecas) * 100;
+          pct = (refugoPecas / (producaoPecas + refugoPecas)) * 100;
         }
         dados.refugoPct = Number.isFinite(pct) ? Number(pct.toFixed(2)) : 0;
       });
@@ -377,7 +377,7 @@ export default function Apontamento() {
                                 )}
 
                                 <div style={{ marginTop: 8, fontSize: 13, color: '#444' }}>
-                                  <b>Produção estimada (peças):</b> {dados.producaoPecas} (padrão {dados.padraoPorCaixa}/caixa)
+                                  <b>Produção Realizada (peças):</b> {dados.producaoPecas} (padrão {dados.padraoPorCaixa}/caixa)
                                 </div>
                               </div>
 
