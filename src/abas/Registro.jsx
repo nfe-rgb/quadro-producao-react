@@ -425,25 +425,21 @@ export default function Registro({ registroGrupos = [], openSet, toggleOpen }) {
         return stIni && stIni < filtroEndMs && (!stFim || stFim >= filtroStartMs)
       })
 
-      // Considera OPs que cruzam o início do filtro
-      const cruzouInicioFiltro = iniMs && iniMs < filtroStartMs && fimMs && fimMs >= filtroStartMs
+      // OP iniciada antes do período, mas ainda aberta ou reiniciada dentro do período
+      const abertaAposInicio = iniMs && iniMs < filtroStartMs && (!fimMs || fimMs >= filtroStartMs)
+      // OP reiniciada dentro do período e ainda aberta
+      const reiniciadaAberta = restartedMs && restartedMs >= filtroStartMs && restartedMs < filtroEndMs && !fimMs
 
-      // Considera OPs reiniciadas que cruzam o início do filtro
-      const cruzouRestartFiltro = restartedMs && restartedMs < filtroStartMs && (!fimMs || fimMs >= filtroStartMs)
-
-      // Considera OPs abertas por restart
-      const abertaPorRestart = restartedMs && restartedMs < filtroStartMs && !fimMs && (!o.interrupted_at || interruptedMs >= filtroStartMs)
-
-      // Se finalizou/interrompeu antes do filtro, ignora
-      const endedBeforeFilter = (fimMs && fimMs < filtroStartMs && !cruzouInicioFiltro && !cruzouRestartFiltro) || (interruptedMs && interruptedMs < filtroStartMs)
+      // Ignorar apenas se FINALIZOU antes do período e não há cruzamento/abertura
+      const endedBeforeFilter = (fimMs && fimMs < filtroStartMs && !abertaAposInicio && !reiniciadaAberta)
       if (endedBeforeFilter) return false
 
       // OPs iniciadas ou reiniciadas dentro do range
-      const startedInRange = iniMs && iniMs < filtroEndMs && (!fimMs || fimMs >= filtroStartMs)
-      const restartedInRange = restartedMs && restartedMs < filtroEndMs && (!fimMs || fimMs >= filtroStartMs)
+      const startedInRange = iniMs && iniMs >= filtroStartMs && iniMs < filtroEndMs
+      const restartedInRange = restartedMs && restartedMs >= filtroStartMs && restartedMs < filtroEndMs
       const finalizedInRange = fimMs && fimMs >= filtroStartMs && fimMs <= filtroEndMs
       const openInRange = !fimMs && (iniMs < filtroEndMs || (restartedMs && restartedMs < filtroEndMs))
-      const resultado = startedInRange || restartedInRange || finalizedInRange || openInRange || cruzouInicioFiltro || cruzouRestartFiltro || hasOpenStop || abertaPorRestart
+      const resultado = startedInRange || restartedInRange || finalizedInRange || openInRange || abertaAposInicio || reiniciadaAberta || hasOpenStop
       return resultado
     })
   }, [registroGrupos, filtroStart, filtroEnd, periodo, customStart, customEnd, tick])
@@ -567,9 +563,15 @@ export default function Registro({ registroGrupos = [], openSet, toggleOpen }) {
     }
     // Chama agregador original, mas ignora os campos de parada e baixa eficiência dele
     const aggs = calculateAggregates({ gruposPorMaquina, filtroStart, filtroEnd, maquinasConsideradas });
+    const totalLowEffH_logs = totalLowEffMs / 1000 / 60 / 60;
+    // Corrigir produção: remover loweff dos logs e repor a loweff nativa já descontada pelo agregador
+    const totalProdH_corrigido = Math.max(0, (aggs.totalProdH || 0) - totalLowEffH_logs + (aggs.totalLowEffH || 0));
     return {
       ...aggs,
-      totalLowEffH: totalLowEffMs / 1000 / 60 / 60,
+      totalProdH: totalProdH_corrigido,
+      totalLowEffH: totalLowEffH_logs,
+      // Mantém 'Sem Programação' calculado pelo agregador (evita subtração global indevida)
+      totalSemProgH: aggs.totalSemProgH,
       machineLowEffH: Object.fromEntries(Object.entries(machineLowEffMs).map(([k, v]) => [k, v / 1000 / 60 / 60])),
       totalParadaH: totalParadaMs / 1000 / 60 / 60,
       machineParadaH: Object.fromEntries(Object.entries(machineParadaMs).map(([k, v]) => [k, v / 1000 / 60 / 60]))
