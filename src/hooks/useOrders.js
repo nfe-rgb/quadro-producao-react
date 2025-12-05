@@ -134,7 +134,7 @@ export default function useOrders(){
     const { data: last, error: maxErr } = await supabase.from('orders').select('pos').eq('machine_id', form.machine_id).eq('finalized', false).order('pos',{ascending:false}).limit(1).maybeSingle()
     if (maxErr) { alert('Erro ao obter posição: ' + maxErr.message); return; }
     const nextPos = (last?.pos ?? -1) + 1
-    const novo = { machine_id: form.machine_id, code: form.code, customer: form.customer, product: form.product, color: form.color, qty: form.qty, boxes: form.boxes, standard: form.standard, due_date: form.due_date || null, notes: form.notes, status: 'AGUARDANDO', pos: nextPos, finalized:false, started_at:null, started_by:null, restarted_at:null, restarted_by:null, interrupted_at:null, interrupted_by:null, loweff_started_at:null, loweff_ended_at:null, loweff_by:null, loweff_notes:null }
+    const novo = { machine_id: form.machine_id, code: form.code, customer: form.customer, product: form.product, color: form.color, qty: form.qty, boxes: form.boxes, standard: form.standard, due_date: form.due_date || null, notes: form.notes, status: 'AGUARDANDO', pos: nextPos, finalized:false, started_at:null, started_by:null, restarted_at:null, restarted_by:null, interrupted_at:null, interrupted_by:null }
     const tempId = `tmp-${crypto.randomUUID()}`
     setOrdens(prev=>[...prev,{id:tempId, ...novo}])
     const res = await supabase.from('orders').insert([novo]).select('*').maybeSingle()
