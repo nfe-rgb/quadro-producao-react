@@ -329,8 +329,10 @@ function Filters({ periodo, setPeriodo, customStart, setCustomStart, customEnd, 
       )}
 
       <div className="select-wrap">
-        <select className="period-select" aria-label="Filtrar por máquina" value={filtroMaquina} onChange={e => setFiltroMaquina(e.target.value)}>
+        <select className="period-select" aria-label="Filtrar por máquina ou grupo" value={filtroMaquina} onChange={e => setFiltroMaquina(e.target.value)}>
           <option value="todas">Todas as máquinas</option>
+          <option value="pet">PET</option>
+          <option value="injecao">Injeção</option>
           {MAQUINAS.map(m => <option key={m} value={m}>{m}</option>)}
         </select>
       </div>
@@ -396,7 +398,19 @@ export default function Registro({ registroGrupos = [], openSet, toggleOpen }) {
   const [customEnd, setCustomEnd] = useState('')
   const [filtroMaquina, setFiltroMaquina] = useState('todas')
 
-  let maquinasConsideradas = filtroMaquina === 'todas' ? MAQUINAS : [filtroMaquina]
+  // Único filtro incluindo grupos PET/Injeção
+  const grupoPET = MAQUINAS.filter(m => String(m).toUpperCase().startsWith('P'))
+  const grupoINJ = MAQUINAS.filter(m => String(m).toUpperCase().startsWith('I'))
+  let maquinasConsideradas = MAQUINAS
+  if (filtroMaquina === 'todas') {
+    maquinasConsideradas = MAQUINAS
+  } else if (filtroMaquina === 'pet') {
+    maquinasConsideradas = grupoPET
+  } else if (filtroMaquina === 'injecao') {
+    maquinasConsideradas = grupoINJ
+  } else {
+    maquinasConsideradas = [filtroMaquina]
+  }
   maquinasConsideradas = maquinasConsideradas.filter(m => MAQUINAS.includes(m))
 
   // 1) Period range (centralizado)
@@ -447,6 +461,12 @@ export default function Registro({ registroGrupos = [], openSet, toggleOpen }) {
   // 3) Filtrar por máquina
   const gruposFiltradosMaquina = useMemo(() => {
     if (filtroMaquina === 'todas') return gruposFiltrados
+    if (filtroMaquina === 'pet') {
+      return gruposFiltrados.filter(g => String(g?.ordem?.machine_id || '').toUpperCase().startsWith('P'))
+    }
+    if (filtroMaquina === 'injecao') {
+      return gruposFiltrados.filter(g => String(g?.ordem?.machine_id || '').toUpperCase().startsWith('I'))
+    }
     return gruposFiltrados.filter(g => String(g?.ordem?.machine_id || 'SEM MÁQ.') === String(filtroMaquina))
   }, [gruposFiltrados, filtroMaquina, tick])
 
@@ -661,7 +681,10 @@ export default function Registro({ registroGrupos = [], openSet, toggleOpen }) {
           <div className="row muted" style={{ padding: '32px 0', textAlign: 'center', fontSize: 18 }}>Nenhum registro encontrado para o período selecionado.</div>
         ) : (
           MAQUINAS.map(m => {
-            if (filtroMaquina !== 'todas' && m !== filtroMaquina) return null
+            // Aplicar filtro único
+            if (filtroMaquina === 'pet' && !String(m).toUpperCase().startsWith('P')) return null
+            if (filtroMaquina === 'injecao' && !String(m).toUpperCase().startsWith('I')) return null
+            if (filtroMaquina !== 'todas' && filtroMaquina !== 'pet' && filtroMaquina !== 'injecao' && m !== filtroMaquina) return null
             const grupos = (gruposPorMaquina[m] || []).slice().sort((a, b) => tsOP(b.ordem) - tsOP(a.ordem))
             const aberto = openMachines.has(m)
             return (
