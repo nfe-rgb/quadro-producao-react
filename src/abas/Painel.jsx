@@ -390,36 +390,6 @@ export default function Painel({
                           onChange={async (e) => {
                             const novoStatus = e.target.value;
                             const prevStatus = ativa?.status;
-
-                            // Se entrou em BAIXA_EFICIENCIA -> INSERE log
-                            if (prevStatus !== "BAIXA_EFICIENCIA" && novoStatus === "BAIXA_EFICIENCIA") {
-                              try {
-                                // started_by poderia ser o usuário logado; aqui deixamos null (ajuste se tiver user context)
-                                await insertLowEfficiencyLog({
-                                  order_id: ativa?.id ?? null,
-                                  machine_id: m,
-                                  started_by: null,
-                                  notes: null,
-                                });
-                              } catch (err) {
-                                console.error("Falha ao inserir baixa eficiência:", err);
-                              }
-                            }
-
-                            // Se saiu de BAIXA_EFICIENCIA -> ENCERRA log(s)
-                            if (prevStatus === "BAIXA_EFICIENCIA" && novoStatus !== "BAIXA_EFICIENCIA") {
-                              try {
-                                await endLowEfficiencyLog({
-                                  order_id: ativa?.id ?? null,
-                                  machine_id: m,
-                                  ended_by: null,
-                                  notes: null,
-                                });
-                              } catch (err) {
-                                console.error("Falha ao encerrar baixa eficiência:", err);
-                              }
-                            }
-
                             // chama callback pai para atualizar status (mantém comportamento atual)
                             try {
                               onStatusChange(ativa, novoStatus);

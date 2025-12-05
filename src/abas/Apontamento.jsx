@@ -4,7 +4,7 @@ import { MAQUINAS } from '../lib/constants';
 import { fmtDateTime, getTurnoAtual } from '../lib/utils';
 import { calcularHorasParadasPorTurno, formatMsToHHmm } from '../lib/paradasPorTurno';
 import '../styles/Apontamento.css';
-// import '../styles/registro.css'; // mantenha se necessário
+
 
 const TURNOS = [
   { key: '1', label: 'Turno 1' },
