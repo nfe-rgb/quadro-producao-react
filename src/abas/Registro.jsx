@@ -487,6 +487,7 @@ export default function Registro({ registroGrupos = [], openSet, toggleOpen }) {
     const filtroStartMs = filtroStart ? filtroStart.getTime() : null;
     const filtroEndMs = filtroEnd ? filtroEnd.getTime() : null;
     const machineLowEffMs = {};
+    const machineLowEffNoStopMs = {};
     const machineParadaMs = {};
     let totalLowEffMs = 0;
     let totalParadaMs = 0;
@@ -536,8 +537,13 @@ export default function Registro({ registroGrupos = [], openSet, toggleOpen }) {
       }
       const paradaUnida = unir(paradaIntervals);
       const lowEffUnida = unir(lowEffIntervals);
-      // 1. Baixa eficiência: desconta trechos de parada
+      // 1. Baixa eficiência integral dos logs (para exibição)
       let lowEffMs = 0;
+      for (const [leIni, leFim] of lowEffUnida) {
+        if (leFim > leIni) lowEffMs += Math.max(0, leFim - leIni);
+      }
+      // 1a. Baixa eficiência sem sobreposição com parada (para ajuste de produção)
+      let lowEffNoStopMs = 0;
       for (const [leIni, leFim] of lowEffUnida) {
         let fatias = [[leIni, leFim]];
         for (const [pIni, pFim] of paradaUnida) {
@@ -553,10 +559,10 @@ export default function Registro({ registroGrupos = [], openSet, toggleOpen }) {
           fatias = novasFatias;
         }
         for (const [fIni, fFim] of fatias) {
-          if (fFim > fIni) lowEffMs += Math.max(0, fFim - fIni);
+          if (fFim > fIni) lowEffNoStopMs += Math.max(0, fFim - fIni);
         }
       }
-      // 2. Parada: desconta trechos de baixa eficiência
+      // 2. Parada: desconta trechos de baixa eficiência (mantém exclusão para não duplicar parada)
       let paradaMs = 0;
       for (const [pIni, pFim] of paradaUnida) {
         let fatias = [[pIni, pFim]];
@@ -577,6 +583,7 @@ export default function Registro({ registroGrupos = [], openSet, toggleOpen }) {
         }
       }
       machineLowEffMs[m] = lowEffMs;
+      machineLowEffNoStopMs[m] = lowEffNoStopMs;
       machineParadaMs[m] = paradaMs;
       totalLowEffMs += lowEffMs;
       totalParadaMs += paradaMs;
@@ -584,8 +591,10 @@ export default function Registro({ registroGrupos = [], openSet, toggleOpen }) {
     // Chama agregador original, mas ignora os campos de parada e baixa eficiência dele
     const aggs = calculateAggregates({ gruposPorMaquina, filtroStart, filtroEnd, maquinasConsideradas });
     const totalLowEffH_logs = totalLowEffMs / 1000 / 60 / 60;
-    // Corrigir produção: remover loweff dos logs e repor a loweff nativa já descontada pelo agregador
-    const totalProdH_corrigido = Math.max(0, (aggs.totalProdH || 0) - totalLowEffH_logs + (aggs.totalLowEffH || 0));
+    // Ajustar produção: subtrair apenas o delta de baixa eficiência (sem parada) que não foi considerado pelo agregador nativo
+    const totalLowEffNoStopH_logs = Object.values(machineLowEffNoStopMs).reduce((acc, ms) => acc + ms, 0) / 1000 / 60 / 60;
+    const deltaLowEffNoStopH = Math.max(0, totalLowEffNoStopH_logs - (aggs.totalLowEffH || 0));
+    const totalProdH_corrigido = Math.max(0, (aggs.totalProdH || 0) - deltaLowEffNoStopH);
     return {
       ...aggs,
       totalProdH: totalProdH_corrigido,
