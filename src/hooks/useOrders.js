@@ -175,6 +175,46 @@ export default function useOrders(){
     const iso = localDateTimeToISO(payload.data, payload.hora)
     const p = { finalized:true, finalized_by: payload.por, finalized_at: iso }
     const before = ordens.find(o=>o.id===ordem.id)
+
+    // Se houver baixa eficiência aberta, encerra o log no mesmo timestamp da finalização
+    try {
+      if (ordem.status === 'BAIXA_EFICIENCIA') {
+        const key = `order_${ordem.id}`
+        const sessionId = lowEffSessions?.[key]
+        if (sessionId) {
+          const upd = await supabase.from('low_efficiency_logs').update({ ended_at: iso }).eq('id', sessionId)
+          if (upd.error) {
+            // fallback: encerra por order_id quaisquer registros abertos
+            await supabase.from('low_efficiency_logs').update({ ended_at: iso }).eq('order_id', ordem.id).is('ended_at', null)
+          } else {
+            // remove mapeamento local
+            setLowEffSessions(prev => { const c = { ...prev }; delete c[key]; return c })
+          }
+        } else {
+          // fallback direto
+          await supabase.from('low_efficiency_logs').update({ ended_at: iso }).eq('order_id', ordem.id).is('ended_at', null)
+        }
+      }
+    } catch (e) {
+      console.warn('Falha ao encerrar baixa eficiência ao finalizar ordem:', e)
+    }
+
+    // Se houver PARADA aberta, encerra (resumed_at) no mesmo timestamp da finalização
+    try {
+      if (ordem.status === 'PARADA') {
+        const sel = await supabase.from('machine_stops').select('*')
+          .eq('order_id', ordem.id).is('resumed_at', null)
+          .order('started_at', { ascending:false })
+          .limit(1).maybeSingle()
+        if (sel.data) {
+          await supabase.from('machine_stops').update({ resumed_by: payload.por || 'Sistema', resumed_at: iso })
+            .eq('id', sel.data.id)
+        }
+      }
+    } catch (e) {
+      console.warn('Falha ao encerrar parada ao finalizar ordem:', e)
+    }
+
     removeOrdemLocal(ordem.id)
     upsertFinalizadaLocal({...ordem,...p})
     const res = await supabase.from('orders').update(p).eq('id', ordem.id).select('*').maybeSingle()
@@ -245,6 +285,25 @@ export default function useOrders(){
         if (sel.data) {
           await supabase.from('machine_stops').update({ resumed_by: operador || 'Sistema', resumed_at: agoraISO })
             .eq('id', sel.data.id);
+        }
+      }
+      // Se status atual é BAIXA_EFICIENCIA, encerra o log aberto
+      if (ativa.status === 'BAIXA_EFICIENCIA') {
+        try {
+          const key = `order_${ativa.id}`
+          const sessionId = lowEffSessions?.[key]
+          if (sessionId) {
+            const upd = await supabase.from('low_efficiency_logs').update({ ended_at: agoraISO }).eq('id', sessionId)
+            if (upd.error) {
+              await supabase.from('low_efficiency_logs').update({ ended_at: agoraISO }).eq('order_id', ativa.id).is('ended_at', null)
+            } else {
+              setLowEffSessions(prev => { const c = { ...prev }; delete c[key]; return c })
+            }
+          } else {
+            await supabase.from('low_efficiency_logs').update({ ended_at: agoraISO }).eq('order_id', ativa.id).is('ended_at', null)
+          }
+        } catch (e) {
+          console.warn('Erro ao encerrar baixa eficiência ao enviar para fila:', e)
         }
       }
       const r = await supabase.from('orders').update({

@@ -1,5 +1,4 @@
 // src/pages/Painel.jsx
-// Referência imagem (seu upload): /mnt/data/45ae41a0-02b0-40d7-8afc-a887077261a1.png
 
 import React, { useEffect, useState } from "react";
 import Etiqueta from "../components/Etiqueta";
@@ -26,7 +25,7 @@ export default function Painel({
   setStartModal,
   setFinalizando,
   lastFinalizadoPorMaquina,
-  metaPercent = 3.7,
+  metaPercent = 20,
   onScanned, // opcional: callback do pai para re-fetch geral
 }) {
   const pct = Math.max(0, Math.min(100, Math.round(metaPercent)));
