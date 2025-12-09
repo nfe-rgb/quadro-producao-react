@@ -1,4 +1,5 @@
 import { useEffect, useState, useMemo } from 'react';
+import { DateTime } from 'luxon';
 import { supabase } from '../lib/supabaseClient';
 import { MAQUINAS } from '../lib/constants';
 import { fmtDateTime, getTurnoAtual } from '../lib/utils';
@@ -19,42 +20,51 @@ export default function Apontamento() {
   const [paradas, setParadas] = useState([]); // Paradas de máquina
   const [turnoFiltro, setTurnoFiltro] = useState('todos');
   const [periodo, setPeriodo] = useState('hoje');
-  const [customStart, setCustomStart] = useState('');
-  const [customEnd, setCustomEnd] = useState('');
+  const [selectedDate, setSelectedDate] = useState('');
   const [caixasAbertas, setCaixasAbertas] = useState({});
   const [bipadasAnim, setBipadasAnim] = useState({});
   const [refugoAnim, setRefugoAnim] = useState({});
   const [paradasAnim, setParadasAnim] = useState({});
 
   function getPeriodoRange(p) {
-    const now = new Date();
-    let start = null, end = null;
+    // Todas as janelas são baseadas no fuso America/Sao_Paulo,
+    // e convertidas para UTC para consulta no Supabase.
+    const nowZ = DateTime.now().setZone('America/Sao_Paulo');
+    let startZ = null;
+    let endZ = null;
     if (p === 'hoje') {
-      start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
-      end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+      startZ = nowZ.startOf('day');
+      endZ = nowZ.endOf('day');
     } else if (p === 'ontem') {
-      const ontem = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, 0, 0, 0, 0);
-      start = new Date(ontem.getFullYear(), ontem.getMonth(), ontem.getDate(), 0, 0, 0, 0);
-      end = new Date(ontem.getFullYear(), ontem.getMonth(), ontem.getDate(), 23, 59, 59, 999);
+      const ontemZ = nowZ.minus({ days: 1 });
+      startZ = ontemZ.startOf('day');
+      endZ = ontemZ.endOf('day');
     } else if (p === 'semana') {
-      const day = now.getDay() === 0 ? 7 : now.getDay();
-      const monday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - (day - 1), 0, 0, 0, 0);
-      start = monday;
-      end = now;
+      // início da semana (segunda) no fuso BR
+      const mondayZ = nowZ.startOf('week');
+      startZ = mondayZ;
+      endZ = nowZ;
     } else if (p === 'mes') {
-      start = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
-      end = now;
+      startZ = nowZ.startOf('month');
+      endZ = nowZ;
     } else if (p === 'mespassado') {
-      start = new Date(now.getFullYear(), now.getMonth() - 1, 1, 0, 0, 0, 0);
-      end = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+      const lastMonthZ = nowZ.minus({ months: 1 });
+      startZ = lastMonthZ.startOf('month');
+      endZ = lastMonthZ.endOf('month');
     } else if (p === 'custom') {
-      start = customStart ? new Date(customStart) : null;
-      end = customEnd ? new Date(customEnd) : null;
+      if (selectedDate) {
+        // selectedDate vem como 'YYYY-MM-DD'
+        const dZ = DateTime.fromISO(selectedDate, { zone: 'America/Sao_Paulo' });
+        startZ = dZ.startOf('day');
+        endZ = dZ.endOf('day');
+      }
     }
+    const start = startZ ? startZ.toUTC().toJSDate() : null;
+    const end = endZ ? endZ.toUTC().toJSDate() : null;
     return { start, end };
   }
 
-  const periodoRange = useMemo(() => getPeriodoRange(periodo), [periodo, customStart, customEnd]);
+  const periodoRange = useMemo(() => getPeriodoRange(periodo), [periodo, selectedDate]);
   const filtroStart = periodoRange.start;
   const filtroEnd = periodoRange.end;
 
@@ -267,8 +277,12 @@ export default function Apontamento() {
 
           {periodo === 'custom' && (
             <div className="custom-dates">
-              <input className="date-input" type="date" value={customStart} onChange={e => setCustomStart(e.target.value)} />
-              <input className="date-input" type="date" value={customEnd} onChange={e => setCustomEnd(e.target.value)} />
+              <input
+                className="date-input"
+                type="date"
+                value={selectedDate}
+                onChange={e => setSelectedDate(e.target.value)}
+              />
             </div>
           )}
 
