@@ -213,37 +213,27 @@ export default function Apontamento() {
       Object.keys(porTurno[turnoKey]).forEach(maq => {
         const dados = porTurno[turnoKey][maq];
 
-        // primeiro, tenta pegar padrão a partir de alguma O.S associada às caixas (usa a primeira com standard)
-        let padraoFromOrder = null;
-        for (const c of (dados.caixas || [])) {
-          if (c.order && (c.order.standard !== undefined && c.order.standard !== null)) {
-            padraoFromOrder = c.order.standard;
-            break;
-          }
-        }
-
-        // fallback: procurar em ordersMap por heurística (p.ex. se existe uma order com boxes que combine)
-        // (normalmente não necessário porque buscamos por order_id, mas mantemos a lógica)
-        if (padraoFromOrder == null && Object.keys(ordersMap).length > 0) {
-          const maybe = Object.values(ordersMap).find(o => o && (o.standard !== undefined && o.standard !== null));
-          if (maybe) padraoFromOrder = maybe.standard;
-        }
-
-        // fallback: MAQUINAS constantes
+        // Determinar produção considerando o padrão de cada caixa individualmente.
+        // Quando não houver padrão na O.S da caixa, usa o padrão da máquina como fallback.
         const maqDef = MAQUINAS && MAQUINAS[maq];
-        const padraoFromConst = (maqDef && (maqDef.padrao_por_caixa ?? maqDef.padrao ?? maqDef.piecesPerBox ?? maqDef.pieces_per_box)) ?? null;
+        const padraoFromConst = (maqDef && (maqDef.padrao_por_caixa ?? maqDef.padrao ?? maqDef.piecesPerBox ?? maqDef.pieces_per_box)) ?? 0;
 
-        const padrao = Number(padraoFromOrder ?? padraoFromConst ?? 1) || 1;
-        dados.padraoPorCaixa = padrao;
+        let somaPecas = 0;
+        const standardsSet = new Set();
+        for (const c of (dados.caixas || [])) {
+          const std = Number((c.order && c.order.standard != null) ? c.order.standard : padraoFromConst) || 0;
+          somaPecas += std;
+          if (std > 0) standardsSet.add(std);
+        }
 
-        const caixasCount = (dados.caixas || []).length;
-        const producaoPecas = caixasCount * dados.padraoPorCaixa;
-        dados.producaoPecas = producaoPecas;
+        dados.producaoPecas = somaPecas;
+        // Se todos os padrões forem iguais, mantém para exibição. Caso contrário, sinaliza como variados.
+        dados.padraoPorCaixa = standardsSet.size === 1 ? Number([...standardsSet][0]) : null;
 
         const refugoPecas = Number(dados.refugo) || 0;
         let pct = 0;
-        if (producaoPecas > 0) {
-          pct = (refugoPecas / (producaoPecas + refugoPecas)) * 100;
+        if (dados.producaoPecas > 0) {
+          pct = (refugoPecas / (dados.producaoPecas + refugoPecas)) * 100;
         }
         dados.refugoPct = Number.isFinite(pct) ? Number(pct.toFixed(2)) : 0;
       });
@@ -391,7 +381,7 @@ export default function Apontamento() {
                                 )}
 
                                 <div style={{ marginTop: 8, fontSize: 13, color: '#444' }}>
-                                  <b>Produção Realizada (peças):</b> {dados.producaoPecas} (padrão {dados.padraoPorCaixa}/caixa)
+                                  <b>Produção Realizada (peças):</b> {dados.producaoPecas} {dados.padraoPorCaixa != null ? `(padrão ${dados.padraoPorCaixa}/caixa)` : `(padrões variados)`}
                                 </div>
                               </div>
 
