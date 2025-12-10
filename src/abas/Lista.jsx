@@ -19,6 +19,7 @@ export default function Lista({
   setFinalizando,
   enviarParaFila,     // agora vamos chamar com { operador, data, hora }
   refreshOrdens,      // opcional
+  isAdmin = false,
 }) {
   // 🔶 Modal de confirmação "Enviar para fila / interromper"
   const [confirmInt, setConfirmInt] = useState(null)
@@ -142,14 +143,18 @@ await supabase.rpc('reorder_machine_queue', {
                                 hora: nowBr.toFormat("HH:mm"),
                               })
                             }}>Iniciar Produção</button>
-                            <button className="btn" onClick={() => setEditando(ativa)}>Editar</button>
+                            {isAdmin && (
+                              <button className="btn" onClick={() => setEditando(ativa)}>Editar</button>
+                            )}
                             {/* 🚚 agora abre modal de confirmação */}
                             <button className="btn" onClick={() => abrirModalInterromper(ativa)}>Enviar para fila</button>
                           </>
                         ) : (
                           <>
                             <button className="btn" onClick={() => setFinalizando(ativa)}>Finalizar</button>
-                            <button className="btn" onClick={() => setEditando(ativa)}>Editar</button>
+                            {isAdmin && (
+                              <button className="btn" onClick={() => setEditando(ativa)}>Editar</button>
+                            )}
                             {/* 🚚 agora abre modal de confirmação */}
                             <button className="btn" onClick={() => abrirModalInterromper(ativa)}>Enviar para fila</button>
                           </>
@@ -165,7 +170,7 @@ await supabase.rpc('reorder_machine_queue', {
               <div className="cell-fila">
                 {fila.length === 0 ? (
                   <div className="fila"><div className="muted">Sem itens na fila</div></div>
-                ) : (
+                ) : isAdmin ? (
                   <DndContext
                     sensors={sensors}
                     onDragEnd={(e) => moverNaFila(m, e)}
@@ -178,14 +183,29 @@ await supabase.rpc('reorder_machine_queue', {
                             key={f.id}
                             ordem={f}
                             onEdit={() => setEditando(f)}
-                            etiquetaVariant="fila"   // ✅ usa a etiqueta compacta com O.P dentro
-                            // 🔶 pinta amarelo se foi interrompida
+                            etiquetaVariant="fila"
                             highlightInterrompida={f.status === 'AGUARDANDO' && !!f.interrupted_at}
+                            canReorder={true}
+                            canEdit={isAdmin}
                           />
                         ))}
                       </div>
                     </SortableContext>
                   </DndContext>
+                ) : (
+                  <div className="fila">
+                    {fila.map(f => (
+                      <FilaSortableItem
+                        key={f.id}
+                        ordem={f}
+                        onEdit={() => setEditando(f)}
+                        etiquetaVariant="fila"
+                        highlightInterrompida={f.status === 'AGUARDANDO' && !!f.interrupted_at}
+                        canReorder={false}
+                        canEdit={false}
+                      />
+                    ))}
+                  </div>
                 )}
               </div>
             </div>

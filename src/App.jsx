@@ -64,6 +64,24 @@ export default function App(){
 
   const location = useLocation();
 
+  // Atalhos de teclado: Ctrl+L (Login) e Ctrl+I (Cadastro Itens)
+  useEffect(() => {
+    const onKey = (e) => {
+      const ctrl = e.ctrlKey || e.metaKey; // permitir Cmd no Mac
+      if (!ctrl) return;
+      const key = String(e.key).toLowerCase();
+      if (key === 'l') {
+        e.preventDefault();
+        setTab('login');
+      } else if (key === 'i') {
+        e.preventDefault();
+        setTab('admin-itens');
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
   // central handler: recebe instrução do hook onStatusChange e abre modais localmente
   async function handleStatusChange(ordem, targetStatus){
     const res = await onStatusChange(ordem, targetStatus)
@@ -220,7 +238,9 @@ export default function App(){
       <div className="tabs">
         <button className={`tabbtn ${tab==='painel'?'active':''}`} onClick={()=>setTab('painel')}>Painel</button>
         <button className={`tabbtn ${tab==='lista'?'active':''}`} onClick={()=>setTab('lista')}>Lista</button>
-        <button className={`tabbtn ${tab==='nova'?'active':''}`} onClick={()=>setTab('nova')}>Nova Ordem</button>
+        {isAdmin && (
+          <button className={`tabbtn ${tab==='nova'?'active':''}`} onClick={()=>setTab('nova')}>Nova Ordem</button>
+        )}
         <button className={`tabbtn ${tab==='registro'?'active':''}`} onClick={()=>setTab('registro')}>Registro</button>
         <button className={`tabbtn ${tab==='apontamento'?'active':''}`} onClick={()=>setTab('apontamento')}>Apontamento</button>
       </div>
@@ -233,7 +253,7 @@ export default function App(){
             <CadastroItens />
           ) : (
             <div style={{ padding: 24 }}>
-              <h3>Não encontrado</h3>
+              <h2>Acesso Negado</h2>
               <p>Esta página não está disponível.</p>
             </div>
           )
@@ -267,11 +287,19 @@ export default function App(){
           setFinalizando={setFinalizando}
           enviarParaFila={enviarParaFila}
           refreshOrdens={fetchOrdensAbertas}
+          isAdmin={isAdmin}
         />
       )}
 
       {tab === 'nova' && (
-        <NovaOrdem form={form} setForm={setForm} criarOrdem={() => criarOrdem(form, setForm, setTab)} />
+        isAdmin ? (
+          <NovaOrdem form={form} setForm={setForm} criarOrdem={() => criarOrdem(form, setForm, setTab)} />
+        ) : (
+          <div style={{ padding: 24 }}>
+            <h2>Acesso Negado</h2>
+            <p>Esta página não está disponível.</p>
+          </div>
+        )
       )}
 
       {tab === 'registro' && (
@@ -279,7 +307,7 @@ export default function App(){
       )}
 
       {tab === 'apontamento' && (
-        <Apontamento />
+        <Apontamento isAdmin={isAdmin} />
       )}
 
       {/* Modais centralizados */}

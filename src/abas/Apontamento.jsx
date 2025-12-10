@@ -5,6 +5,25 @@ import { MAQUINAS } from '../lib/constants';
 import { fmtDateTime, getTurnoAtual } from '../lib/utils';
 import { calcularHorasParadasPorTurno, formatMsToHHmm } from '../lib/paradasPorTurno';
 import '../styles/Apontamento.css';
+import Modal from '../components/Modal';
+// Motivos padrão de refugo (mesmos usados em Pet01)
+const REFUGO_MOTIVOS = [
+  'Troca de Cor',
+  'Regulagem',
+  'Rebarba',
+  'Bolha',
+  'Contaminação ou Caídas no Chão',
+  'Ponto de Injeção Alto ou Deslocado',
+  'Sujas de Óleo',
+  'Fora de Cor',
+  'Parede Fraca',
+  'Fundo/Ombro Deformado',
+  'Peças falhadas',
+  'Peças Furadas',
+  'Fiapo',
+  'Queimadas',
+  'Manchadas',
+];
 
 
 const TURNOS = [
@@ -13,10 +32,11 @@ const TURNOS = [
   { key: '3', label: 'Turno 3' },
 ];
 
-export default function Apontamento() {
+export default function Apontamento({ isAdmin = false }) {
   const [bipagens, setBipagens] = useState([]);
   const [refugos, setRefugos] = useState([]);
   const [orders, setOrders] = useState([]); // O.S relevantes
+  const [ordersAll, setOrdersAll] = useState([]); // Todas as O.S registradas
   const [paradas, setParadas] = useState([]); // Paradas de máquina
   const [turnoFiltro, setTurnoFiltro] = useState('todos');
   const [periodo, setPeriodo] = useState('hoje');
@@ -25,6 +45,15 @@ export default function Apontamento() {
   const [bipadasAnim, setBipadasAnim] = useState({});
   const [refugoAnim, setRefugoAnim] = useState({});
   const [paradasAnim, setParadasAnim] = useState({});
+  const [manualOpen, setManualOpen] = useState(false);
+  const [manualForm, setManualForm] = useState({
+    date: DateTime.now().setZone('America/Sao_Paulo').toISODate(),
+    machine: '',
+    turno: '',
+    osCode: '',
+    goodQty: '',
+    scrapEntries: [{ qty: '', reason: '' }],
+  });
 
   function getPeriodoRange(p) {
     // Todas as janelas são baseadas no fuso America/Sao_Paulo,
@@ -151,6 +180,25 @@ export default function Apontamento() {
     }
 
     fetchData();
+    // Busca todas as O.S registradas (independente de bipagens/refugos no período)
+    async function fetchAllOrders() {
+      try {
+        const { data, error } = await supabase
+          .from('orders')
+          .select('id, code, standard, created_at, boxes')
+          .order('created_at', { ascending: false });
+        if (error) {
+          console.warn('Erro ao buscar todas as orders:', error);
+          if (mounted) setOrdersAll([]);
+        } else if (mounted) {
+          setOrdersAll(data || []);
+        }
+      } catch (err) {
+        console.error('Exception ao buscar todas as orders:', err);
+        if (mounted) setOrdersAll([]);
+      }
+    }
+    fetchAllOrders();
     return () => { mounted = false; };
   }, [filtroStart, filtroEnd]);
   // Calcular horas paradas por turno/máquina
@@ -168,7 +216,7 @@ export default function Apontamento() {
     const porTurno = {};
     TURNOS.forEach(t => {
       porTurno[t.key] = {};
-      ['P1','P2','P3'].forEach(maq => {
+      MAQUINAS.forEach(maq => {
         porTurno[t.key][maq] = {
           bipadas: 0,
           refugo: 0,
@@ -246,7 +294,14 @@ export default function Apontamento() {
   return (
     <div className="apontamento-card card registro-wrap">
       <div className="card-inner">
-        <div className="apontamento-title label">Apontamentos por Turno</div>
+        <div className="apontamento-title label" style={{ display: 'flex', alignItems: 'center' }}>
+          Apontamentos por Turno
+          {isAdmin && (
+            <div style={{ marginLeft: 'auto' }}>
+              <button className="btn" onClick={() => setManualOpen(true)}>Apontar Produção</button>
+            </div>
+          )}
+        </div>
 
         <div className="apontamento-controls">
           <div className="select-wrap">
@@ -291,7 +346,7 @@ export default function Apontamento() {
         </div> 
           <div className="apontamento-content">
             <div className="maquinas-column">
-              {['P1','P2','P3'].map(maq => (
+              {MAQUINAS.map(maq => (
                 <div key={maq} className="maquina-card card">
                   <div className="maquina-header">{maq}</div>
 
@@ -333,7 +388,11 @@ export default function Apontamento() {
                             title="Clique para ver registros por hora"
                             role="button"
                           >
-                            Caixas bipadas: <span className="destaque-value">{dados.bipadas}</span>
+                            {/^I[1-6]$/.test(maq) ? (
+                              <>Peças Boas: <span className="destaque-value">{dados.producaoPecas}</span></>
+                            ) : (
+                              <>Caixas bipadas: <span className="destaque-value">{dados.bipadas}</span></>
+                            )}
                           </div>
 
 
@@ -407,6 +466,166 @@ export default function Apontamento() {
               ))}
             </div>
           </div>
+        {/* Modal de Apontamento Manual */}
+        <Modal open={manualOpen} onClose={() => setManualOpen(false)} title="Apontar Produção Manual">
+          <div className="grid2" style={{ gap: 12 }}>
+            <label className="label">
+              Data
+              <input
+                type="date"
+                className="input"
+                value={manualForm.date}
+                onChange={(e) => setManualForm((f) => ({ ...f, date: e.target.value }))}
+              />
+            </label>
+
+            <label className="label">
+              Máquina
+              <select
+                className="select"
+                value={manualForm.machine}
+                onChange={(e) => setManualForm((f) => ({ ...f, machine: e.target.value }))}
+              >
+                <option value="">Selecione...</option>
+                {MAQUINAS.filter((m) => /^I[1-6]$/.test(m)).map((m) => (
+                  <option key={m} value={m}>{m}</option>
+                ))}
+              </select>
+            </label>
+
+            <label className="label">
+              Turno
+              <select
+                className="select"
+                value={manualForm.turno}
+                onChange={(e) => setManualForm((f) => ({ ...f, turno: e.target.value }))}
+              >
+                <option value="">Selecione...</option>
+                {TURNOS.map((t) => (
+                  <option key={t.key} value={t.key}>{t.label}</option>
+                ))}
+              </select>
+            </label>
+
+            <label className="label" style={{ gridColumn: '1 / -1' }}>
+              O.S
+              <select
+                className="select"
+                value={manualForm.osCode}
+                onChange={(e) => setManualForm((f) => ({ ...f, osCode: e.target.value }))}
+              >
+                <option value="">Selecione...</option>
+                {Array.from(new Set((ordersAll || []).map((o) => o?.code))).filter(Boolean).map((code) => (
+                  <option key={code} value={code}>{code}</option>
+                ))}
+              </select>
+            </label>
+
+            <label className="label">
+              Peças Boas
+              <input
+                type="number"
+                min="0"
+                className="input"
+                value={manualForm.goodQty}
+                onChange={(e) => setManualForm((f) => ({ ...f, goodQty: e.target.value }))}
+              />
+            </label>
+
+            <div className="label" style={{ gridColumn: '1 / -1' }}>
+              Refugo
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: 8, marginTop: 6 }}>
+                {manualForm.scrapEntries.map((entry, idx) => (
+                  <>
+                    <input
+                      key={`qty-${idx}`}
+                      type="number"
+                      min="0"
+                      className="input"
+                      placeholder="Refugo Peças"
+                      value={entry.qty}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setManualForm((f) => {
+                          const next = [...f.scrapEntries];
+                          next[idx] = { ...next[idx], qty: val };
+                          return { ...f, scrapEntries: next };
+                        });
+                      }}
+                    />
+                    <select
+                      key={`reason-${idx}`}
+                      className="select"
+                      value={entry.reason}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setManualForm((f) => {
+                          const next = [...f.scrapEntries];
+                          next[idx] = { ...next[idx], reason: val };
+                          return { ...f, scrapEntries: next };
+                        });
+                      }}
+                    >
+                      <option value="">Motivo Refugo</option>
+                      {REFUGO_MOTIVOS.map((mot) => (
+                        <option key={mot} value={mot}>{mot}</option>
+                      ))}
+                    </select>
+                    <button
+                      key={`add-${idx}`}
+                      type="button"
+                      className="btn"
+                      onClick={() =>
+                        setManualForm((f) => ({
+                          ...f,
+                          scrapEntries: [...f.scrapEntries, { qty: '', reason: '' }],
+                        }))
+                      }
+                      title="Adicionar outro apontamento de refugo"
+                    >
+                      +
+                    </button>
+                  </>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div className="flex" style={{ justifyContent: 'flex-end', gap: 8, marginTop: 12 }}>
+            <button className="btn" onClick={() => setManualOpen(false)}>Cancelar</button>
+            <button
+              className="btn"
+              onClick={async () => {
+                const payload = {
+                  date: manualForm.date,
+                  machine: manualForm.machine,
+                  turno: manualForm.turno,
+                  osCode: manualForm.osCode,
+                  goodQty: Number(manualForm.goodQty || 0),
+                  scrapEntries: (manualForm.scrapEntries || [])
+                    .map((e) => ({ qty: Number(e.qty || 0), reason: (e.reason || '').trim() }))
+                    .filter((e) => e.qty > 0 && e.reason.length > 0),
+                };
+                try {
+                  console.log('Apontamento manual:', payload);
+                  setManualOpen(false);
+                  setManualForm({
+                    date: DateTime.now().setZone('America/Sao_Paulo').toISODate(),
+                    machine: '',
+                    turno: '',
+                    osCode: '',
+                    goodQty: '',
+                    scrapEntries: [{ qty: '', reason: '' }],
+                  });
+                } catch (err) {
+                  console.warn('Falha ao registrar apontamento manual', err);
+                }
+              }}
+            >
+              Registrar
+            </button>
+          </div>
+        </Modal>
       </div>
     </div>
   );

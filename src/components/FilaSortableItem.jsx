@@ -9,9 +9,11 @@ export default function FilaSortableItem({
   etiquetaVariant = 'fila',
   // 🔶 nova prop para pintar amarelo quando for produção interrompida
   highlightInterrompida = false,
+  canReorder = true,
+  canEdit = true,
 }) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
-    useSortable({ id: ordem.id })
+  const sortable = useSortable({ id: ordem.id })
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = sortable
 
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -24,12 +26,18 @@ export default function FilaSortableItem({
 
   return (
     <div ref={setNodeRef} style={style} className={className}>
-      <button className="drag-handle" {...attributes} {...listeners} title="Arrastar">⠿</button>
+      {canReorder ? (
+        <button className="drag-handle" {...attributes} {...listeners} title="Arrastar">⠿</button>
+      ) : (
+        <div className="drag-handle" style={{ visibility: 'hidden' }}>⠿</div>
+      )}
       <div className="fila-content">
         <Etiqueta o={ordem} variant={etiquetaVariant} />
 
         <div className="sep"></div>
-        <button className="btn" onClick={onEdit}>Editar</button>
+        {canEdit && (
+          <button className="btn" onClick={onEdit}>Editar</button>
+        )}
       </div>
     </div>
   )
