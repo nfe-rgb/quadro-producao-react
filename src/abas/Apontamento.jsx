@@ -39,6 +39,7 @@ export default function Apontamento({ isAdmin = false }) {
   const [ordersAll, setOrdersAll] = useState([]); // Todas as O.S registradas
   const [paradas, setParadas] = useState([]); // Paradas de máquina
   const [turnoFiltro, setTurnoFiltro] = useState('todos');
+  const [filtroMaquina, setFiltroMaquina] = useState('todas');
   const [periodo, setPeriodo] = useState('hoje');
   const [selectedDate, setSelectedDate] = useState('');
   const [caixasAbertas, setCaixasAbertas] = useState({});
@@ -203,6 +204,16 @@ export default function Apontamento({ isAdmin = false }) {
   }, [filtroStart, filtroEnd]);
   // Calcular horas paradas por turno/máquina
   const horasParadasPorTurno = useMemo(() => calcularHorasParadasPorTurno(paradas, TURNOS, filtroStart, filtroEnd), [paradas, filtroStart, filtroEnd]);
+  // Listas de máquinas por setor, como em Registro.jsx
+  const grupoPET = useMemo(() => MAQUINAS.filter(m => String(m).toUpperCase().startsWith('P')), []);
+  const grupoINJ = useMemo(() => MAQUINAS.filter(m => String(m).toUpperCase().startsWith('I')), []);
+  let maquinasConsideradas = useMemo(() => {
+    if (filtroMaquina === 'todas') return MAQUINAS;
+    if (filtroMaquina === 'pet') return grupoPET;
+    if (filtroMaquina === 'injecao') return grupoINJ;
+    return MAQUINAS.filter(m => String(m) === String(filtroMaquina));
+  }, [filtroMaquina]);
+  maquinasConsideradas = maquinasConsideradas.filter(m => MAQUINAS.includes(m));
 
   // mapa por id para lookup rápido
   const ordersMap = useMemo(() => {
@@ -343,10 +354,23 @@ export default function Apontamento({ isAdmin = false }) {
               ))}
             </select>
           </div>
+
+          <div className="select-wrap">
+            <select
+              className="period-select"
+              aria-label="Filtrar por máquina ou grupo"
+              value={filtroMaquina}
+              onChange={e => setFiltroMaquina(e.target.value)}
+            >
+              <option value="todas">Todas as máquinas</option>
+              <option value="pet">PET</option>
+              <option value="injecao">Injeção</option>
+            </select>
+          </div>
         </div> 
           <div className="apontamento-content">
             <div className="maquinas-column">
-              {MAQUINAS.map(maq => (
+              {maquinasConsideradas.map(maq => (
                 <div key={maq} className="maquina-card card">
                   <div className="maquina-header">{maq}</div>
 
