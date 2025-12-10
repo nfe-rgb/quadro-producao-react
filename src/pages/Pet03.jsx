@@ -100,19 +100,22 @@ const [currentShift, setCurrentShift] = useState(() => {
   const saldo = ativa ? Math.max(0, Number(ativa.boxes) - lidas) : 0;
 
     // cronômetros
-  const paradaAberta = paradas?.find((p) => p.order_id === ativa?.id && !p.resumed_at);
+  const paradaAberta = paradas?.find((p) => String(p.order_id) === String(ativa?.id) && !p.resumed_at);
   const stopReason = paradaAberta?.reason || "";
   const tempoParada = useMemo(() => {
     if (!ativa) return null;
-    if (ativa.paradaAberta?.status !== "PARADA") return null;
-    if (!ativa.started_at) return null;
+    // mantém sua lógica: só mostra se a ordem está em PARADA
+    if (ativa.status !== "PARADA") return null;
+    // mas usa o timestamp real da parada aberta
+    if (!paradaAberta?.started_at) return null;
     const _ = tick;
-    const diff = Math.floor((Date.now() - new Date(ativa.started_at).getTime()) / 1000);
+    const since = new Date(paradaAberta.started_at).getTime();
+    const diff = Math.floor((Date.now() - since) / 1000);
     const hh = String(Math.floor(diff / 3600)).padStart(2, "0");
     const mm = String(Math.floor((diff % 3600) / 60)).padStart(2, "0");
     const ss = String(diff % 60).padStart(2, "0");
     return `${hh}:${mm}:${ss}`;
-  }, [ativa, tick]);
+  }, [ativa, paradaAberta, tick]);
 
 
   const tempoLow = useMemo(() => {
@@ -437,11 +440,10 @@ if (typeof window !== "undefined") {
 
         <div className={statusClass(ativa?.status)}>
           <Etiqueta o={ativa} variant="pet01" saldoCaixas={saldo} lidasCaixas={lidas} />
-        </div>
-
-                  {ativa?.status === "PARADA" && stopReason && (
-                  <div className="stop-reason-below">{stopReason}</div>
+                            {ativa?.status === "PARADA" && stopReason && (
+                  <div className="stop-reason-below-p1">{stopReason}</div>
                   )}
+        </div>
                   
         <div className="sep" style={{ marginTop: 12 }} />
 

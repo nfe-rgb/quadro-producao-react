@@ -365,6 +365,9 @@ export default function Apontamento({ isAdmin = false }) {
               <option value="todas">Todas as máquinas</option>
               <option value="pet">PET</option>
               <option value="injecao">Injeção</option>
+              {MAQUINAS.map(m => (
+                <option key={m} value={m}>{m}</option>
+              ))}
             </select>
           </div>
         </div> 
