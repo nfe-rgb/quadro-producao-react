@@ -533,3 +533,10 @@ body:fullscreen .pet01-logo {
 /* Se precisar ajustar timer pill estilo (usar as mesmas classes do painel) */
 .pet01-timer.red { background: rgba(231,76,60,0.12); border:1px solid rgba(231,76,60,0.18); color:#C62828; }
 .pet01-timer.yellow { background: rgba(255,193,7,0.12); border:1px solid rgba(255,193,7,0.18); color:#7a5a00; }
+
+.stop-reason-below-p1 {
+  text-align: center !important;
+  line-height: 1.5 !important;
+  font-weight: 800 !important;
+  font-size: 22px !important;
+}

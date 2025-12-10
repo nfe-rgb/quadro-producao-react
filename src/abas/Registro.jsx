@@ -2,7 +2,8 @@ import React, { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import PieChartIndicadores from '../components/PieChartIndicadores'
 import { fmtDateTime, fmtDuracao } from '../lib/utils'
-import { MAQUINAS } from '../lib/constants'
+import { MAQUINAS, MOTIVOS_PARADA } from '../lib/constants'
+import Modal from '../components/Modal'
 
 const safe = v => {
   if (v === null || v === undefined) return null
@@ -343,7 +344,7 @@ function Filters({ periodo, setPeriodo, customStart, setCustomStart, customEnd, 
 // =========================
 // Componente principal (refatorado e com pontos de extensão claros)
 // =========================
-export default function Registro({ registroGrupos = [], openSet, toggleOpen }) {
+export default function Registro({ registroGrupos = [], openSet, toggleOpen, isAdmin = false }) {
   // Estado para armazenar logs de baixa eficiência por ordem
   // ...existing code...
   // Estado para armazenar logs de baixa eficiência por ordem
@@ -380,6 +381,28 @@ export default function Registro({ registroGrupos = [], openSet, toggleOpen }) {
     }
     fetchLowEffLogs();
   }, [registroGrupos]);
+
+  // Re-fetch auxiliar após salvar correções
+  async function refetchLowEffLogs() {
+    const orderIds = registroGrupos.map(g => g?.ordem?.id).filter(Boolean);
+    if (!orderIds.length) {
+      setLowEffLogsByOrder({});
+      return;
+    }
+    const { data, error } = await supabase
+      .from('low_efficiency_logs')
+      .select('*')
+      .in('order_id', orderIds);
+    if (error) {
+      return;
+    }
+    const logsByOrder = {};
+    for (const log of data) {
+      if (!logsByOrder[log.order_id]) logsByOrder[log.order_id] = [];
+      logsByOrder[log.order_id].push(log);
+    }
+    setLowEffLogsByOrder(logsByOrder);
+  }
 
   const [hoveredIndicador, setHoveredIndicador] = useState(null)
   const [localOpenSet, setLocalOpenSet] = useState(() => new Set())
@@ -649,6 +672,67 @@ export default function Registro({ registroGrupos = [], openSet, toggleOpen }) {
     ).getTime()
   }
 
+  // ====== Correção de eventos (Parada / Baixa Eficiência) ======
+  const [editEv, setEditEv] = useState(null); // { type: 'stop'|'loweff'|'start'|'interrupt'|'restart'|'end', id, rawId?, orderId?, when, end, reason?, notes? }
+  const [editForm, setEditForm] = useState({ started: '', ended: '', reason: '', notes: '' });
+
+  function pad(n){ return String(n).padStart(2,'0') }
+  function isoToLocalInput(iso){
+    if(!iso) return ''
+    const d = new Date(iso)
+    const y = d.getFullYear(); const m = pad(d.getMonth()+1); const da = pad(d.getDate());
+    const hh = pad(d.getHours()); const mm = pad(d.getMinutes())
+    return `${y}-${m}-${da}T${hh}:${mm}`
+  }
+  function localInputToIso(v){
+    if(!v) return null
+    const d = new Date(v)
+    return d.toISOString()
+  }
+
+  async function salvarCorrecao(){
+    if(!editEv) return
+    try{
+      if(editEv.type === 'stop'){
+        const updates = {
+          started_at: localInputToIso(editForm.started),
+          resumed_at: editForm.ended ? localInputToIso(editForm.ended) : null,
+          reason: editForm.reason || null,
+          notes: editForm.notes || null,
+        }
+        const { error } = await supabase.from('machine_stops').update(updates).eq('id', editEv.rawId)
+        if(error) throw error
+      } else if(editEv.type === 'loweff'){
+        const updates = {
+          started_at: localInputToIso(editForm.started),
+          ended_at: editForm.ended ? localInputToIso(editForm.ended) : null,
+          notes: editForm.notes || null,
+        }
+        const { error } = await supabase.from('low_efficiency_logs').update(updates).eq('id', editEv.rawId)
+        if(error) throw error
+      } else if (editEv.type === 'start') {
+        const { error } = await supabase.from('orders').update({ started_at: localInputToIso(editForm.started) }).eq('id', editEv.orderId)
+        if(error) throw error
+      } else if (editEv.type === 'interrupt') {
+        const { error } = await supabase.from('orders').update({ interrupted_at: localInputToIso(editForm.started) }).eq('id', editEv.orderId)
+        if(error) throw error
+      } else if (editEv.type === 'restart') {
+        const { error } = await supabase.from('orders').update({ restarted_at: localInputToIso(editForm.started) }).eq('id', editEv.orderId)
+        if(error) throw error
+      } else if (editEv.type === 'end') {
+        const { error } = await supabase.from('orders').update({ finalized_at: localInputToIso(editForm.started) }).eq('id', editEv.orderId)
+        if(error) throw error
+      }
+      setEditEv(null)
+      // Recarrega logs de baixa eficiência e força rerender
+      await refetchLowEffLogs();
+      setTick(t => t + 1);
+    }catch(err){
+      console.error('Falha ao salvar correção:', err)
+      alert('Falha ao salvar correção. Veja o console para detalhes.')
+    }
+  }
+
   return (
     <div className="card registro-wrap">
       <div className="card">
@@ -689,7 +773,8 @@ export default function Registro({ registroGrupos = [], openSet, toggleOpen }) {
         {(!Array.isArray(gruposFiltrados) || gruposFiltrados.length === 0) ? (
           <div className="row muted" style={{ padding: '32px 0', textAlign: 'center', fontSize: 18 }}>Nenhum registro encontrado para o período selecionado.</div>
         ) : (
-          MAQUINAS.map(m => {
+          <>
+          {MAQUINAS.map(m => {
             // Aplicar filtro único
             if (filtroMaquina === 'pet' && !String(m).toUpperCase().startsWith('P')) return null
             if (filtroMaquina === 'injecao' && !String(m).toUpperCase().startsWith('I')) return null
@@ -720,9 +805,9 @@ export default function Registro({ registroGrupos = [], openSet, toggleOpen }) {
                       {grupos.map(gr => {
                         const o = gr.ordem || {}
                         const events = []
-                        if (safe(o.started_at)) events.push({ id: `start-${o.id}`, type: 'start', title: 'Início da produção', when: o.started_at, who: o.started_by || '-' })
-                        if (safe(o.interrupted_at)) events.push({ id: `interrupt-${o.id}`, type: 'interrupt', title: 'Produção interrompida', when: o.interrupted_at, who: o.interrupted_by || '-' })
-                        if (safe(o.restarted_at)) events.push({ id: `restart-${o.id}`, type: 'restart', title: 'Reinício da produção', when: o.restarted_at, who: o.restarted_by || '-' })
+                        if (safe(o.started_at)) events.push({ id: `start-${o.id}`, type: 'start', title: 'Início da produção', when: o.started_at, who: o.started_by || '-', orderId: o.id })
+                        if (safe(o.interrupted_at)) events.push({ id: `interrupt-${o.id}`, type: 'interrupt', title: 'Produção interrompida', when: o.interrupted_at, who: o.interrupted_by || '-', orderId: o.id })
+                        if (safe(o.restarted_at)) events.push({ id: `restart-${o.id}`, type: 'restart', title: 'Reinício da produção', when: o.restarted_at, who: o.restarted_by || '-', orderId: o.id })
                         // Adiciona eventos de baixa eficiência vindos dos logs
                         const lowEffLogs = lowEffLogsByOrder[o.id] || [];
                         for (const log of lowEffLogs) {
@@ -733,10 +818,11 @@ export default function Registro({ registroGrupos = [], openSet, toggleOpen }) {
                             when: log.started_at,
                             end: log.ended_at || null,
                             who: log.started_by || '-',
-                            notes: log.notes || ''
+                            notes: log.notes || '',
+                            rawId: log.id
                           });
                         }
-                        ;(gr.stops || []).forEach(st => { if (safe(st.started_at)) events.push({ id: `stop-${st.id}`, type: 'stop', title: 'Parada', when: st.started_at, end: safe(st.resumed_at) ? st.resumed_at : null, who: st.started_by || '-', reason: st.reason || '-', notes: st.notes || '' }) })
+                        ;(gr.stops || []).forEach(st => { if (safe(st.started_at)) events.push({ id: `stop-${st.id}`, type: 'stop', title: 'Parada', when: st.started_at, end: safe(st.resumed_at) ? st.resumed_at : null, who: st.started_by || '-', reason: st.reason || '-', notes: st.notes || '', rawId: st.id }) })
                         if (safe(o.finalized_at)) events.push({ id: `end-${o.id}`, type: 'end', title: 'Fim da produção', when: o.finalized_at, who: o.finalized_by || '-' })
                         if (!events.length) events.push({ id: `empty-${o.id}`, type: 'empty', title: 'Sem eventos', when: null })
                         events.sort((a, b) => (toTime(a.when) || 0) - (toTime(b.when) || 0))
@@ -755,19 +841,127 @@ export default function Registro({ registroGrupos = [], openSet, toggleOpen }) {
                               <div className="row" style={{ gridColumn: '1 / -1', background: '#fafafa' }}>
                                 <div className="timeline">
                                   {events.map(ev => {
-                                    if (ev.type === 'empty') return (<div key={ev.id} className="tl-card tl-empty"><div className="tl-title">Sem eventos</div><div className="tl-meta muted">Esta O.P ainda não possui início, paradas ou fim registrados.</div></div>)
-                                    if (ev.type === 'start') return (<div key={ev.id} className="tl-card tl-start"><div className="tl-title">🚀 {ev.title}</div><div className="tl-meta"><b>Data/Hora:</b> {fmtDateTime(ev.when)}</div><div className="tl-meta"><b>Operador:</b> {ev.who}</div></div>)
-                                    if (ev.type === 'restart') return (<div key={ev.id} className="tl-card tl-start"><div className="tl-title">🔁 {ev.title}</div><div className="tl-meta"><b>Data/Hora:</b> {fmtDateTime(ev.when)}</div><div className="tl-meta"><b>Operador:</b> {ev.who}</div></div>)
-                                    if (ev.type === 'loweff') {
-                                      const dur = ev.end ? fmtDuracao(ev.when, ev.end) : '-'
-                                      return (<div key={ev.id} className="tl-card tl-interrupt"><div className="tl-title">🟡 {ev.title}</div><div className="tl-meta"><b>Início:</b> {fmtDateTime(ev.when)}</div><div className="tl-meta"><b>Fim:</b> {ev.end ? fmtDateTime(ev.end) : '— (em aberto)'}</div><div className="tl-meta"><b>Duração:</b> {dur}</div><div className="tl-meta"><b>Operador:</b> {ev.who}</div>{ev.notes ? <div className="tl-notes">{ev.notes}</div> : null}</div>)
+                                    if (ev.type === 'empty') {
+                                      return (
+                                        <div key={ev.id} className="tl-card tl-empty">
+                                          <div className="tl-title">Sem eventos</div>
+                                          <div className="tl-meta muted">Esta O.P ainda não possui início, paradas ou fim registrados.</div>
+                                        </div>
+                                      )
+                                    }
+                                    if (ev.type === 'start') {
+                                      return (
+                                        <div key={ev.id} className="tl-card tl-start">
+                                          <div className="tl-title">🚀 {ev.title}</div>
+                                          <div className="tl-meta"><b>Data/Hora:</b> {fmtDateTime(ev.when)}</div>
+                                          <div className="tl-meta"><b>Operador:</b> {ev.who}</div>
+                                          {isAdmin && (
+                                            <div className="flex" style={{ justifyContent: 'flex-end' }}>
+                                              <button className="btn" onClick={() => {
+                                                setEditEv({ type: 'start', id: ev.id, orderId: ev.orderId })
+                                                setEditForm({ started: isoToLocalInput(ev.when), ended: '', reason: '', notes: '' })
+                                              }}>Corrigir</button>
+                                            </div>
+                                          )}
+                                        </div>
+                                      )
+                                    }
+                                    if (ev.type === 'restart') {
+                                      return (
+                                        <div key={ev.id} className="tl-card tl-start">
+                                          <div className="tl-title">🔁 {ev.title}</div>
+                                          <div className="tl-meta"><b>Data/Hora:</b> {fmtDateTime(ev.when)}</div>
+                                          <div className="tl-meta"><b>Operador:</b> {ev.who}</div>
+                                          {isAdmin && (
+                                            <div className="flex" style={{ justifyContent: 'flex-end' }}>
+                                              <button className="btn" onClick={() => {
+                                                setEditEv({ type: 'restart', id: ev.id, orderId: ev.orderId })
+                                                setEditForm({ started: isoToLocalInput(ev.when), ended: '', reason: '', notes: '' })
+                                              }}>Corrigir</button>
+                                            </div>
+                                          )}
+                                        </div>
+                                      )
+                                    }
+                                    if (ev.type === 'interrupt') {
+                                      return (
+                                        <div key={ev.id} className="tl-card tl-interrupt">
+                                          <div className="tl-title">🟡 {ev.title}</div>
+                                          <div className="tl-meta"><b>Data/Hora:</b> {fmtDateTime(ev.when)}</div>
+                                          <div className="tl-meta"><b>Registrado por:</b> {ev.who}</div>
+                                          <div className="tl-notes">A O.P foi removida do painel e enviada ao fim da fila.</div>
+                                          {isAdmin && (
+                                            <div className="flex" style={{ justifyContent: 'flex-end' }}>
+                                              <button className="btn" onClick={() => {
+                                                setEditEv({ type: 'interrupt', id: ev.id, orderId: ev.orderId })
+                                                setEditForm({ started: isoToLocalInput(ev.when), ended: '', reason: '', notes: '' })
+                                              }}>Corrigir</button>
+                                            </div>
+                                          )}
+                                        </div>
+                                      )
                                     }
                                     if (ev.type === 'stop') {
                                       const dur = ev.end ? fmtDuracao(ev.when, ev.end) : '-'
-                                      return (<div key={ev.id} className="tl-card tl-stop"><div className="tl-title">⛔ {ev.title}</div><div className="tl-meta"><b>Início:</b> {fmtDateTime(ev.when)}</div><div className="tl-meta"><b>Fim:</b> {ev.end ? fmtDateTime(ev.end) : '— (em aberto)'}</div><div className="tl-meta"><b>Duração:</b> {dur}</div><div className="tl-meta"><b>Operador:</b> {ev.who}</div><div className="tl-meta"><b>Motivo:</b> {ev.reason}</div>{ev.notes ? <div className="tl-notes">{ev.notes}</div> : null}</div>)
+                                      return (
+                                        <div key={ev.id} className="tl-card tl-stop">
+                                          <div className="tl-title">⛔ {ev.title}</div>
+                                          <div className="tl-meta"><b>Início:</b> {fmtDateTime(ev.when)}</div>
+                                          <div className="tl-meta"><b>Retorno:</b> {ev.end ? fmtDateTime(ev.end) : '— (em aberto)'}</div>
+                                          <div className="tl-meta"><b>Duração:</b> {dur}</div>
+                                          <div className="tl-meta"><b>Operador:</b> {ev.who}</div>
+                                          {ev.reason ? <div className="tl-meta"><b>Motivo:</b> {ev.reason}</div> : null}
+                                          {ev.notes ? <div className="tl-notes">{ev.notes}</div> : null}
+                                          {isAdmin && (
+                                            <div className="flex" style={{ justifyContent: 'flex-end' }}>
+                                              <button className="btn" onClick={() => {
+                                                setEditEv({ type: 'stop', id: ev.id, rawId: ev.rawId })
+                                                setEditForm({ started: isoToLocalInput(ev.when), ended: isoToLocalInput(ev.end), reason: ev.reason || '', notes: ev.notes || '' })
+                                              }}>Corrigir</button>
+                                            </div>
+                                          )}
+                                        </div>
+                                      )
                                     }
-                                    if (ev.type === 'interrupt') return (<div key={ev.id} className="tl-card tl-interrupt"><div className="tl-title">🟡 {ev.title}</div><div className="tl-meta"><b>Data/Hora:</b> {fmtDateTime(ev.when)}</div><div className="tl-meta"><b>Registrado por:</b> {ev.who}</div><div className="tl-meta muted">A O.P foi removida do painel e enviada ao fim da fila.</div></div>)
-                                    return (<div key={ev.id} className="tl-card tl-end"><div className="tl-title">🏁 {ev.title}</div><div className="tl-meta"><b>Data/Hora:</b> {fmtDateTime(ev.when)}</div><div className="tl-meta"><b>Operador:</b> {ev.who}</div></div>)
+                                    if (ev.type === 'loweff') {
+                                      const dur = ev.end ? fmtDuracao(ev.when, ev.end) : '-'
+                                      return (
+                                        <div key={ev.id} className="tl-card tl-interrupt">
+                                          <div className="tl-title">🟡 {ev.title}</div>
+                                          <div className="tl-meta"><b>Início:</b> {fmtDateTime(ev.when)}</div>
+                                          <div className="tl-meta"><b>Fim:</b> {ev.end ? fmtDateTime(ev.end) : '— (em aberto)'}</div>
+                                          <div className="tl-meta"><b>Duração:</b> {dur}</div>
+                                          <div className="tl-meta"><b>Operador:</b> {ev.who}</div>
+                                          {ev.notes ? <div className="tl-notes">{ev.notes}</div> : null}
+                                          {isAdmin && (
+                                            <div className="flex" style={{ justifyContent: 'flex-end' }}>
+                                              <button className="btn" onClick={() => {
+                                                setEditEv({ type: 'loweff', id: ev.id, rawId: ev.rawId })
+                                                setEditForm({ started: isoToLocalInput(ev.when), ended: isoToLocalInput(ev.end), reason: '', notes: ev.notes || '' })
+                                              }}>Corrigir</button>
+                                            </div>
+                                          )}
+                                        </div>
+                                      )
+                                    }
+                                    if (ev.type === 'end') {
+                                      return (
+                                        <div key={ev.id} className="tl-card tl-end">
+                                          <div className="tl-title">🏁 {ev.title}</div>
+                                          <div className="tl-meta"><b>Data/Hora:</b> {fmtDateTime(ev.when)}</div>
+                                          <div className="tl-meta"><b>Operador:</b> {ev.who}</div>
+                                          {isAdmin && (
+                                            <div className="flex" style={{ justifyContent: 'flex-end' }}>
+                                              <button className="btn" onClick={() => {
+                                                setEditEv({ type: 'end', id: ev.id, orderId: ev.orderId })
+                                                setEditForm({ started: isoToLocalInput(ev.when), ended: '', reason: '', notes: '' })
+                                              }}>Corrigir</button>
+                                            </div>
+                                          )}
+                                        </div>
+                                      )
+                                    }
+                                    return null
                                   })}
                                 </div>
                               </div>
@@ -780,7 +974,43 @@ export default function Registro({ registroGrupos = [], openSet, toggleOpen }) {
                 )}
               </div>
             )
-          })
+          })}
+          </>
+        )}
+
+        {editEv && (
+          <Modal open={!!editEv} onClose={() => setEditEv(null)} title="Corrigir evento">
+            <div className="grid two" style={{ gap: 12 }}>
+              <div>
+                <div className="label">Início *</div>
+                <input type="datetime-local" className="input" value={editForm.started} onChange={e => setEditForm(f => ({ ...f, started: e.target.value }))} />
+              </div>
+              <div>
+                <div className="label">Fim</div>
+                <input type="datetime-local" className="input" value={editForm.ended} onChange={e => setEditForm(f => ({ ...f, ended: e.target.value }))} />
+              </div>
+              {editEv.type === 'stop' && (
+                <div style={{ gridColumn: '1 / -1' }}>
+                  <div className="label">Motivo</div>
+                  <select className="input" value={editForm.reason} onChange={e => setEditForm(f => ({ ...f, reason: e.target.value }))}>
+                    <option value="">Selecione...</option>
+                    {MOTIVOS_PARADA.map((mot) => (
+                      <option key={mot} value={mot}>{mot}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              <div style={{ gridColumn: '1 / -1' }}>
+                <div className="label">Observações</div>
+                <textarea className="input" rows={3} value={editForm.notes} onChange={e => setEditForm(f => ({ ...f, notes: e.target.value }))} />
+              </div>
+              <div className="sep" />
+              <div className="flex" style={{ justifyContent: 'flex-end', gap: 8, gridColumn: '1 / -1' }}>
+                <button className="btn ghost" onClick={() => setEditEv(null)}>Cancelar</button>
+                <button className="btn primary" onClick={salvarCorrecao}>Salvar</button>
+              </div>
+            </div>
+          </Modal>
         )}
       </div>
     </div>

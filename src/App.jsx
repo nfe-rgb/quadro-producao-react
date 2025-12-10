@@ -114,10 +114,12 @@ export default function App(){
           registroGrupos={registroGrupos}
           ativosP1={ativosP1}
           tick={tick}
+          paradas={paradas}
           onStatusChange={handleStatusChange}
           setStartModal={setStartModal}
           setStopModal={setStopModal}
           setLowEffModal={setLowEffModal}
+          setLowEffEndModal={setLowEffEndModal}
           setResumeModal={setResumeModal}
           setFinalizando={setFinalizando}
           setEditando={setEditando}
@@ -150,10 +152,12 @@ export default function App(){
           registroGrupos={registroGrupos}
           ativosP2={ativosP2}
           tick={tick}
+          paradas={paradas}
           onStatusChange={handleStatusChange}
           setStartModal={setStartModal}
           setStopModal={setStopModal}
           setLowEffModal={setLowEffModal}
+          setLowEffEndModal={setLowEffEndModal}
           setResumeModal={setResumeModal}
           setFinalizando={setFinalizando}
           setEditando={setEditando}
@@ -186,10 +190,12 @@ export default function App(){
           registroGrupos={registroGrupos}
           ativosP3={ativosP3}
           tick={tick}
+          paradas={paradas}
           onStatusChange={handleStatusChange}
           setStartModal={setStartModal}
           setStopModal={setStopModal}
           setLowEffModal={setLowEffModal}
+          setLowEffEndModal={setLowEffEndModal}
           setResumeModal={setResumeModal}
           setFinalizando={setFinalizando}
           setEditando={setEditando}
@@ -303,7 +309,7 @@ export default function App(){
       )}
 
       {tab === 'registro' && (
-        <Registro registroGrupos={registroGrupos} openSet={openSet} toggleOpen={toggleOpen} />
+        <Registro registroGrupos={registroGrupos} openSet={openSet} toggleOpen={toggleOpen} isAdmin={isAdmin} />
       )}
 
       {tab === 'apontamento' && (
