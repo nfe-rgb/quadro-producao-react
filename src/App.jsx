@@ -106,6 +106,22 @@ export default function App(){
   }
 
   // pet pages quick-return (mantive comportamento)
+  // rota de login para acesso via celular (/login)
+  if (location && location.pathname === '/login') {
+    return (
+      <div className="app">
+        <div className="brand-bar">
+          <img src="/Logotipo Savanti.png" alt="Savanti Plásticos" className="brand-logo"
+               onError={(e)=>{ e.currentTarget.src='/savanti-logo.png'; }}/>
+          <div className="brand-titles">
+            <h1 className="brand-title">Painel de Produção</h1>
+            <div className="brand-sub">Savanti Plásticos • Acesso Admin</div>
+          </div>
+        </div>
+        <Login />
+      </div>
+    )
+  }
   if (location && location.pathname === '/pet-01') {
     const ativosP1 = ordens.filter(o => o.machine_id === 'P1' && !o.finalized).sort((a,b)=>(a.pos??999)-(b.pos??999))
     return (

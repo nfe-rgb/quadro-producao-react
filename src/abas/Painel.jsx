@@ -313,7 +313,9 @@ export default function Painel({
               : null;
 
           let semProgText = null;
-          if (!ativa) {
+          // Mostrar cronômetro "Sem Programação" quando não há ativa
+          // ou quando a ordem está em "AGUARDANDO" (antes de iniciar produção)
+          if (!ativa || ativa.status === "AGUARDANDO") {
             const lastFinISO = lastFinalizadoPorMaquina?.[m] || null;
             if (lastFinISO) {
               const _ = tick;
@@ -349,7 +351,7 @@ export default function Painel({
                     <span className="loweff-timer">{lowEffText}</span>
                   )}
 
-                  {!ativa && semProgText && (
+                  {semProgText && (
                     <span className="semprog-timer">{semProgText}</span>
                   )}
                 </div>
