@@ -98,6 +98,10 @@ await supabase.rpc('reorder_machine_queue', {
           const lista = ativosPorMaquina[m] || []
           const ativa = lista[0] || null
           const fila  = lista.slice(1)
+          const opCode = ativa?.code || ativa?.o?.code || ativa?.op_code || ""
+          // lidas / saldo: usar mesma lógica do Painel
+          const lidas = Number(ativa?.scanned_count || 0)
+          const saldo = ativa ? Math.max(0, (Number(ativa.boxes) || 0) - lidas) : 0
 
           return (
             <div className="tableline" key={m}>
@@ -106,7 +110,17 @@ await supabase.rpc('reorder_machine_queue', {
               <div className="cell-painel">
                 {ativa ? (
                   <div className={statusClass(ativa.status)}>
-                    <Etiqueta o={ativa} variant="painel" />
+                    {opCode && (
+                      <div className="hdr-right op-inline" style={{ marginBottom: 4, textAlign: 'left' }}>
+                        O.P - {opCode}
+                      </div>
+                    )}
+                    <Etiqueta
+                      o={ativa}
+                      variant="painel"
+                      lidasCaixas={["P1","P2","P3"].includes(m) ? lidas : undefined}
+                      saldoCaixas={["P1","P2","P3"].includes(m) ? saldo : undefined}
+                    />
                     <div className="sep"></div>
 
                     <div className="grid2">
