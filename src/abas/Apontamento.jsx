@@ -275,12 +275,22 @@ export default function Apontamento({ isAdmin = false }) {
         // Determinar produção considerando o padrão de cada caixa individualmente.
         // Quando não houver padrão na O.S da caixa, usa o padrão da máquina como fallback.
         const maqDef = MAQUINAS && MAQUINAS[maq];
-        const padraoFromConst = (maqDef && (maqDef.padrao_por_caixa ?? maqDef.padrao ?? maqDef.piecesPerBox ?? maqDef.pieces_per_box)) ?? 0;
+        const padraoFromConstRaw = (maqDef && (maqDef.padrao_por_caixa ?? maqDef.padrao ?? maqDef.piecesPerBox ?? maqDef.pieces_per_box)) ?? 0;
+        const parsePiecesPerBox = (val) => {
+          if (val == null) return 0;
+          const s = String(val).trim();
+          if (!s) return 0;
+          const digitsOnly = s.replace(/[^0-9]/g, '');
+          if (!digitsOnly) return 0;
+          return parseInt(digitsOnly, 10);
+        };
+        const padraoFromConst = parsePiecesPerBox(padraoFromConstRaw);
 
         let somaPecas = 0;
         const standardsSet = new Set();
         for (const c of (dados.caixas || [])) {
-          const std = Number((c.order && c.order.standard != null) ? c.order.standard : padraoFromConst) || 0;
+          const stdRaw = (c.order && c.order.standard != null) ? c.order.standard : padraoFromConst;
+          const std = parsePiecesPerBox(stdRaw) || 0;
           somaPecas += std;
           if (std > 0) standardsSet.add(std);
         }

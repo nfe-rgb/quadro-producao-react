@@ -190,7 +190,19 @@ async function biparWithCode(code) {
     return;
   }
 
-  const qtyPiecesPerBox = Number(ativa.standard || 0);
+  // Parse padrão (peças por caixa) aceitando separador de milhar brasileiro
+  function parsePiecesPerBox(val) {
+    if (val == null) return 0;
+    const s = String(val).trim();
+    if (!s) return 0;
+    // Remove espaços e separadores não numéricos comuns
+    // Regra: somente inteiros são válidos para padrão de peças/caixa
+    const digitsOnly = s.replace(/[^0-9]/g, "");
+    if (!digitsOnly) return 0;
+    return parseInt(digitsOnly, 10);
+  }
+
+  const qtyPiecesPerBox = parsePiecesPerBox(ativa.standard);
 
   // --- FORÇA horário BR e calcula turno com BR ---
   const nowBr = DateTime.now().setZone("America/Sao_Paulo");
