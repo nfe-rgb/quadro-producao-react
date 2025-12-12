@@ -6,32 +6,32 @@ function inRange(minIni, minFim, minutos) {
   return minutos >= minIni || minutos < minFim;
 }
 
-// Retorna array de intervalos [{ini, fim, turnoKey}] para um dia específico, com tolerância de 15 minutos
+// Retorna array de intervalos [{ini, fim, turnoKey}] para um dia específico, horários EXATOS para horas paradas
 function getTurnoIntervalsDia(date) {
   const dia = date.getDay();
-  // Tolerância de 15 minutos aplicada a todos os dias
-  // Turno 1: 05:15 às 13:45
-  // Turno 2: 13:45 às 22:15
-  // Turno 3: 22:15 às 05:15
+  // Horários exatos (sem tolerância) para cálculo de horas paradas:
+  // Turno 1: 05:00 às 13:30
+  // Turno 2: 13:30 às 22:00
+  // Turno 3: 22:00 às 05:00
   if (dia === 0) { // Domingo
     return [
-      { ini: 22 * 60 + 15, fim: 24 * 60, turnoKey: '3' }, // 22:15 até 00:00
-      { ini: 0, fim: 5 * 60 + 15, turnoKey: '3' },         // 00:00 até 05:15
+      { ini: 22 * 60, fim: 24 * 60, turnoKey: '3' }, // 22:00 até 00:00
+      { ini: 0, fim: 5 * 60, turnoKey: '3' },         // 00:00 até 05:00
       // resto é hora extra
     ];
   }
   if (dia >= 1 && dia <= 5) { // Segunda a Sexta
     return [
-      { ini: 5 * 60 + 15, fim: 13 * 60 + 45, turnoKey: '1' },   // 05:15 até 13:45
-      { ini: 13 * 60 + 45, fim: 22 * 60 + 15, turnoKey: '2' },  // 13:45 até 22:15
-      { ini: 22 * 60 + 15, fim: 24 * 60, turnoKey: '3' },       // 22:15 até 00:00
-      { ini: 0, fim: 5 * 60 + 15, turnoKey: '3' },              // 00:00 até 05:15
+      { ini: 5 * 60, fim: 13 * 60 + 30, turnoKey: '1' },   // 05:00 até 13:30
+      { ini: 13 * 60 + 30, fim: 22 * 60, turnoKey: '2' },  // 13:30 até 22:00
+      { ini: 22 * 60, fim: 24 * 60, turnoKey: '3' },       // 22:00 até 00:00
+      { ini: 0, fim: 5 * 60, turnoKey: '3' },              // 00:00 até 05:00
     ];
   }
   if (dia === 6) { // Sábado
     return [
-      { ini: 5 * 60 + 15, fim: 9 * 60 + 15, turnoKey: '1' },   // 05:15 até 09:15
-      { ini: 9 * 60 + 15, fim: 13 * 60 + 15, turnoKey: '2' },  // 09:15 até 13:15
+      { ini: 5 * 60, fim: 9 * 60, turnoKey: '1' },   // 05:00 até 09:00
+      { ini: 9 * 60, fim: 13 * 60, turnoKey: '2' },  // 09:00 até 13:00
       // resto é hora extra
     ];
   }
@@ -43,21 +43,20 @@ function splitIntervalPorTurno(iniMs, fimMs) {
   const res = [];
   let cursor = iniMs;
   while (cursor < fimMs) {
-    const d = new Date(cursor);
-    const dia = d.getDay();
-    const minutos = d.getHours() * 60 + d.getMinutes();
-    const turnosDia = getTurnoIntervalsDia(d);
+    // Normaliza cursor para horário do Brasil
+    const dBr = toBrazilTime(new Date(cursor).toISOString());
+    const dia = dBr.getDay();
+    const minutos = dBr.getHours() * 60 + dBr.getMinutes();
+    const turnosDia = getTurnoIntervalsDia(dBr);
     // Acha o turno atual
     let fatia = null;
     for (const t of turnosDia) {
       if (inRange(t.ini, t.fim, minutos)) {
-        // Calcula fim da fatia
+        // Calcula fim da fatia em minutos relativos no fuso BR
         let fatiaFimMin = t.fim;
         if (t.fim <= t.ini) fatiaFimMin += 24 * 60; // cruza meia-noite
-        let fatiaFim = new Date(d);
-        fatiaFim.setHours(0, 0, 0, 0);
-        fatiaFim = fatiaFim.getTime() + ((t.fim % (24 * 60)) * 60 * 1000);
-        if (fatiaFim <= cursor) fatiaFim += 24 * 60 * 60 * 1000;
+        const deltaMin = fatiaFimMin - minutos;
+        let fatiaFim = cursor + (deltaMin * 60 * 1000);
         fatia = {
           turnoKey: t.turnoKey,
           ini: cursor,
@@ -67,15 +66,28 @@ function splitIntervalPorTurno(iniMs, fimMs) {
       }
     }
     if (!fatia) {
-      // Hora extra, pula para próximo minuto
-      cursor += 60 * 1000;
-      continue;
+      // Hora extra: ainda deve contar como parada em apontamento.
+      // Vamos atribuir ao turno calculado pelo util `getTurnoAtual` no fuso BR.
+      // Caso retorne "Hora Extra", por consistência vamos acumular sob o turno 3.
+      try {
+        const { getTurnoAtual } = require('./utils');
+        const turnoCalc = String(getTurnoAtual(dBr));
+        const turnoKey = turnoCalc === 'Hora Extra' ? '3' : turnoCalc;
+        const nextMin = Math.min(fimMs, cursor + 60 * 1000);
+        fatia = { turnoKey, ini: cursor, fim: nextMin };
+      } catch {
+        const nextMin = Math.min(fimMs, cursor + 60 * 1000);
+        fatia = { turnoKey: '3', ini: cursor, fim: nextMin };
+      }
     }
     res.push(fatia);
     cursor = fatia.fim;
   }
   return res;
 }
+
+import { toBrazilTime } from './timezone';
+import { MAQUINAS } from './constants';
 
 export function calcularHorasParadasPorTurno(paradas, turnos, filtroStart, filtroEnd) {
   // paradas: array de registros de parada (machine_stops)
@@ -84,16 +96,20 @@ export function calcularHorasParadasPorTurno(paradas, turnos, filtroStart, filtr
   const porTurno = {};
   turnos.forEach(t => {
     porTurno[t.key] = {};
-    ['P1','P2','P3'].forEach(maq => {
-      porTurno[t.key][maq] = 0;
-    });
+    (MAQUINAS || []).forEach(maq => { porTurno[t.key][maq] = 0; });
   });
   if (!Array.isArray(paradas)) return porTurno;
   paradas.forEach(p => {
     const maq = p.machine_id;
-    if (!['P1','P2','P3'].includes(maq)) return;
-    const ini = new Date(p.started_at).getTime();
-    const fim = p.resumed_at ? new Date(p.resumed_at).getTime() : (filtroEnd ? filtroEnd.getTime() : Date.now());
+    if (!MAQUINAS.includes(maq)) return;
+    const ini = p.started_at ? toBrazilTime(p.started_at).getTime() : null;
+    const fimAberta = Math.min(
+      filtroEnd ? filtroEnd.getTime() : Date.now(),
+      Date.now()
+    );
+    const fim = p.resumed_at
+      ? toBrazilTime(p.resumed_at).getTime()
+      : fimAberta;
     if (!ini || !fim || fim <= ini) return;
     // Clipping ao filtro
     const iniClip = Math.max(ini, filtroStart ? filtroStart.getTime() : ini);

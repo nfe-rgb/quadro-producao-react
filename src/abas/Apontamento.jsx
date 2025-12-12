@@ -27,9 +27,9 @@ const REFUGO_MOTIVOS = [
 
 
 const TURNOS = [
+  { key: '3', label: 'Turno 3' },
   { key: '1', label: 'Turno 1' },
   { key: '2', label: 'Turno 2' },
-  { key: '3', label: 'Turno 3' },
 ];
 
 export default function Apontamento({ isAdmin = false }) {
@@ -128,8 +128,8 @@ export default function Apontamento({ isAdmin = false }) {
         const paradaQuery = supabase
           .from('machine_stops')
           .select('*')
-          .gte('started_at', filtroStart.toISOString())
-          .lte('started_at', filtroEnd.toISOString());
+          .lte('started_at', filtroEnd.toISOString())
+          .or(`resumed_at.gte.${filtroStart.toISOString()},resumed_at.is.null`);
 
         // fetch bipagens, refugos e paradas
         const [{ data: bip }, { data: ref }, { data: par }] = await Promise.all([bipQuery, refQuery, paradaQuery]);
@@ -390,7 +390,11 @@ export default function Apontamento({ isAdmin = false }) {
                   <div className="turnos-row">
                     {TURNOS.filter(t => turnoFiltro === 'todos' || turnoFiltro === t.key).map(t => {
                       const dados = agrupadoPorTurno[t.key][maq];
-                      const caixasSorted = [...(dados.caixas || [])].sort((a,b) => (Number(a.num)||0) - (Number(b.num)||0));
+                      const caixasSorted = [...(dados.caixas || [])].sort((a, b) => {
+                        const ta = DateTime.fromISO(String(a.hora));
+                        const tb = DateTime.fromISO(String(b.hora));
+                        return ta.toMillis() - tb.toMillis();
+                      });
                       const key = `${maq}-${t.key}`;
                       const isOpen = caixasAbertas[key] || false;
                       const isBipadasAnim = bipadasAnim[key] || false;
@@ -485,7 +489,11 @@ export default function Apontamento({ isAdmin = false }) {
                                 <div className="registros-section">
                                   <div className="sub-title"><b>Refugos:</b></div>
                                   <ul className="refugos-list">
-                                    {dados.refugos.map((r, i) => (
+                                    {[...dados.refugos].sort((a, b) => {
+                                      const ta = DateTime.fromISO(String(a.created_at));
+                                      const tb = DateTime.fromISO(String(b.created_at));
+                                      return ta.toMillis() - tb.toMillis();
+                                    }).map((r, i) => (
                                       <li key={i}>
                                         {fmtDateTime(r.created_at)} — {r.qty} peças ({r.reason})
                                       </li>

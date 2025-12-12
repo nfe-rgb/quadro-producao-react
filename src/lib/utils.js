@@ -74,10 +74,15 @@ export function fmtDateTime(ts) {
 
 // Converte data/hora local digitada -> ISO UTC
 export function localDateTimeToISO(dateStr, timeStr) {
-  const [Y,M,D] = dateStr.split('-').map(Number)
-  const [h,m] = timeStr.split(':').map(Number)
-  const local = new Date(Y, M-1, D, h, m, 0)
-  return local.toISOString()
+  const [Y, M, D] = String(dateStr).split('-').map(Number);
+  const [h, m] = String(timeStr).split(':').map(Number);
+  // Constrói o horário no fuso de São Paulo, preservando o horário digitado
+  const dtBr = DateTime.fromObject(
+    { year: Y, month: M, day: D, hour: h, minute: m, second: 0 },
+    { zone: 'America/Sao_Paulo' }
+  );
+  // Retorna ISO com offset (-03:00), evitando virar o dia ao converter
+  return dtBr.toISO();
 }
 
 // Util: a ordem JÁ iniciou produção?
