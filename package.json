@@ -17,6 +17,8 @@
     "@supabase/supabase-js": "^2.78.0",
     "luxon": "^3.7.2",
     "papaparse": "^5.5.3",
+    "jspdf": "^2.5.2",
+    "svg2pdf.js": "^2.2.4",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
     "react-router-dom": "^7.9.6"

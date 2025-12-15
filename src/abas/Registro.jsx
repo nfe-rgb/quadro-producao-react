@@ -512,6 +512,18 @@ export default function Registro({ registroGrupos = [], openSet, toggleOpen, isA
     return map
   }, [gruposFiltradosMaquina])
 
+  // Agrupado por máquina sem o filtro por setor/máquina (para PDF por setor)
+  const gruposPorMaquinaAll = useMemo(() => {
+    const map = {}
+    const source = Array.isArray(gruposFiltrados) ? gruposFiltrados : []
+    for (const g of source) {
+      const m = g?.ordem?.machine_id || 'SEM MÁQ.'
+      if (!map[m]) map[m] = []
+      map[m].push(g)
+    }
+    return map
+  }, [gruposFiltrados])
+
   // 5) Calcular agregados, somando baixa eficiência dos logs reais
   const aggregates = useMemo(() => {
     // Calcula intervalos de parada e baixa eficiência por máquina, sem sobreposição
@@ -680,6 +692,412 @@ export default function Registro({ registroGrupos = [], openSet, toggleOpen, isA
     ).getTime()
   }
 
+  // ====== PDF: Relatório de Indicadores por Setor ======
+  function secondsToHMS(sec){
+    const h = Math.floor(sec/3600); const m = Math.floor((sec%3600)/60); const s = Math.floor(sec%60)
+    const pad = n => String(n).padStart(2,'0')
+    return `${pad(h)}:${pad(m)}:${pad(s)}`
+  }
+  function fmtCurrencyBR(v){
+    try{ return new Intl.NumberFormat('pt-BR',{style:'currency',currency:'BRL'}).format(Number(v)||0) }catch{ return `R$ ${(Number(v)||0).toFixed(2)}` }
+  }
+  function buildSectorAggregates(gruposMap, machines){
+    // Subconjunto por máquinas pedidas
+    const subset = {}
+    for(const m of machines){ subset[m] = (gruposMap[m] || []) }
+
+    // Base via agregador original
+    const base = calculateAggregates({ gruposPorMaquina: subset, filtroStart, filtroEnd, maquinasConsideradas: machines })
+
+    // Recalcular baixa eficiência via logs reais e ajustar produção e parada
+    const filtroStartMs = filtroStart ? filtroStart.getTime() : null
+    const filtroEndMs = filtroEnd ? filtroEnd.getTime() : null
+    let totalLowEffMs = 0
+    let totalLowEffNoStopMsTotal = 0
+    let totalParadaMs = 0
+    function unir(arr){
+      if(!arr.length) return []
+      arr.sort((a,b)=>a[0]-b[0])
+      const out=[arr[0].slice()]
+      for(let i=1;i<arr.length;i++){
+        const u=out[out.length-1]; const c=arr[i]
+        if(c[0]<=u[1]) u[1]=Math.max(u[1], c[1]); else out.push([c[0],c[1]])
+      }
+      return out
+    }
+    for(const m of machines){
+      const grupos = subset[m] || []
+      const paradaIntervals=[]
+      for(const gr of grupos){
+        const stops = gr.stops || []
+        for(const st of stops){
+          let ini = toTime(st.started_at); let fim = safe(st.resumed_at)?toTime(st.resumed_at):Date.now()
+          if(filtroStartMs!==null && ini < filtroStartMs) ini = filtroStartMs
+          if(filtroEndMs!==null && fim > filtroEndMs) fim = filtroEndMs
+          if(ini && fim && fim>ini) paradaIntervals.push([ini,fim])
+        }
+      }
+      const lowEffIntervals=[]
+      for(const gr of grupos){
+        const o = gr.ordem || {}
+        const logs = lowEffLogsByOrder[o.id] || []
+        for(const log of logs){
+          let ini = toTime(log.started_at); let fim = log.ended_at ? toTime(log.ended_at) : Date.now()
+          if(filtroStartMs!==null && ini < filtroStartMs) ini = filtroStartMs
+          if(filtroEndMs!==null && fim > filtroEndMs) fim = filtroEndMs
+          if(ini && fim && fim>ini) lowEffIntervals.push([ini,fim])
+        }
+      }
+      const paradaUnida = unir(paradaIntervals)
+      const lowEffUnida = unir(lowEffIntervals)
+      // low eff integral
+      for(const [a,b] of lowEffUnida) totalLowEffMs += Math.max(0,b-a)
+      // low eff sem sobrepor parada (para ajuste de produção)
+      let lowEffNoStopMs = 0
+      for(const [leIni, leFim] of lowEffUnida){
+        let fatias=[[leIni,leFim]]
+        for(const [pIni,pFim] of paradaUnida){
+          const n=[]
+          for(const [fIni,fFim] of fatias){
+            const s=Math.max(fIni,pIni); const e=Math.min(fFim,pFim)
+            if(e<=s){ n.push([fIni,fFim]) }
+            else{
+              if(fIni<s) n.push([fIni,s])
+              if(e<fFim) n.push([e,fFim])
+            }
+          }
+          fatias=n
+          if(!fatias.length) break
+        }
+        for(const [fIni,fFim] of fatias) lowEffNoStopMs += Math.max(0,fFim-fIni)
+      }
+      totalLowEffNoStopMsTotal += lowEffNoStopMs
+      // parada descontando baixa eficiência para não duplicar
+      for(const [pIni,pFim] of paradaUnida){
+        let fatias=[[pIni,pFim]]
+        for(const [leIni,leFim] of lowEffUnida){
+          const n=[]
+          for(const [fIni,fFim] of fatias){
+            const s=Math.max(fIni,leIni); const e=Math.min(fFim,leFim)
+            if(e<=s){ n.push([fIni,fFim]) }
+            else{
+              if(fIni<s) n.push([fIni,s])
+              if(e<fFim) n.push([e,fFim])
+            }
+          }
+          fatias=n
+          if(!fatias.length) break
+        }
+        for(const [fIni,fFim] of fatias) totalParadaMs += Math.max(0,fFim-fIni)
+      }
+    }
+    const totalLowEffH_logs = totalLowEffMs/1000/60/60
+    const totalLowEffNoStopH_logs = totalLowEffNoStopMsTotal/1000/60/60
+    const deltaLowEffNoStopH = Math.max(0, totalLowEffNoStopH_logs - (base.totalLowEffH||0))
+    const totalProdH_corrigido = Math.max(0, (base.totalProdH||0) - deltaLowEffNoStopH)
+    return {
+      ...base,
+      totalProdH: totalProdH_corrigido,
+      totalLowEffH: totalLowEffH_logs,
+      totalParadaH: totalParadaMs/1000/60/60,
+    }
+  }
+  // Geração de donut idêntico ao componente (SVG -> PNG)
+  function formatHoursToHMS(hoursDecimal) {
+    const totalSec = Math.round((Number(hoursDecimal) || 0) * 3600)
+    const h = Math.floor(totalSec / 3600)
+    const m = Math.floor((totalSec % 3600) / 60)
+    const s = totalSec % 60
+    const pad = n => String(n).padStart(2, '0')
+    return `${pad(h)}:${pad(m)}:${pad(s)}`
+  }
+  function createDonutSvg({ items, total }){
+    const radius = 90, cx = 100, cy = 100
+    // Se total 0, evita divisão por zero
+    const t = Number(total) || items.reduce((acc,i)=>acc+(Number(i.value)||0),0)
+    let acc = 0
+    const paths = []
+    for (let i=0;i<items.length;i++){
+      const d = items[i]; const val = Number(d.value)||0
+      if (val === t && t > 0){
+        paths.push(`<circle cx="${cx}" cy="${cy}" r="${radius}" fill="${d.color}" />`)
+        acc += val
+        continue
+      }
+      const startAngle = (acc / (t||1)) * 2 * Math.PI; acc += val
+      const endAngle = (acc / (t||1)) * 2 * Math.PI
+      const largeArc = (endAngle - startAngle) > Math.PI ? 1 : 0
+      const x1 = cx + radius * Math.cos(startAngle)
+      const y1 = cy + radius * Math.sin(startAngle)
+      const x2 = cx + radius * Math.cos(endAngle)
+      const y2 = cy + radius * Math.sin(endAngle)
+      const path = `M${cx},${cy} L${x1},${y1} A${radius},${radius} 0 ${largeArc},1 ${x2},${y2} Z`
+      paths.push(`<path d="${path}" fill="${d.color}" />`)
+    }
+    return `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="240" height="240" viewBox="0 0 200 200">
+  ${paths.join('\n  ')}
+  <circle cx="${cx}" cy="${cy}" r="60" fill="#fff" />
+  <text x="${cx}" y="${cy+5}" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="12" fill="#444">Indicadores</text>
+ </svg>`
+  }
+  async function renderSvgToPdf(doc, svgText, x, y, width=240, height=240){
+    // Renderização vetorial para máxima nitidez usando svg2pdf.js
+    await import('svg2pdf.js')
+    const parser = new DOMParser()
+    const svgEl = parser.parseFromString(svgText, 'image/svg+xml').documentElement
+    await doc.svg(svgEl, { x, y, width, height })
+  }
+  async function handleDownloadPdf(){
+    try{
+      const { jsPDF } = await import('jspdf')
+      const doc = new jsPDF({ unit: 'pt', format: 'a4' })
+      const margin = 40
+      let y = margin
+      const title = 'Relatório de Indicadores por Setor'
+      doc.setFontSize(16); doc.text(title, margin, y); y += 24
+      const periodLine = (()=>{
+        const s = filtroStart ? fmtDateTime(filtroStart) : '-'
+        const e = filtroEnd ? fmtDateTime(filtroEnd) : '-'
+        return `Período: ${s} — ${e}`
+      })()
+      doc.setFontSize(10); doc.setTextColor(90); doc.text(periodLine, margin, y); y += 18
+      doc.setTextColor(0)
+
+      // Duas colunas: PET (esq) e INJEÇÃO (dir)
+      const colW = (doc.internal.pageSize.getWidth() - margin*2 - 20) / 2
+      const xPet = margin
+      const xInj = margin + colW + 20
+
+      const petAgg = buildSectorAggregates(gruposPorMaquinaAll, grupoPET)
+      const injAgg = buildSectorAggregates(gruposPorMaquinaAll, grupoINJ)
+
+      async function drawSectorCard(x, sectorTitle, ag){
+        // Layout e medidas
+        const padX = 16
+        const padTop = 24
+        const titleH = 16
+        const gapTitle = 8
+        const donutH = 240
+        const gapDonut = 16
+        const legendLineH = 20
+        const legendLines = 4
+        const gapLegend = 18
+        const tempoH = 14
+        const padBottom = 16
+
+        const cardTop = y + 8
+        const cardH = padTop + titleH + gapTitle + donutH + gapDonut + (legendLineH * legendLines) + gapLegend + tempoH + padBottom
+
+        // Card de fundo primeiro (para cobrir todo conteúdo)
+        doc.setDrawColor(230); doc.setFillColor(246,246,246); doc.roundedRect(x, cardTop, colW, cardH, 8, 8, 'FD')
+
+        // Título dentro do card: "Resumo do Período - PET" com PET em negrito
+        let innerY = cardTop + padTop
+        doc.setFontSize(14); doc.setFont(undefined, 'normal')
+        const baseTitle = 'Resumo do Período - '
+        doc.text(baseTitle, x + padX, innerY)
+        doc.setFont(undefined, 'bold')
+        const off = doc.getTextWidth(baseTitle)
+        doc.text(sectorTitle, x + padX + off, innerY)
+        doc.setFont(undefined, 'normal')
+        innerY += gapTitle
+
+        // Donut central (vetorial, sem pixelar)
+        const items = [
+          { label: 'Produzindo', value: ag.totalProdH||0, color: '#0a7' },
+          { label: 'Parada', value: ag.totalParadaH||0, color: '#e74c3c' },
+          { label: 'Baixa Eficiência', value: ag.totalLowEffH||0, color: '#ffc107' },
+          { label: 'Sem Programação', value: ag.totalSemProgH||0, color: '#3498db' }
+        ]
+        const svg = createDonutSvg({ items, total: ag.totalDisponivelH||0 })
+        const donutX = x + (colW - 240)/2
+        const donutY = innerY
+        await renderSvgToPdf(doc, svg, donutX, donutY, 240, 240)
+
+        // Legenda à esquerda com cores e percentuais (uma linha por indicador)
+        let legendY = donutY + donutH + gapDonut
+        doc.setFontSize(12); doc.setTextColor(0)
+        function pctOf(h){ return (ag.totalDisponivelH? ((Number(h)||0)/ag.totalDisponivelH*100) : 0).toFixed(1).replace('.',',') + '%' }
+        for(const it of items){
+          doc.setFillColor(it.color)
+          // Quadradinho de cor
+          doc.setDrawColor(255); doc.rect(donutX, legendY - 8, 10, 10, 'F')
+          const line = `${it.label}: ${formatHoursToHMS(it.value)} - ${pctOf(it.value)}`
+          doc.setTextColor(0); doc.setFont(undefined, 'normal')
+          doc.text(line, donutX + 18, legendY)
+          legendY += legendLineH
+        }
+
+        // Tempo total disponível no final, centralizado
+        const label = 'Tempo total disponível: '
+        const value = formatHoursToHMS(ag.totalDisponivelH||0)
+        const labelW = doc.getTextWidth(label)
+        doc.setFont(undefined, 'normal')
+        const valueW = (doc.setFont(undefined,'bold'), doc.getTextWidth(value))
+        doc.setFont(undefined, 'normal')
+        const midX = x + (colW/2)
+        const startX = midX - (labelW + valueW)/2
+        const baseY = legendY + gapLegend
+        doc.text(label, startX, baseY)
+        doc.setFont(undefined, 'bold'); doc.text(value, startX + labelW, baseY)
+        doc.setFont(undefined, 'normal')
+      }
+
+      await drawSectorCard(xPet, 'PET', petAgg)
+      await drawSectorCard(xInj, 'INJEÇÃO', injAgg)
+
+      doc.save('indicadores-por-setor.pdf')
+    }catch(err){
+      console.error('Falha ao gerar PDF:', err)
+      alert('Não foi possível gerar o PDF. Verifique se a dependência jspdf está instalada.')
+    }
+  }
+
+  // ====== PDF: Valorização (R$) ======
+  function extractItemCodeFromOrderProduct(product){
+    if(!product) return null
+    const t = String(product)
+    return t.split('-')[0]?.trim() || null
+  }
+  function overlapMs(aStart, aEnd, bStart, bEnd){
+    const s = Math.max(aStart, bStart); const e = Math.min(aEnd, bEnd)
+    return Math.max(0, e - s)
+  }
+  async function computeSectorRateRperH(gruposMap, machines){
+    const filtroStartMs = filtroStart ? filtroStart.getTime() : 0
+    const filtroEndMs = filtroEnd ? filtroEnd.getTime() : Date.now()
+    // Coleta códigos de item por setor
+    const codes = new Set()
+    const perOp = [] // { code, activeMs }
+    for(const m of machines){
+      const grupos = gruposMap[m] || []
+      for(const gr of grupos){
+        const o = gr.ordem || {}
+        const code = extractItemCodeFromOrderProduct(o.product)
+        if(!code) continue
+        const ini = toTime(o.restarted_at) || toTime(o.started_at)
+        const fim = toTime(o.finalized_at) || filtroEndMs
+        if(!ini) continue
+        const ms = overlapMs(ini, fim, filtroStartMs, filtroEndMs)
+        if(ms <= 0) continue
+        codes.add(code)
+        perOp.push({ code, ms })
+      }
+    }
+    if(!perOp.length) return 0
+    // Busca itens
+    let itemsMap = {}
+    try{
+      const { data, error } = await supabase
+        .from('items')
+        .select('code, cycle_seconds, cavities, unit_value')
+        .in('code', Array.from(codes))
+      if(error) throw error
+      itemsMap = Object.fromEntries((data||[]).map(it => [it.code, it]))
+    }catch(err){
+      console.warn('Falha ao buscar itens p/ valorização:', err)
+      return 0
+    }
+    // Taxa ponderada por tempo ativo
+    let wSum = 0, wt = 0
+    for(const { code, ms } of perOp){
+      const it = itemsMap[code]
+      const cycle = Number(it?.cycle_seconds)||0
+      const cav = Number(it?.cavities)||0
+      const unit = Number(it?.unit_value)||0
+      if(cycle<=0 || cav<=0 || unit<=0) continue
+      const piecesPerHour = (3600 / cycle) * cav
+      const rateRperH = piecesPerHour * unit
+      wSum += rateRperH * ms
+      wt += ms
+    }
+    if(wt<=0) return 0
+    return wSum / wt
+  }
+
+  async function handleDownloadValorizationPdf(){
+    try{
+      const { jsPDF } = await import('jspdf')
+      const doc = new jsPDF({ unit: 'pt', format: 'a4' })
+      const margin = 40
+      let y = margin
+      doc.setFontSize(16); doc.text('Valorização do Período', margin, y); y += 24
+      const periodLine = (()=>{
+        const s = filtroStart ? fmtDateTime(filtroStart) : '-'
+        const e = filtroEnd ? fmtDateTime(filtroEnd) : '-'
+        return `Período: ${s} — ${e}`
+      })()
+      doc.setFontSize(10); doc.setTextColor(90); doc.text(periodLine, margin, y); y += 18
+      doc.setTextColor(0)
+
+      // Duas colunas também
+      const colW = (doc.internal.pageSize.getWidth() - margin*2 - 20) / 2
+      const xPet = margin
+      const xInj = margin + colW + 20
+
+      const petAgg = buildSectorAggregates(gruposPorMaquinaAll, grupoPET)
+      const injAgg = buildSectorAggregates(gruposPorMaquinaAll, grupoINJ)
+      const petRate = await computeSectorRateRperH(gruposPorMaquinaAll, grupoPET)
+      const injRate = await computeSectorRateRperH(gruposPorMaquinaAll, grupoINJ)
+
+      async function drawValSector(x, title, ag, rate){
+        let yy = y
+        doc.setFontSize(12); doc.setFont(undefined, 'bold'); doc.text(title, x, yy); doc.setFont(undefined, 'normal'); yy += 12
+        const cardTop = yy + 8
+        const cardH = 360
+        doc.setDrawColor(230); doc.setFillColor(246,246,246); doc.roundedRect(x, cardTop, colW, cardH, 8, 8, 'FD')
+        let innerY = cardTop + 24
+        doc.setFontSize(14); doc.text('Resumo do Período', x + 16, innerY); innerY += 8
+
+        const items = [
+          { label: 'Produzindo', value: ag.totalProdH||0, color: '#0a7' },
+          { label: 'Parada', value: ag.totalParadaH||0, color: '#e74c3c' },
+          { label: 'Baixa Eficiência', value: ag.totalLowEffH||0, color: '#ffc107' },
+          { label: 'Sem Programação', value: ag.totalSemProgH||0, color: '#3498db' }
+        ]
+        const svg = createDonutSvg({ items, total: ag.totalDisponivelH||0 })
+        const png = await svgToPngDataUrl(svg, 240, 240)
+        const donutX = x + 16
+        const donutY = innerY + 8
+        doc.addImage(png, 'PNG', donutX, donutY, 240, 240)
+
+        // Valor total disponível
+        let infoY = donutY + 240 + 10
+        const totalVal = (Number(ag.totalDisponivelH||0) * Number(rate||0))
+        doc.setFontSize(10); doc.setTextColor(0)
+        doc.text(`Valor Total Disponível: `, donutX, infoY)
+        doc.setFont(undefined, 'bold'); doc.text(`${fmtCurrencyBR(totalVal)}`, donutX + 150, infoY)
+        doc.setFont(undefined, 'normal')
+
+        // Legenda com R$ por indicador
+        let legendY = infoY + 18
+        doc.setFontSize(11)
+        function pctOf(h){ return (ag.totalDisponivelH? ((Number(h)||0)/ag.totalDisponivelH*100) : 0).toFixed(1).replace('.',',') + '%' }
+        for(const it of items){
+          const val = (Number(it.value)||0) * Number(rate||0)
+          doc.setFillColor(it.color)
+          doc.setDrawColor(255); doc.rect(donutX, legendY - 8, 10, 10, 'F')
+          doc.setTextColor(0)
+          doc.text(`${it.label}: `, donutX + 16, legendY)
+          doc.setFont(undefined, 'bold'); doc.text(`${fmtCurrencyBR(val)} `, donutX + 90, legendY)
+          doc.setFont(undefined, 'normal'); doc.setTextColor(102)
+          doc.text(`- ${pctOf(it.value)}`, donutX + 180, legendY)
+          doc.setTextColor(0)
+          legendY += 16
+        }
+      }
+
+      await drawValSector(xPet, 'PET', petAgg, petRate)
+      await drawValSector(xInj, 'INJEÇÃO', injAgg, injRate)
+
+      doc.save('valorizacao-indicadores.pdf')
+    }catch(err){
+      console.error('Falha ao gerar PDF de valorização:', err)
+      alert('Não foi possível gerar o PDF de valorização. Verifique se a dependência jspdf está instalada e os itens possuem ciclo/cavidades/valor.')
+    }
+  }
+
   // ====== Correção de eventos (Parada / Baixa Eficiência) ======
   const [editEv, setEditEv] = useState(null); // { type: 'stop'|'loweff'|'start'|'interrupt'|'restart'|'end', id, rawId?, orderId?, when, end, reason?, notes? }
   const [editForm, setEditForm] = useState({ started: '', ended: '', reason: '', notes: '' });
@@ -744,7 +1162,15 @@ export default function Registro({ registroGrupos = [], openSet, toggleOpen, isA
   return (
     <div className="card registro-wrap">
       <div className="card">
-        <div className="label" style={{ marginBottom: 8 }}>Histórico de Produção por Máquina</div>
+        <div className="label" style={{ marginBottom: 8, display: 'flex', alignItems: 'center' }}>
+          Histórico de Produção por Máquina
+          <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
+            <button className="btn" onClick={handleDownloadPdf} title="Baixar relatório de indicadores em PDF">Baixar PDF</button>
+            {isAdmin && (
+              <button className="btn" onClick={handleDownloadValorizationPdf} title="Baixar valorização dos indicadores em PDF">Valorização</button>
+            )}
+          </div>
+        </div>
 
         <Filters periodo={periodo} setPeriodo={setPeriodo} customDate={customDate} setCustomDate={setCustomDate} filtroMaquina={filtroMaquina} setFiltroMaquina={setFiltroMaquina} />
 
