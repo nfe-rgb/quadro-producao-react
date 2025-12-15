@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react'
+import { DateTime } from 'luxon'
 import { supabase } from '../lib/supabaseClient'
 import PieChartIndicadores from '../components/PieChartIndicadores'
 import { fmtDateTime, fmtDuracao } from '../lib/utils'
@@ -17,7 +18,7 @@ const toTime = v => {
   return Number.isFinite(t) ? t : null
 }
 
-function getPeriodoRange(p, customStart, customEnd, now = new Date()) {
+function getPeriodoRange(p, customStart, _unusedCustomEnd, now = new Date()) {
   // Retorna { start: Date|null, end: Date|null }
   let start = null, end = null
   if (p === 'hoje') {
@@ -39,8 +40,17 @@ function getPeriodoRange(p, customStart, customEnd, now = new Date()) {
     start = new Date(now.getFullYear(), now.getMonth() - 1, 1, 0, 0, 0, 0)
     end = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0)
   } else if (p === 'custom') {
-    start = customStart ? new Date(customStart) : null
-    end = customEnd ? new Date(customEnd) : null
+    // Igual Apontamento.jsx: um dia específico em America/Sao_Paulo
+    if (customStart) {
+      const dayZ = DateTime.fromISO(String(customStart), { zone: 'America/Sao_Paulo' })
+      const startZ = dayZ.startOf('day')
+      const endZ = dayZ.endOf('day')
+      start = startZ.toJSDate()
+      end = endZ.toJSDate()
+    } else {
+      start = null
+      end = null
+    }
   }
   return { start, end }
 }
@@ -308,7 +318,7 @@ function calculateAggregates({ gruposPorMaquina, filtroStart, filtroEnd, maquina
 // =========================
 // Subcomponentes pequenos (apenas para organização visual)
 // =========================
-function Filters({ periodo, setPeriodo, customStart, setCustomStart, customEnd, setCustomEnd, filtroMaquina, setFiltroMaquina }) {
+function Filters({ periodo, setPeriodo, customDate, setCustomDate, filtroMaquina, setFiltroMaquina }) {
   return (
     <div style={{ display: 'flex', gap: 12, marginBottom: 16 }}>
       <div className="select-wrap">
@@ -324,8 +334,7 @@ function Filters({ periodo, setPeriodo, customStart, setCustomStart, customEnd, 
 
       {periodo === 'custom' && (
         <>
-          <input type="date" value={customStart} onChange={e => setCustomStart(e.target.value)} />
-          <input type="date" value={customEnd} onChange={e => setCustomEnd(e.target.value)} />
+          <input type="date" value={customDate} onChange={e => setCustomDate(e.target.value)} />
         </>
       )}
 
@@ -417,8 +426,7 @@ export default function Registro({ registroGrupos = [], openSet, toggleOpen, isA
 
   const [openMachines, setOpenMachines] = useState(new Set())
   const [periodo, setPeriodo] = useState('hoje')
-  const [customStart, setCustomStart] = useState('')
-  const [customEnd, setCustomEnd] = useState('')
+  const [customDate, setCustomDate] = useState('')
   const [filtroMaquina, setFiltroMaquina] = useState('todas')
 
   // Único filtro incluindo grupos PET/Injeção
@@ -437,14 +445,14 @@ export default function Registro({ registroGrupos = [], openSet, toggleOpen, isA
   maquinasConsideradas = maquinasConsideradas.filter(m => MAQUINAS.includes(m))
 
   // 1) Period range (centralizado)
-  const periodoRange = useMemo(() => getPeriodoRange(periodo, customStart, customEnd, new Date()), [periodo, customStart, customEnd, tick])
+  const periodoRange = useMemo(() => getPeriodoRange(periodo, customDate, undefined, new Date()), [periodo, customDate, tick])
   const filtroStart = periodoRange.start
   const filtroEnd = periodoRange.end
 
   // 2) Filtrar registros por período (clean)
   const gruposFiltrados = useMemo(() => {
     const source = Array.isArray(registroGrupos) ? registroGrupos : []
-    if (periodo === 'custom' && (!customStart || !customEnd)) return []
+    if (periodo === 'custom' && !customDate) return []
     if (!filtroStart || !filtroEnd) return source
 
     return source.filter(g => {
@@ -479,7 +487,7 @@ export default function Registro({ registroGrupos = [], openSet, toggleOpen, isA
       const resultado = startedInRange || restartedInRange || finalizedInRange || openInRange || abertaAposInicio || reiniciadaAberta || hasOpenStop
       return resultado
     })
-  }, [registroGrupos, filtroStart, filtroEnd, periodo, customStart, customEnd, tick])
+  }, [registroGrupos, filtroStart, filtroEnd, periodo, customDate, tick])
 
   // 3) Filtrar por máquina
   const gruposFiltradosMaquina = useMemo(() => {
@@ -738,10 +746,10 @@ export default function Registro({ registroGrupos = [], openSet, toggleOpen, isA
       <div className="card">
         <div className="label" style={{ marginBottom: 8 }}>Histórico de Produção por Máquina</div>
 
-        <Filters periodo={periodo} setPeriodo={setPeriodo} customStart={customStart} setCustomStart={setCustomStart} customEnd={customEnd} setCustomEnd={setCustomEnd} filtroMaquina={filtroMaquina} setFiltroMaquina={setFiltroMaquina} />
+        <Filters periodo={periodo} setPeriodo={setPeriodo} customDate={customDate} setCustomDate={setCustomDate} filtroMaquina={filtroMaquina} setFiltroMaquina={setFiltroMaquina} />
 
-        {periodo === 'custom' && (!customStart || !customEnd) ? (
-          <div className="row muted" style={{ padding: '32px 0', textAlign: 'center', fontSize: 18, background: '#f6f6f6' }}>Selecione as duas datas para visualizar os indicadores.</div>
+        {periodo === 'custom' && !customDate ? (
+          <div className="row muted" style={{ padding: '32px 0', textAlign: 'center', fontSize: 18, background: '#f6f6f6' }}>Selecione a data para visualizar os indicadores.</div>
         ) : (
           <div className="card" style={{ marginBottom: 16, background: '#f6f6f6', padding: 16 }}>
             <div className="label" style={{ marginBottom: 8, textAlign: 'center' }}>Resumo do Período</div>
