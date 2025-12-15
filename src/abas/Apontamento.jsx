@@ -1,8 +1,10 @@
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, useCallback } from 'react';
 import { DateTime } from 'luxon';
 import { supabase } from '../lib/supabaseClient';
 import { MAQUINAS } from '../lib/constants';
 import { fmtDateTime, getTurnoAtual } from '../lib/utils';
+import useAuthAdmin from '../hooks/useAuthAdmin';
+import { toBrazilTime } from '../lib/timezone';
 import { calcularHorasParadasPorTurno, formatMsToHHmm } from '../lib/paradasPorTurno';
 import '../styles/Apontamento.css';
 import Modal from '../components/Modal';
@@ -31,10 +33,13 @@ const TURNOS = [
   { key: '1', label: 'Turno 1' },
   { key: '2', label: 'Turno 2' },
 ];
-
-export default function Apontamento({ isAdmin = false }) {
+export default function Apontamento({ isAdmin: _unusedIsAdminProp = false }) {
+  const adminObj = typeof useAuthAdmin === 'function' ? useAuthAdmin() : { isAdmin: false };
+  const isAdmin = Boolean(adminObj && adminObj.isAdmin); // só libera para admin verdadeiro
   const [bipagens, setBipagens] = useState([]);
   const [refugos, setRefugos] = useState([]);
+  const [apontamentos, setApontamentos] = useState([]); // Produção manual das injetoras
+  const [toast, setToast] = useState({ visible: false, type: 'ok', msg: '' });
   const [orders, setOrders] = useState([]); // O.S relevantes
   const [ordersAll, setOrdersAll] = useState([]); // Todas as O.S registradas
   const [paradas, setParadas] = useState([]); // Paradas de máquina
@@ -55,6 +60,77 @@ export default function Apontamento({ isAdmin = false }) {
     goodQty: '',
     scrapEntries: [{ qty: '', reason: '' }],
   });
+
+  // Helpers locais para fatiar paradas por turno (clipping por turno)
+  function getTurnoIntervalsDiaLocal(date) {
+    const dia = date.getDay();
+    if (dia === 0) {
+      return [
+        { ini: 23 * 60, fim: 24 * 60, turnoKey: '3' },
+      ];
+    }
+    if (dia >= 1 && dia <= 5) {
+      return [
+        { ini: 5 * 60, fim: 13 * 60 + 30, turnoKey: '1' },
+        { ini: 13 * 60 + 30, fim: 22 * 60, turnoKey: '2' },
+        { ini: 22 * 60, fim: 24 * 60, turnoKey: '3' },
+        { ini: 0, fim: 5 * 60, turnoKey: '3' },
+      ];
+    }
+    if (dia === 6) {
+      return [
+        { ini: 0, fim: 5 * 60, turnoKey: '3' },
+        { ini: 5 * 60, fim: 9 * 60, turnoKey: '1' },
+        { ini: 9 * 60, fim: 13 * 60, turnoKey: '2' },
+      ];
+    }
+    return [];
+  }
+
+  function inRangeMinutes(minIni, minFim, minutos) {
+    if (minIni <= minFim) return minutos >= minIni && minutos < minFim;
+    return minutos >= minIni || minutos < minFim;
+  }
+
+  function splitIntervalPorTurnoLocal(iniMs, fimMs) {
+    const res = [];
+    let cursor = iniMs;
+    while (cursor < fimMs) {
+      const dBr = toBrazilTime(new Date(cursor).toISOString());
+      const minutos = dBr.getHours() * 60 + dBr.getMinutes();
+      const turnosDia = getTurnoIntervalsDiaLocal(dBr);
+      let fatia = null;
+      for (const t of turnosDia) {
+        if (inRangeMinutes(t.ini, t.fim, minutos)) {
+          let fatiaFimMin = t.fim;
+          if (t.fim <= t.ini) fatiaFimMin += 24 * 60;
+          const deltaMin = fatiaFimMin - minutos;
+          const fatiaFim = cursor + (deltaMin * 60 * 1000);
+          // Corrige off-by-one quando o fim cai em 23:59:59.999 e o limite real é 00:00
+          let limite = Math.min(fimMs, fatiaFim);
+          if (limite === fimMs && (fatiaFim - fimMs) <= 1000) {
+            limite = fatiaFim;
+          }
+          fatia = { turnoKey: t.turnoKey, ini: cursor, fim: limite };
+          break;
+        }
+      }
+      if (!fatia) {
+        const nextMin = Math.min(fimMs, cursor + 60 * 1000);
+        fatia = { turnoKey: null, ini: cursor, fim: nextMin };
+      }
+      res.push(fatia);
+      cursor = fatia.fim;
+    }
+    return res;
+  }
+
+  // ---------- TOAST helper ----------
+  function showToast(msg, type = 'ok', ms = 2400) {
+    setToast({ visible: true, type, msg });
+    window.clearTimeout(showToast._t);
+    showToast._t = window.setTimeout(() => setToast(t => ({ ...t, visible: false })), ms);
+  }
 
   function getPeriodoRange(p) {
     // Todas as janelas são baseadas no fuso America/Sao_Paulo,
@@ -98,6 +174,65 @@ export default function Apontamento({ isAdmin = false }) {
   const filtroStart = periodoRange.start;
   const filtroEnd = periodoRange.end;
 
+  // Reconsulta completa do período atual
+  const refetchData = useCallback(async () => {
+    if (!filtroStart || !filtroEnd) {
+      setBipagens([]); setRefugos([]); setParadas([]); setApontamentos([]); setOrders([]);
+      return;
+    }
+
+    try {
+      const bipQuery = supabase
+        .from('production_scans')
+        .select('*')
+        .gte('created_at', filtroStart.toISOString())
+        .lte('created_at', filtroEnd.toISOString());
+
+      const refQuery = supabase
+        .from('scrap_logs')
+        .select('*')
+        .gte('created_at', filtroStart.toISOString())
+        .lte('created_at', filtroEnd.toISOString());
+
+      const paradaQuery = supabase
+        .from('machine_stops')
+        .select('*')
+        .lte('started_at', filtroEnd.toISOString())
+        .or(`resumed_at.gte.${filtroStart.toISOString()},resumed_at.is.null`);
+
+      const apontQuery = supabase
+        .from('injection_production_entries')
+        .select('*')
+        .gte('created_at', filtroStart.toISOString())
+        .lte('created_at', filtroEnd.toISOString());
+
+      const [bipRes, refRes, parRes, apRes] = await Promise.all([bipQuery, refQuery, paradaQuery, apontQuery]);
+      const { data: bip } = bipRes || {}; const { data: ref } = refRes || {}; const { data: par } = parRes || {}; const { data: aps } = apRes || {};
+
+      setBipagens(bip || []);
+      setRefugos(ref || []);
+      setParadas(par || []);
+      setApontamentos(aps || []);
+
+      // buscar orders relevantes
+      const orderIdsSet = new Set();
+      (bip || []).forEach(b => { if (b.order_id != null) orderIdsSet.add(String(b.order_id)); });
+      (ref || []).forEach(r => { if (r.order_id != null) orderIdsSet.add(String(r.order_id)); });
+      const orderIds = Array.from(orderIdsSet);
+      if (orderIds.length > 0) {
+        const { data: ords } = await supabase
+          .from('orders')
+          .select('id,code,standard,created_at,boxes')
+          .in('id', orderIds);
+        setOrders(ords || []);
+      } else {
+        setOrders([]);
+      }
+    } catch (e) {
+      console.warn('Refetch falhou:', e);
+    }
+  }, [filtroStart, filtroEnd]);
+
   useEffect(() => {
     let mounted = true;
 
@@ -131,17 +266,26 @@ export default function Apontamento({ isAdmin = false }) {
           .lte('started_at', filtroEnd.toISOString())
           .or(`resumed_at.gte.${filtroStart.toISOString()},resumed_at.is.null`);
 
+        // produção manual das injetoras
+        const apontQuery = supabase
+          .from('injection_production_entries')
+          .select('*')
+          .gte('created_at', filtroStart.toISOString())
+          .lte('created_at', filtroEnd.toISOString());
+
         // fetch bipagens, refugos e paradas
-        const [{ data: bip }, { data: ref }, { data: par }] = await Promise.all([bipQuery, refQuery, paradaQuery]);
+        const [{ data: bip }, { data: ref }, { data: par }, { data: aps }] = await Promise.all([bipQuery, refQuery, paradaQuery, apontQuery]);
 
         if (!mounted) return;
         const bipagensData = bip || [];
         const refugosData = ref || [];
         const paradasData = par || [];
+        const apontData = aps || [];
 
         setBipagens(bipagensData);
         setRefugos(refugosData);
         setParadas(paradasData);
+        setApontamentos(apontData);
 
         // extrair order_id únicos de ambas as tabelas
         const orderIdsSet = new Set();
@@ -234,6 +378,7 @@ export default function Apontamento({ isAdmin = false }) {
           caixas: [], // { num, hora, order_id, order }
           refugos: [],
           producaoPecas: 0,
+          producaoManual: 0,
           refugoPct: 0,
           padraoPorCaixa: 1
         };
@@ -267,6 +412,14 @@ export default function Apontamento({ isAdmin = false }) {
       porTurno[turno][maq].refugos.push(r);
     });
 
+    // somar produção manual das injetoras
+    (apontamentos || []).forEach(a => {
+      const turno = a.shift || String(getTurnoAtual(a.created_at));
+      const maq = a.machine_id;
+      if (!porTurno[turno] || !porTurno[turno][maq]) return;
+      porTurno[turno][maq].producaoManual += Number(a.good_qty) || 0;
+    });
+
     // calcular produção e percentual usando padrão da O.S quando disponível
     Object.keys(porTurno).forEach(turnoKey => {
       Object.keys(porTurno[turnoKey]).forEach(maq => {
@@ -295,7 +448,8 @@ export default function Apontamento({ isAdmin = false }) {
           if (std > 0) standardsSet.add(std);
         }
 
-        dados.producaoPecas = somaPecas;
+        // soma produção escaneada (caixas) + produção manual (injetoras)
+        dados.producaoPecas = somaPecas + (Number(dados.producaoManual) || 0);
         // Se todos os padrões forem iguais, mantém para exibição. Caso contrário, sinaliza como variados.
         dados.padraoPorCaixa = standardsSet.size === 1 ? Number([...standardsSet][0]) : null;
 
@@ -309,12 +463,13 @@ export default function Apontamento({ isAdmin = false }) {
     });
 
     return porTurno;
-  }, [bipagens, refugos, ordersMap]);
+  }, [bipagens, refugos, ordersMap, apontamentos]);
 
   // RENDER
   return (
     <div className="apontamento-card card registro-wrap">
       <div className="card-inner">
+        <div className={`apontamento-toast ${toast.type === 'ok' ? 'ok' : 'err'} ${toast.visible ? 'show' : ''}`} role="status" aria-live="polite">{toast.msg}</div>
         <div className="apontamento-title label" style={{ display: 'flex', alignItems: 'center' }}>
           Apontamentos por Turno
           {isAdmin && (
@@ -501,6 +656,78 @@ export default function Apontamento({ isAdmin = false }) {
                                   </ul>
                                 </div>
                               )}
+
+                              {/* Paradas detalhadas no turno (clipe por turno e período) */}
+                              <div className="registros-section">
+                                <div style={{ marginTop: 4, fontSize: 13, color: '#444' }}>
+                                  <b>Paradas:</b> {formatMsToHHmm(horasParadasPorTurno[t.key]?.[maq] || 0)}
+                                </div>
+                                {(() => {
+                                  const segs = [];
+                                  const nowMs = Date.now();
+                                  (paradas || [])
+                                    .filter(p => String(p.machine_id) === String(maq))
+                                    .forEach(p => {
+                                      const ini = p.started_at ? toBrazilTime(p.started_at).getTime() : null;
+                                      const fimBase = p.resumed_at ? toBrazilTime(p.resumed_at).getTime() : Math.min(filtroEnd ? filtroEnd.getTime() : nowMs, nowMs);
+                                      if (!ini || !fimBase || fimBase <= ini) return;
+                                      const iniClip = Math.max(ini, filtroStart ? filtroStart.getTime() : ini);
+                                      const fimClip = Math.min(fimBase, filtroEnd ? filtroEnd.getTime() : fimBase);
+                                      if (fimClip <= iniClip) return;
+                                      const fatias = splitIntervalPorTurnoLocal(iniClip, fimClip);
+                                      for (const f of fatias) {
+                                        if (f.turnoKey && String(f.turnoKey) === String(t.key)) {
+                                          segs.push({
+                                            ini: f.ini,
+                                            fim: f.fim,
+                                            reason: p.reason || '-',
+                                            id: p.id,
+                                            origIni: p.started_at || null,
+                                            origFim: p.resumed_at || null,
+                                            original: p,
+                                          });
+                                        }
+                                      }
+                                    });
+                                  if (segs.length === 0) return <div className="empty">—</div>;
+                                  segs.sort((a,b)=>a.ini-b.ini);
+                                  return (
+                                    <ul className="caixas-list">
+                                      {segs.map((s, i) => {
+                                        const iniISO = new Date(s.ini).toISOString();
+                                        const fimISO = new Date(s.fim).toISOString();
+                                        const ms = Math.max(0, s.fim - s.ini);
+                                        return (
+                                          <li
+                                            key={i}
+                                            title={(() => {
+                                              const oIni = s.origIni ? fmtDateTime(s.origIni) : '-';
+                                              const oFim = s.origFim ? fmtDateTime(s.origFim) : '— (em aberto)';
+                                              return `Parada original: ${oIni} — ${oFim}`;
+                                            })()}
+                                            onClick={() => {
+                                              try {
+                                                if (s.id && navigator?.clipboard?.writeText) {
+                                                  navigator.clipboard.writeText(String(s.id));
+                                                }
+                                              } catch {}
+                                              try {
+                                                // Log detalhado no console para localizar no Supabase
+                                                // Inclui o registro completo retornado do backend
+                                                // eslint-disable-next-line no-console
+                                                console.log('Parada original', s.original);
+                                              } catch {}
+                                            }}
+                                            style={{ cursor: 'pointer' }}
+                                          >
+                                            {fmtDateTime(iniISO)} — {fmtDateTime(fimISO)} • {s.reason} • {formatMsToHHmm(ms)}
+                                          </li>
+                                        );
+                                      })}
+                                    </ul>
+                                  );
+                                })()}
+                              </div>
                             </div>
                           )}
                         </div>
@@ -652,7 +879,77 @@ export default function Apontamento({ isAdmin = false }) {
                     .filter((e) => e.qty > 0 && e.reason.length > 0),
                 };
                 try {
-                  console.log('Apontamento manual:', payload);
+                  if (!payload.date || !payload.machine || !payload.turno || !payload.osCode) {
+                    showToast('Preencha Data, Máquina, Turno e O.S.', 'err');
+                    return;
+                  }
+                  if (payload.goodQty < 0) {
+                    showToast('Peças Boas deve ser >= 0.', 'err');
+                    return;
+                  }
+
+                  // Resolve O.S -> order_id + product
+                  let ordSel = null;
+                  {
+                    const q = supabase
+                      .from('orders')
+                      .select('id, code, product, machine_id, created_at')
+                      .eq('code', payload.osCode)
+                      .order('created_at', { ascending: false })
+                      .limit(1);
+                    const { data: ordData, error: ordErr } = await q;
+                    if (ordErr || !ordData || !ordData[0]) {
+                      showToast('O.S não encontrada.', 'err');
+                      return;
+                    }
+                    ordSel = ordData[0];
+                  }
+
+                  // Converter a data escolhida (sem hora) para meio-dia BR e gravar UTC
+                  const diaZ = DateTime.fromISO(String(payload.date), { zone: 'America/Sao_Paulo' }).set({ hour: 12, minute: 0, second: 0, millisecond: 0 });
+                  const createdAtUtcIso = diaZ.toUTC().toISO();
+
+                  // 1) Inserir produção manual
+                  const prodIns = {
+                    entry_date: diaZ.toISODate(),
+                    created_at: createdAtUtcIso,
+                    machine_id: payload.machine,
+                    shift: String(payload.turno),
+                    order_id: ordSel.id,
+                    order_code: ordSel.code,
+                    product: ordSel.product || '',
+                    good_qty: Number(payload.goodQty || 0),
+                  };
+                  const { error: eProd } = await supabase.from('injection_production_entries').insert([prodIns]);
+                  if (eProd) {
+                    console.warn('Erro ao inserir produção manual:', eProd);
+                    showToast('Falha ao registrar produção manual.', 'err');
+                    return;
+                  }
+
+                  // 2) Inserir refugos (scrap_logs), se houver
+                  if (payload.scrapEntries.length > 0) {
+                    const scrapRows = payload.scrapEntries.map((s) => ({
+                      created_at: createdAtUtcIso,
+                      machine_id: payload.machine,
+                      shift: String(payload.turno),
+                      operator: 'apontamento-manual',
+                      order_id: ordSel.id,
+                      op_code: String(ordSel.code),
+                      qty: Number(s.qty),
+                      reason: s.reason,
+                    }));
+                    const { error: eScrap } = await supabase.from('scrap_logs').insert(scrapRows);
+                    if (eScrap) {
+                      console.warn('Erro ao inserir scrap_logs:', eScrap);
+                      showToast('Falha ao registrar refugo.', 'err');
+                      return;
+                    }
+
+                    // Observação: refugo deve ser registrado apenas em scrap_logs (sem espelhar em low_efficiency_logs)
+                  }
+
+                  // Reset UI
                   setManualOpen(false);
                   setManualForm({
                     date: DateTime.now().setZone('America/Sao_Paulo').toISODate(),
@@ -662,8 +959,12 @@ export default function Apontamento({ isAdmin = false }) {
                     goodQty: '',
                     scrapEntries: [{ qty: '', reason: '' }],
                   });
+                  // reconsulta para refletir números sem F5
+                  await refetchData();
+                  showToast('Apontamento registrado.', 'ok');
                 } catch (err) {
                   console.warn('Falha ao registrar apontamento manual', err);
+                  showToast('Falha ao registrar apontamento.', 'err');
                 }
               }}
             >

@@ -15,9 +15,8 @@ function getTurnoIntervalsDia(date) {
   // Turno 3: 22:00 às 05:00
   if (dia === 0) { // Domingo
     return [
-      { ini: 22 * 60, fim: 24 * 60, turnoKey: '3' }, // 22:00 até 00:00
-      { ini: 0, fim: 5 * 60, turnoKey: '3' },         // 00:00 até 05:00
-      // resto é hora extra
+      { ini: 23 * 60, fim: 24 * 60, turnoKey: '3' }, // 23:00 até 00:00
+      // resto é hora extra (não considerar 00:00–05:00 no domingo)
     ];
   }
   if (dia >= 1 && dia <= 5) { // Segunda a Sexta
@@ -30,9 +29,10 @@ function getTurnoIntervalsDia(date) {
   }
   if (dia === 6) { // Sábado
     return [
+      { ini: 0, fim: 5 * 60, turnoKey: '3' },        // 00:00 até 05:00
       { ini: 5 * 60, fim: 9 * 60, turnoKey: '1' },   // 05:00 até 09:00
       { ini: 9 * 60, fim: 13 * 60, turnoKey: '2' },  // 09:00 até 13:00
-      // resto é hora extra
+      // resto é hora extra (não considerar 23:00–00:00 no sábado)
     ];
   }
   return [];
@@ -57,28 +57,23 @@ function splitIntervalPorTurno(iniMs, fimMs) {
         if (t.fim <= t.ini) fatiaFimMin += 24 * 60; // cruza meia-noite
         const deltaMin = fatiaFimMin - minutos;
         let fatiaFim = cursor + (deltaMin * 60 * 1000);
+        // Aplica limite do intervalo e corrige off-by-one no fim do dia (~23:59:59.999)
+        let limite = Math.min(fimMs, fatiaFim);
+        if (limite === fimMs && (fatiaFim - fimMs) <= 1000) {
+          limite = fatiaFim;
+        }
         fatia = {
           turnoKey: t.turnoKey,
           ini: cursor,
-          fim: Math.min(fimMs, fatiaFim)
+          fim: limite
         };
         break;
       }
     }
     if (!fatia) {
-      // Hora extra: ainda deve contar como parada em apontamento.
-      // Vamos atribuir ao turno calculado pelo util `getTurnoAtual` no fuso BR.
-      // Caso retorne "Hora Extra", por consistência vamos acumular sob o turno 3.
-      try {
-        const { getTurnoAtual } = require('./utils');
-        const turnoCalc = String(getTurnoAtual(dBr));
-        const turnoKey = turnoCalc === 'Hora Extra' ? '3' : turnoCalc;
-        const nextMin = Math.min(fimMs, cursor + 60 * 1000);
-        fatia = { turnoKey, ini: cursor, fim: nextMin };
-      } catch {
-        const nextMin = Math.min(fimMs, cursor + 60 * 1000);
-        fatia = { turnoKey: '3', ini: cursor, fim: nextMin };
-      }
+      // Fora de turno: não atribuir a nenhum turno (não contará em totais por turno)
+      const nextMin = Math.min(fimMs, cursor + 60 * 1000);
+      fatia = { turnoKey: null, ini: cursor, fim: nextMin };
     }
     res.push(fatia);
     cursor = fatia.fim;
