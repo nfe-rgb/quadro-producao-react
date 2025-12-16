@@ -1,38 +1,14 @@
 import { useEffect, useState, useMemo, useCallback } from 'react';
 import { DateTime } from 'luxon';
 import { supabase } from '../lib/supabaseClient';
-import { MAQUINAS } from '../lib/constants';
+import { MAQUINAS, REFUGO_MOTIVOS, TURNOS } from '../lib/constants';
 import { fmtDateTime, getTurnoAtual } from '../lib/utils';
 import useAuthAdmin from '../hooks/useAuthAdmin';
 import { toBrazilTime } from '../lib/timezone';
 import { calcularHorasParadasPorTurno, formatMsToHHmm } from '../lib/paradasPorTurno';
 import '../styles/Apontamento.css';
 import Modal from '../components/Modal';
-// Motivos padrão de refugo (mesmos usados em Pet01)
-const REFUGO_MOTIVOS = [
-  'Troca de Cor',
-  'Regulagem',
-  'Rebarba',
-  'Bolha',
-  'Contaminação ou Caídas no Chão',
-  'Ponto de Injeção Alto ou Deslocado',
-  'Sujas de Óleo',
-  'Fora de Cor',
-  'Parede Fraca',
-  'Fundo/Ombro Deformado',
-  'Peças falhadas',
-  'Peças Furadas',
-  'Fiapo',
-  'Queimadas',
-  'Manchadas',
-];
 
-
-const TURNOS = [
-  { key: '3', label: 'Turno 3' },
-  { key: '1', label: 'Turno 1' },
-  { key: '2', label: 'Turno 2' },
-];
 export default function Apontamento({ isAdmin: _unusedIsAdminProp = false }) {
   const adminObj = typeof useAuthAdmin === 'function' ? useAuthAdmin() : { isAdmin: false };
   const isAdmin = Boolean(adminObj && adminObj.isAdmin); // só libera para admin verdadeiro
@@ -839,9 +815,7 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false }) {
                       }}
                     >
                       <option value="">Motivo Refugo</option>
-                      {REFUGO_MOTIVOS.map((mot) => (
-                        <option key={mot} value={mot}>{mot}</option>
-                      ))}
+                      {REFUGO_MOTIVOS.map(m=> <option key={m} value={m}>{m}</option>)}
                     </select>
                     <button
                       key={`add-${idx}`}

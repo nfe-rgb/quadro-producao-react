@@ -10,3 +10,12 @@ export const MOTIVOS_PARADA = [
   'TRY-OUT / TESTE','QUALIDADE / REGULAGEM','MANUTENÇÃO ELÉTRICA','MANUTENÇÃO MECÂNICA',
   'FALTA DE PEDIDO','FIM OP','FALTA DE ABASTECIMENTO','FALTA DE INSUMOS','FALTA DE ENERGIA ELÉTRICA','FALTA DE PROGRAMAÇÃO',
 ]
+export const REFUGO_MOTIVOS = ['Troca de Cor','Regulagem','Rebarba','Bolha','Contaminação ou Caídas no Chão',
+  'Ponto de Injeção Alto ou Deslocado','Sujas de Óleo','Fora de Cor','Parede Fraca','Fundo/Ombro Deformado',
+  'Peças falhadas','Peças Furadas','Fiapo','Queimadas','Manchadas',
+];
+export const TURNOS = [
+  { key: '3', label: 'Turno 3' },
+  { key: '1', label: 'Turno 1' },
+  { key: '2', label: 'Turno 2' },
+];

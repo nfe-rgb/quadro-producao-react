@@ -6,6 +6,7 @@ import { getTurnoAtual, statusClass } from "../lib/utils";
 import { toBrazilTime } from "../lib/timezone";
 import { DateTime } from "luxon";
 import "../styles/Pet01.css";
+import { REFUGO_MOTIVOS } from "../lib/constants";
 
 export default function Pet01({
   registroGrupos,
@@ -25,27 +26,7 @@ export default function Pet01({
   const [proximo, setProximo] = useState(null);
   const [scans, setScans] = useState([]);
 
-  const [refugoForm, setRefugoForm] = useState({ operador: "", turno: "", quantidade: "", motivo: "Rebarba",});
-  // --------------------------
-  // Motivos padrão de refugo
-  // --------------------------
-  const REFUGO_MOTIVOS = [
-    "Troca de Cor",
-    "Regulagem",
-    "Rebarba",
-    "Bolha",
-    "Contaminação ou Caídas no Chão",
-    "Ponto de Injeção Alto ou Deslocado",
-    "Sujas de Óleo",
-    "Fora de Cor",
-    "Parede Fraca",
-    "Fundo/Ombro Deformado",
-    "Peças falhadas",
-    "Peças Furadas",
-    "Fiapo",
-    "Queimadas",
-    "Manchadas",
-  ];
+  const [refugoForm, setRefugoForm] = useState({ operador: "", turno: "", quantidade: "", motivo: "",});
 
   const [showRefugo, setShowRefugo] = useState(false);
 
