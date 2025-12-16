@@ -20,6 +20,7 @@
   letter-spacing:.3px;
   color: var(--text);
 }
+
 .tableline{ padding: 8px 0; border-bottom: 1px dashed var(--border); }
 
 /* O wrapper padrão vira rolável quando a linha for larga */

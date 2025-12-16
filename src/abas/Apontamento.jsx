@@ -108,6 +108,67 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false }) {
     showToast._t = window.setTimeout(() => setToast(t => ({ ...t, visible: false })), ms);
   }
 
+  // A duração do turno por período é calculada após `filtroStart/filtroEnd`.
+
+  // Componente simples de donut percentual
+  function DonutPct({ pct = 0 }) {
+    const p = Math.max(0, Math.min(100, Number(pct) || 0));
+    const size = 24;
+    const stroke = 4;
+    const r = (size - stroke) / 2;
+    const c = 2 * Math.PI * r;
+    const offset = c * (1 - p / 100);
+    return (
+      <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+        <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} aria-label={`Eficiência ${p}%`}>
+          <circle cx={size/2} cy={size/2} r={r} stroke="#e0e0e0" strokeWidth={stroke} fill="none" />
+          <circle
+            cx={size/2}
+            cy={size/2}
+            r={r}
+            stroke="#2b8a3e"
+            strokeWidth={stroke}
+            fill="none"
+            strokeDasharray={c}
+            strokeDashoffset={offset}
+            transform={`rotate(-90 ${size/2} ${size/2})`}
+          />
+        </svg>
+        <span style={{ fontSize: 12, color: '#333' }}>{p.toFixed(0)}%</span>
+      </div>
+    );
+  }
+
+  // Donut grande com percentual no centro
+  function BigDonutPct({ pct = 0 }) {
+    const p = Math.max(0, Math.min(100, Number(pct) || 0));
+    const size = 64;
+    const stroke = 8;
+    const r = (size - stroke) / 2;
+    const c = 2 * Math.PI * r;
+    const offset = c * (1 - p / 100);
+    const color = p >= 90 ? '#2b8a3e' : p >= 75 ? '#f59f00' : '#d9480f';
+    return (
+      <div style={{ display: 'inline-flex', alignItems: 'center', gap: 10 }}>
+        <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} aria-label={`Eficiência ${p}%`}>
+          <circle cx={size/2} cy={size/2} r={r} stroke="#e0e0e0" strokeWidth={stroke} fill="none" />
+          <circle
+            cx={size/2}
+            cy={size/2}
+            r={r}
+            stroke={color}
+            strokeWidth={stroke}
+            fill="none"
+            strokeDasharray={c}
+            strokeDashoffset={offset}
+            transform={`rotate(-90 ${size/2} ${size/2})`}
+          />
+          <text x={size/2} y={size/2 + 4} textAnchor="middle" fontSize="16" fontWeight="700" fill={color}>{p.toFixed(0)}%</text>
+        </svg>
+      </div>
+    );
+  }
+
   function getPeriodoRange(p) {
     // Todas as janelas são baseadas no fuso America/Sao_Paulo,
     // e convertidas para UTC para consulta no Supabase.
@@ -149,6 +210,30 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false }) {
   const periodoRange = useMemo(() => getPeriodoRange(periodo), [periodo, selectedDate]);
   const filtroStart = periodoRange.start;
   const filtroEnd = periodoRange.end;
+
+  // Calcula a duração total do turno dentro do período filtrado (em ms)
+  const duracaoTurnoPorPeriodo = useMemo(() => {
+    if (!filtroStart || !filtroEnd) return {};
+    const res = { '1': 0, '2': 0, '3': 0 };
+
+    // iterar dia a dia em America/Sao_Paulo
+    let cursor = DateTime.fromJSDate(filtroStart).setZone('America/Sao_Paulo').startOf('day');
+    const endZ = DateTime.fromJSDate(filtroEnd).setZone('America/Sao_Paulo').endOf('day');
+    while (cursor <= endZ) {
+      const dJs = cursor.toJSDate();
+      const fatias = getTurnoIntervalsDiaLocal(dJs);
+      fatias.forEach(f => {
+        let iniMin = f.ini;
+        let fimMin = f.fim;
+        // normaliza quando cruza meia-noite (fim <= ini)
+        if (fimMin <= iniMin) fimMin += 24 * 60;
+        const durMin = Math.max(0, fimMin - iniMin);
+        res[f.turnoKey] = (res[f.turnoKey] || 0) + durMin * 60 * 1000;
+      });
+      cursor = cursor.plus({ days: 1 });
+    }
+    return res;
+  }, [filtroStart, filtroEnd]);
 
   // Reconsulta completa do período atual
   const refetchData = useCallback(async () => {
@@ -548,9 +633,17 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false }) {
                         setTimeout(() => setParadasAnim(prev => ({ ...prev, [key]: false })), 250);
                       }
 
+                      // eficiência: (tempo de turno disponível - horas paradas) / tempo de turno disponível
+                      const totalTurnoMs = duracaoTurnoPorPeriodo[t.key] || (8.5 * 60 * 60 * 1000);
+                      const paradasMs = horasParadasPorTurno[t.key]?.[maq] || 0;
+                      const eficienciaPct = totalTurnoMs > 0 ? Math.max(0, Math.min(100, ((totalTurnoMs - paradasMs) / totalTurnoMs) * 100)) : 0;
+
                       return (
                         <div key={t.key} className="turno-card">
-                          <div className="turno-label">{t.label}</div>
+                          <div className="turno-label" style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                            <BigDonutPct pct={eficienciaPct} />
+                            {t.label}
+                          </div>
 
                           <div
                             className={`destaque destaque-bipadas ${isBipadasAnim ? 'anim-clicado' : ''}`}

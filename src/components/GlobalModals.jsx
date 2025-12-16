@@ -1,7 +1,17 @@
 // src/components/GlobalModals.jsx
-import React from 'react'
+import React, { useEffect } from 'react'
 import Modal from '../components/Modal'
 import { MAQUINAS, MOTIVOS_PARADA } from '../lib/constants'
+import { DateTime } from 'luxon'
+
+function safeDate(val){
+  if (val && /^\d{4}-\d{2}-\d{2}$/.test(String(val))) return String(val)
+  return DateTime.local().toFormat('yyyy-LL-dd')
+}
+function safeTime(val){
+  if (val && /^\d{2}:\d{2}$/.test(String(val))) return String(val)
+  return DateTime.local().toFormat('HH:mm')
+}
 
 export default function GlobalModals({
   editando, setEditando, finalizando, setFinalizando, confirmData, setConfirmData,
@@ -9,6 +19,66 @@ export default function GlobalModals({
   lowEffModal, setLowEffModal, lowEffEndModal, setLowEffEndModal,
   onUpdateOrder, onFinalize, onConfirmStart, onConfirmStop, onConfirmResume, onConfirmLowEffStart, onConfirmLowEffEnd
 }){
+  // Normaliza data/hora ao abrir cada modal, apenas na primeira renderização
+  useEffect(() => {
+    if (stopModal && !stopModal.__initApplied) {
+      const now = DateTime.local();
+      setStopModal(v => ({
+        ...v,
+        data: now.toFormat('yyyy-LL-dd'),
+        hora: now.toFormat('HH:mm'),
+        __initApplied: true,
+      }));
+    }
+  }, [stopModal, setStopModal]);
+
+  useEffect(() => {
+    if (startModal && !startModal.__initApplied) {
+      const now = DateTime.local();
+      setStartModal(v => ({
+        ...v,
+        data: now.toFormat('yyyy-LL-dd'),
+        hora: now.toFormat('HH:mm'),
+        __initApplied: true,
+      }));
+    }
+  }, [startModal, setStartModal]);
+
+  useEffect(() => {
+    if (resumeModal && !resumeModal.__initApplied) {
+      const now = DateTime.local();
+      setResumeModal(v => ({
+        ...v,
+        data: now.toFormat('yyyy-LL-dd'),
+        hora: now.toFormat('HH:mm'),
+        __initApplied: true,
+      }));
+    }
+  }, [resumeModal, setResumeModal]);
+
+  useEffect(() => {
+    if (lowEffModal && !lowEffModal.__initApplied) {
+      const now = DateTime.local();
+      setLowEffModal(v => ({
+        ...v,
+        data: now.toFormat('yyyy-LL-dd'),
+        hora: now.toFormat('HH:mm'),
+        __initApplied: true,
+      }));
+    }
+  }, [lowEffModal, setLowEffModal]);
+
+  useEffect(() => {
+    if (lowEffEndModal && !lowEffEndModal.__initApplied) {
+      const now = DateTime.local();
+      setLowEffEndModal(v => ({
+        ...v,
+        data: now.toFormat('yyyy-LL-dd'),
+        hora: now.toFormat('HH:mm'),
+        __initApplied: true,
+      }));
+    }
+  }, [lowEffEndModal, setLowEffEndModal]);
   return (
     <>
       {/* Editar */}
@@ -88,8 +158,8 @@ export default function GlobalModals({
           <div className="grid">
             <div><div className="label">Operador *</div><input className="input" value={stopModal.operador} onChange={e=>setStopModal(v=>({...v, operador:e.target.value}))} placeholder="Nome do operador"/></div>
             <div className="grid2">
-              <div><div className="label">Data *</div><input type="date" className="input" value={stopModal.data} onChange={e=>setStopModal(v=>({...v, data:e.target.value}))}/></div>
-              <div><div className="label">Hora *</div><input type="time" className="input" value={stopModal.hora} onChange={e=>setStopModal(v=>({...v, hora:e.target.value}))}/></div>
+              <div><div className="label">Data *</div><input type="date" className="input" value={safeDate(stopModal.data)} onChange={e=>setStopModal(v=>({...v, data:e.target.value}))}/></div>
+              <div><div className="label">Hora *</div><input type="time" className="input" value={safeTime(stopModal.hora)} onChange={e=>setStopModal(v=>({...v, hora:e.target.value}))}/></div>
             </div>
             <div>
               <div className="label">Motivo da Parada *</div>
@@ -105,7 +175,8 @@ export default function GlobalModals({
             <div className="flex" style={{justifyContent:'flex-end', gap:8}}>
               <button className="btn ghost" onClick={()=>setStopModal(null)}>Cancelar</button>
               <button className="btn primary" onClick={async ()=>{
-                if (typeof onConfirmStop === 'function') await onConfirmStop(stopModal)
+                const normalized = { ...stopModal, data: safeDate(stopModal.data), hora: safeTime(stopModal.hora) }
+                if (typeof onConfirmStop === 'function') await onConfirmStop(normalized)
                 setStopModal(null)
               }}>Confirmar Parada</button>
             </div>
