@@ -57,7 +57,7 @@ export default function CadastroItens() {
     const { data, error } = await supabase
       .from('items')
       .select('id, code, description, color, cycle_seconds, cavities, part_weight_g, unit_value, resin, created_at')
-      .order('created_at', { ascending: false })
+      .order('code', { ascending: true })
     if (error) {
       setError(error.message)
       setItems([])
@@ -76,6 +76,7 @@ export default function CadastroItens() {
   // ============== FORM / MODAL (sempre declarar hooks) ==============
   const [open, setOpen] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [editing, setEditing] = useState(null)
   const [form, setForm] = useState({
     code: '',
     description: '',
@@ -100,6 +101,21 @@ export default function CadastroItens() {
       resin: '',
     })
     setFormErr(null)
+  }
+  const startEdit = (item) => {
+    setEditing(item)
+    setForm({
+      code: cleanText(item.code),
+      description: cleanText(item.description),
+      color: cleanText(item.color),
+      cycle_seconds: String(item.cycle_seconds ?? ''),
+      cavities: String(item.cavities ?? ''),
+      part_weight_g: String(item.part_weight_g ?? ''),
+      unit_value: String(item.unit_value ?? ''),
+      resin: cleanText(item.resin),
+    })
+    setFormErr(null)
+    setOpen(true)
   }
   const onChange = (e) => {
     const { name, value } = e.target
@@ -135,10 +151,16 @@ export default function CadastroItens() {
       resin: cleanText(form.resin),
     }
     setSaving(true)
-    const { error } = await supabase.from('items').insert(payload)
+    let q = null
+    if (editing?.id) {
+      q = supabase.from('items').update(payload).eq('id', editing.id)
+    } else {
+      q = supabase.from('items').insert(payload)
+    }
+    const { error } = await q
     setSaving(false)
     if (error) { setFormErr(error.message ?? 'Erro ao salvar.'); return }
-    setOpen(false); resetForm(); await fetchItems()
+    setOpen(false); resetForm(); setEditing(null); await fetchItems()
   }
 
   // ============== IMPORTAR CSV ==============
@@ -253,7 +275,7 @@ export default function CadastroItens() {
               <h2 style={{ margin: 0 }}>Cadastro de Itens</h2>
               <small style={{ opacity: 0.8 }}>Somente administradores</small>
             </div>
-            <div style={{ display: 'flex', gap: 8 }}>
+              <div style={{ display: 'flex', gap: 8 }}>
               <button
                 onClick={downloadCSVTemplate}
                 style={{ padding: '10px 14px', borderRadius: 12, border: '1px solid #ddd', cursor: 'pointer', fontWeight: 600, background: '#fff' }}
@@ -279,7 +301,7 @@ export default function CadastroItens() {
               />
 
               <button
-                onClick={() => { resetForm(); setOpen(true) }}
+                onClick={() => { setEditing(null); resetForm(); setOpen(true) }}
                 style={{ padding: '10px 14px', borderRadius: 12, border: '1px solid #ddd', cursor: 'pointer', fontWeight: 600 }}
               >
                 Cadastrar item
@@ -319,6 +341,7 @@ export default function CadastroItens() {
                       <th style={th}>Valor (R$)</th>
                       <th style={th}>Resina</th>
                       <th style={th}>Criado em</th>
+                      <th style={th}>Ações</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -333,6 +356,14 @@ export default function CadastroItens() {
                         <td style={tdNum}>{it.unit_value}</td>
                         <td style={td}>{it.resin}</td>
                         <td style={td}>{formatDate(it.created_at)}</td>
+                        <td style={{ ...td, whiteSpace: 'nowrap' }}>
+                          <button
+                            onClick={() => startEdit(it)}
+                            style={{ padding: '6px 10px', borderRadius: 10, border: '1px solid #ddd', background: '#fff', cursor: 'pointer', fontWeight: 600 }}
+                          >
+                            Editar
+                          </button>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -342,7 +373,7 @@ export default function CadastroItens() {
           </div>
 
           {/* MODAL: CADASTRO DE ITEM */}
-          <Modal open={open} onClose={() => !saving && setOpen(false)} title="Cadastrar item">
+          <Modal open={open} onClose={() => !saving && setOpen(false)} title={editing?.id ? 'Editar item' : 'Cadastrar item'}>
             <div style={{ display: 'grid', gap: 12, paddingTop: 4 }}>
               {formErr && (
                 <div style={{ padding: 10, borderRadius: 10, background: '#fff3f3', color: '#a80000' }}>
@@ -369,7 +400,7 @@ export default function CadastroItens() {
 
               <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 8 }}>
                 <button disabled={saving} onClick={() => setOpen(false)} style={btnGhost}>Cancelar</button>
-                <button disabled={saving} onClick={handleSave} style={btnPrimary}>{saving ? 'Salvando…' : 'Salvar'}</button>
+                <button disabled={saving} onClick={handleSave} style={btnPrimary}>{saving ? 'Salvando…' : (editing?.id ? 'Atualizar' : 'Salvar')}</button>
               </div>
             </div>
           </Modal>
