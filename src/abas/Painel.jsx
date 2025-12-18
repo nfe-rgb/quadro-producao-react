@@ -378,6 +378,11 @@ export default function Painel({
               <div className="column-body">
                 {ativa ? (
                   <div className={statusClass(ativa.status)}>
+                      {opCode && (
+                      <div className="hdr-right op-inline" style={{ marginBottom: 4, textAlign: 'left' }}>
+                        O.P - {opCode}
+                      </div>
+                    )}
                     <Etiqueta
                       o={ativa}
                       variant="painel"

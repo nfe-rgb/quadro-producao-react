@@ -99,7 +99,6 @@ export default function Etiqueta({ o, variant = 'painel', saldoCaixas, lidasCaix
     <div className={`small ${isWeekendStop ? 'etiqueta-weekend' : ''}`}>
       {interrompida && <div className="badge-interrompida">⚠️ Produção Interrompida</div>}
  
-      {opCode && <div><b>O.P:</b> {opCode}</div>}
       {o.customer && <div><b>Cliente:</b> {o.customer}</div>}
       {o.product && <div><b>Produto:</b> {o.product}</div>}
       {o.color && <div><b>Cor:</b> {o.color}</div>}
