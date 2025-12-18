@@ -13,20 +13,11 @@ export default function Prioridade({ machinePriorities = {}, onChangePriority, l
     return "priority-chip-gray";
   }
 
-  if (!canEdit) {
-    return (
-      <div style={{ padding: 24 }}>
-        <h2>Acesso restrito</h2>
-        <p>Somente o e-mail autorizado pode alterar prioridades.</p>
-      </div>
-    );
-  }
-
   return (
     <div style={{ padding: 24, maxWidth: 640, margin: "0 auto" }}>
       <h1 style={{ marginBottom: 12 }}>Prioridades por Máquina</h1>
       <p style={{ marginBottom: 16, color: "#475569" }}>
-        Atualize os valores e eles aparecerão em tempo real no painel para todos os usuários.
+        As prioridades aparecem no painel para todos. Somente o e-mail autorizado pode alterar.
       </p>
 
       {loading && <div style={{ marginBottom: 12 }}>Carregando prioridades…</div>}
@@ -56,9 +47,10 @@ export default function Prioridade({ machinePriorities = {}, onChangePriority, l
                 max="10"
                 step="1"
                 value={val}
-                onChange={(e) => onChangePriority(m, e.target.value)}
+                onChange={(e) => { if (canEdit) onChangePriority(m, e.target.value); }}
                 className="priority-input"
                 style={{ marginLeft: "auto", width: 100 }}
+                disabled={!canEdit}
               />
             </div>
           );

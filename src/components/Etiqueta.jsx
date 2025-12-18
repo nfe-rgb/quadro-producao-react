@@ -1,4 +1,6 @@
 // src/components/Etiqueta.jsx
+import { useEffect, useState } from 'react'
+
 export default function Etiqueta({ o, variant = 'painel', saldoCaixas, lidasCaixas }) {
   if (!o) return null
 
@@ -16,6 +18,26 @@ export default function Etiqueta({ o, variant = 'painel', saldoCaixas, lidasCaix
     if (saldoCaixas <= 3) return 'warn'    // reta final
     return ''                              // neutro
   })()
+
+  // Selo A/B local, persistido no navegador por ordem
+  const cardKey = (() => {
+    if (o.id) return `ord-${o.id}`
+    if (opCode) return `op-${opCode}`
+    return 'op-unknown'
+  })()
+  const [tagLetter, setTagLetter] = useState('A')
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem(`etq-letter-${cardKey}`)
+      if (saved === 'A' || saved === 'B') setTagLetter(saved)
+    } catch (_) {}
+  }, [cardKey])
+  const toggleLetter = () => {
+    const next = tagLetter === 'A' ? 'B' : 'A'
+    setTagLetter(next)
+    try { window.localStorage.setItem(`etq-letter-${cardKey}`, next) } catch (_) {}
+  }
+  const tagColor = tagLetter === 'A' ? '#d7263d' : '#2b8a3e'
 
   // ===== variante FILA =====
   if (variant === 'fila') {
@@ -96,7 +118,16 @@ export default function Etiqueta({ o, variant = 'painel', saldoCaixas, lidasCaix
 
   // ===== variante PAINEL =====
   return (
-    <div className={`small ${isWeekendStop ? 'etiqueta-weekend' : ''}`}>
+    <div className={`small ${isWeekendStop ? 'etiqueta-weekend' : ''}`} style={{ position: 'relative' }}>
+      <button
+        type="button"
+        onClick={toggleLetter}
+        title="Alternar selo A/B"
+        className={`etq-ab-badge ${tagLetter === 'A' ? 'ab-a' : 'ab-b'}`}
+      >
+        {tagLetter}
+      </button>
+
       {interrompida && <div className="badge-interrompida">⚠️ Produção Interrompida</div>}
  
       {o.customer && <div><b>Cliente:</b> {o.customer}</div>}

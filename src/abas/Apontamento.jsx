@@ -10,8 +10,10 @@ import '../styles/Apontamento.css';
 import Modal from '../components/Modal';
 
 export default function Apontamento({ isAdmin: _unusedIsAdminProp = false }) {
-  const adminObj = typeof useAuthAdmin === 'function' ? useAuthAdmin() : { isAdmin: false };
+  const adminObj = typeof useAuthAdmin === 'function' ? useAuthAdmin() : { isAdmin: false, authUser: null };
   const isAdmin = Boolean(adminObj && adminObj.isAdmin); // só libera para admin verdadeiro
+  const authEmail = String(adminObj?.authUser?.email || '').toLowerCase();
+  const canSeeValorization = authEmail === 'nfe@savantiplasticos.com.br';
   const [bipagens, setBipagens] = useState([]);
   const [refugos, setRefugos] = useState([]);
   const [apontamentos, setApontamentos] = useState([]); // Produção manual das injetoras
@@ -19,6 +21,7 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false }) {
   const [orders, setOrders] = useState([]); // O.S relevantes
   const [ordersAll, setOrdersAll] = useState([]); // Todas as O.S registradas
   const [paradas, setParadas] = useState([]); // Paradas de máquina
+  const [itemsMap, setItemsMap] = useState({}); // Cache de itens (valor unitário)
   const [shiftResponsibles, setShiftResponsibles] = useState([]); // Responsáveis por turno
   const [turnoFiltro, setTurnoFiltro] = useState('todos');
   const [filtroMaquina, setFiltroMaquina] = useState('todas');
@@ -107,6 +110,17 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false }) {
     setToast({ visible: true, type, msg });
     window.clearTimeout(showToast._t);
     showToast._t = window.setTimeout(() => setToast(t => ({ ...t, visible: false })), ms);
+  }
+
+  // Formatação e chave de item extraída do campo Produto ("CODE - Descrição")
+  function formatBRL(val) {
+    const n = Number(val) || 0;
+    return n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+  function extractItemCodeFromOrderProduct(product) {
+    if (!product) return null;
+    const t = String(product);
+    return t.split('-')[0]?.trim() || null;
   }
 
   // A duração do turno por período é calculada após `filtroStart/filtroEnd`.
@@ -287,11 +301,12 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false }) {
       const orderIdsSet = new Set();
       (bip || []).forEach(b => { if (b.order_id != null) orderIdsSet.add(String(b.order_id)); });
       (ref || []).forEach(r => { if (r.order_id != null) orderIdsSet.add(String(r.order_id)); });
+      (aps || []).forEach(a => { if (a.order_id != null) orderIdsSet.add(String(a.order_id)); });
       const orderIds = Array.from(orderIdsSet);
       if (orderIds.length > 0) {
         const { data: ords } = await supabase
           .from('orders')
-          .select('id,code,standard,created_at,boxes')
+          .select('id,code,product,standard,created_at,boxes')
           .in('id', orderIds);
         setOrders(ords || []);
       } else {
@@ -369,6 +384,7 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false }) {
         const orderIdsSet = new Set();
         bipagensData.forEach(b => { if (b.order_id != null) orderIdsSet.add(String(b.order_id)); });
         refugosData.forEach(r => { if (r.order_id != null) orderIdsSet.add(String(r.order_id)); });
+        apontData.forEach(a => { if (a.order_id != null) orderIdsSet.add(String(a.order_id)); });
 
         const orderIds = Array.from(orderIdsSet);
         let ordersData = [];
@@ -376,7 +392,7 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false }) {
           // consultar apenas orders relevantes
           const { data: ords, error } = await supabase
             .from('orders')
-            .select('id,code,standard,created_at,boxes') // traga campos úteis
+            .select('id,code,product,standard,created_at,boxes') // traga campos úteis
             .in('id', orderIds);
           if (error) {
             console.warn('Erro ao buscar orders por ids:', error);
@@ -409,7 +425,7 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false }) {
       try {
         const { data, error } = await supabase
           .from('orders')
-          .select('id, code, standard, created_at, boxes')
+          .select('id, code, product, standard, created_at, boxes')
           .order('created_at', { ascending: false });
         if (error) {
           console.warn('Erro ao buscar todas as orders:', error);
@@ -425,6 +441,47 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false }) {
     fetchAllOrders();
     return () => { mounted = false; };
   }, [filtroStart, filtroEnd]);
+
+  // Busca valores unitários dos itens usados nos pedidos/apontamentos do período
+  useEffect(() => {
+    const codes = new Set();
+    (orders || []).forEach(o => {
+      const code = extractItemCodeFromOrderProduct(o?.product);
+      if (code) codes.add(code);
+    });
+    (apontamentos || []).forEach(a => {
+      const code = extractItemCodeFromOrderProduct(a?.product);
+      if (code) codes.add(code);
+    });
+    if (codes.size === 0) {
+      setItemsMap({});
+      return;
+    }
+
+    let active = true;
+    (async () => {
+      try {
+        const { data, error } = await supabase
+          .from('items')
+          .select('code, unit_value')
+          .in('code', Array.from(codes));
+        if (error) throw error;
+        if (!active) return;
+        const map = {};
+        (data || []).forEach(it => {
+          const code = String(it.code || '').trim();
+          if (!code) return;
+          map[code] = it;
+        });
+        setItemsMap(map);
+      } catch (err) {
+        console.warn('Falha ao buscar itens para valorização:', err);
+        if (active) setItemsMap({});
+      }
+    })();
+
+    return () => { active = false; };
+  }, [orders, apontamentos]);
   // Calcular horas paradas por turno/máquina
   const horasParadasPorTurno = useMemo(() => calcularHorasParadasPorTurno(paradas, TURNOS, filtroStart, filtroEnd), [paradas, filtroStart, filtroEnd]);
   // Listas de máquinas por setor, como em Registro.jsx
@@ -474,7 +531,9 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false }) {
           producaoPecas: 0,
           producaoManual: 0,
           refugoPct: 0,
-          padraoPorCaixa: 1
+          padraoPorCaixa: 1,
+          manualEntries: [],
+          valorTotal: 0,
         };
       });
     });
@@ -493,7 +552,8 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false }) {
         num: b.scanned_box,
         hora: b.created_at,
         order_id: orderId,
-        order: matchedOrder || null
+        order: matchedOrder || null,
+        product: matchedOrder?.product || '',
       });
     });
 
@@ -511,13 +571,33 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false }) {
       const turno = a.shift || String(getTurnoAtual(a.created_at));
       const maq = a.machine_id;
       if (!porTurno[turno] || !porTurno[turno][maq]) return;
-      porTurno[turno][maq].producaoManual += Number(a.good_qty) || 0;
+      const orderId = a.order_id != null ? String(a.order_id) : null;
+      const order = orderId ? ordersMap[orderId] : null;
+      const goodQty = Number(a.good_qty) || 0;
+      porTurno[turno][maq].producaoManual += goodQty;
+      porTurno[turno][maq].manualEntries.push({
+        good_qty: goodQty,
+        product: a.product || order?.product || '',
+        order,
+      });
     });
 
     // calcular produção e percentual usando padrão da O.S quando disponível
+    const getUnitValueFromProduct = (productStr) => {
+      const code = extractItemCodeFromOrderProduct(productStr);
+      if (!code) return 0;
+      const raw = itemsMap && itemsMap[code] ? itemsMap[code].unit_value : null;
+      const n = Number(raw);
+      return Number.isFinite(n) ? n : 0;
+    };
+    const getUnitValueFromOrder = (order) => getUnitValueFromProduct(order?.product || '');
+
     Object.keys(porTurno).forEach(turnoKey => {
       Object.keys(porTurno[turnoKey]).forEach(maq => {
         const dados = porTurno[turnoKey][maq];
+
+        // Reinicia acumulador monetário a cada cálculo
+        dados.valorTotal = 0;
 
         // Determinar produção considerando o padrão de cada caixa individualmente.
         // Quando não houver padrão na O.S da caixa, usa o padrão da máquina como fallback.
@@ -540,12 +620,25 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false }) {
           const std = parsePiecesPerBox(stdRaw) || 0;
           somaPecas += std;
           if (std > 0) standardsSet.add(std);
+          const unitVal = getUnitValueFromOrder(c.order) || getUnitValueFromProduct(c.product);
+          if (std > 0 && unitVal > 0) {
+            dados.valorTotal += std * unitVal;
+          }
         }
 
         // soma produção escaneada (caixas) + produção manual (injetoras)
         dados.producaoPecas = somaPecas + (Number(dados.producaoManual) || 0);
         // Se todos os padrões forem iguais, mantém para exibição. Caso contrário, sinaliza como variados.
         dados.padraoPorCaixa = standardsSet.size === 1 ? Number([...standardsSet][0]) : null;
+
+        // Valorização das produções manuais (quando houver item cadastrado)
+        (dados.manualEntries || []).forEach(me => {
+          const unitVal = getUnitValueFromProduct(me.product || (me.order ? me.order.product : ''));
+          const qty = Number(me.good_qty) || 0;
+          if (unitVal > 0 && qty > 0) {
+            dados.valorTotal += qty * unitVal;
+          }
+        });
 
         const refugoPecas = Number(dados.refugo) || 0;
         let pct = 0;
@@ -557,7 +650,7 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false }) {
     });
 
     return porTurno;
-  }, [bipagens, refugos, ordersMap, apontamentos]);
+  }, [bipagens, refugos, ordersMap, apontamentos, itemsMap]);
 
   // RENDER
   return (
@@ -730,6 +823,12 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false }) {
                           >
                             Horas Paradas: <span className="destaque-value">{formatMsToHHmm(horasParadasPorTurno[t.key]?.[maq] || 0)}</span>
                           </div>
+
+                          {canSeeValorization && (
+                            <div style={{ marginTop: 6, fontSize: 13, color: '#333' }}>
+                              Valorização: <strong>{formatBRL(dados.valorTotal || 0)}</strong>
+                            </div>
+                          )}
 
                           {isOpen && (
                             <div className="registros">

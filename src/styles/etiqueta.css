@@ -92,3 +92,27 @@
   transform: scale(1.05);
   filter: brightness(1.05);
 }
+
+/* Selo A/B no canto superior direito da etiqueta */
+.etq-ab-badge {
+  position: absolute;
+  top: -30px;
+  right: -5px;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 1px solid #e0e0e0;
+  background: #fff;
+  font-weight: 800;
+  cursor: pointer;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.12);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  padding: 0;
+  z-index: 2;
+}
+
+.etq-ab-badge.ab-a { color: #d7263d; }
+.etq-ab-badge.ab-b { color: #2b8a3e; }

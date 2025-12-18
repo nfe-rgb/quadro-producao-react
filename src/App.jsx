@@ -83,7 +83,9 @@ export default function App(){
         if (!error && Array.isArray(data)) {
           const mapped = {}
           data.forEach((row) => {
-            mapped[row.machine_id] = row.priority
+            const key = String(row.machine_id || '').toUpperCase()
+            const val = row.priority == null ? null : Number(row.priority)
+            if (key) mapped[key] = Number.isFinite(val) ? val : null
           })
           setMachinePriorities(mapped)
         } else if (error) {
@@ -110,9 +112,11 @@ export default function App(){
           setMachinePriorities((prev) => {
             const next = { ...prev }
             if (payload.eventType === 'DELETE') {
-              delete next[row.machine_id]
+              delete next[String(row.machine_id || '').toUpperCase()]
             } else {
-              next[row.machine_id] = row.priority
+              const key = String(row.machine_id || '').toUpperCase()
+              const val = row.priority == null ? null : Number(row.priority)
+              if (key) next[key] = Number.isFinite(val) ? val : null
             }
             return next
           })
@@ -130,6 +134,11 @@ export default function App(){
   }, [])
 
   async function handlePriorityChange(machineId, priorityValue) {
+    const userEmail = String(authUser?.email || '').toLowerCase();
+    if (userEmail !== 'nfe@savantiplasticos.com.br') {
+      alert('Apenas o e-mail autorizado pode alterar prioridades.');
+      return;
+    }
     try {
       const val = priorityValue === '' || priorityValue == null ? null : Number(priorityValue)
       const payload = {
@@ -144,7 +153,9 @@ export default function App(){
         return
       }
       if (data && data[0]) {
-        setMachinePriorities((prev) => ({ ...prev, [machineId]: data[0].priority }))
+        const key = String(machineId || '').toUpperCase()
+        const valNum = data[0].priority == null ? null : Number(data[0].priority)
+        setMachinePriorities((prev) => ({ ...prev, [key]: Number.isFinite(valNum) ? valNum : null }))
       }
     } catch (err) {
       alert('Erro ao salvar prioridade.')
