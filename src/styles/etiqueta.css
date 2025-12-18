@@ -56,7 +56,7 @@
 /* === PÍLULAS DE LIDAS / SALDO NAS ETIQUETAS === */
 .pill-row {
   position: absolute !important;
-  top: 62px !important;
+  top: 90px !important;
   right: 5px !important;
   display: flex !important;
   flex-direction: column !important;

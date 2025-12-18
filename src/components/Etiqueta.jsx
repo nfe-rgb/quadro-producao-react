@@ -2,6 +2,8 @@
 export default function Etiqueta({ o, variant = 'painel', saldoCaixas, lidasCaixas }) {
   if (!o) return null
 
+  const opCode = o.code || o.op_code || o.o?.code || o.ordem?.code
+
   const temObsLowEff = !!o.loweff_notes
   const interrompida = o.status === 'AGUARDANDO' && !!o.interrupted_at
   const isWeekendStop = o.status === 'PARADA' && o.reason === 'FIM DE SEMANA'
@@ -18,10 +20,10 @@ export default function Etiqueta({ o, variant = 'painel', saldoCaixas, lidasCaix
   // ===== variante FILA =====
   if (variant === 'fila') {
     return (
-      <div className={`small etiqueta-fila-flex ${isWeekendStop ? 'etiqueta-weekend' : ''}`}> 
+      <div className={`small etiqueta-fila-flex ${isWeekendStop ? 'etiqueta-weekend' : ''}`}>
         <div className="etiqueta-fila-main">
           {interrompida && <div className="badge-interrompida">⚠️ Produção Interrompida</div>}
-          {o.code && <div><b>O.P:</b> {o.code}</div>}
+          {opCode && <div><b>O.P:</b> {opCode}</div>}
           {o.customer && <div><b>Cliente:</b> {o.customer}</div>}
           {o.product && <div><b>Produto:</b> {o.product}</div>}
           {o.color && <div><b>Cor:</b> {o.color}</div>}
@@ -96,7 +98,8 @@ export default function Etiqueta({ o, variant = 'painel', saldoCaixas, lidasCaix
   return (
     <div className={`small ${isWeekendStop ? 'etiqueta-weekend' : ''}`}>
       {interrompida && <div className="badge-interrompida">⚠️ Produção Interrompida</div>}
-
+ 
+      {opCode && <div><b>O.P:</b> {opCode}</div>}
       {o.customer && <div><b>Cliente:</b> {o.customer}</div>}
       {o.product && <div><b>Produto:</b> {o.product}</div>}
       {o.color && <div><b>Cor:</b> {o.color}</div>}

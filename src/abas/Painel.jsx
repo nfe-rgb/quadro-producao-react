@@ -27,6 +27,8 @@ export default function Painel({
   lastFinalizadoPorMaquina,
   metaPercent = 20,
   onScanned, // opcional: callback do pai para re-fetch geral
+  authUser,
+  machinePriorities = {},
 }) {
   const pct = Math.max(0, Math.min(100, Math.round(metaPercent)));
   const pctText = `${pct}%`;
@@ -191,6 +193,15 @@ export default function Painel({
   // Estado para armazenar o started_at do log aberto de baixa eficiência por máquina
   const [lowEffStartedAt, setLowEffStartedAt] = useState({});
 
+  function priorityTone(value) {
+    if (value == null || Number.isNaN(Number(value))) return "priority-chip-gray";
+    const n = Number(value);
+    if (n >= 5) return "priority-chip-green";
+    if (n >= 3) return "priority-chip-yellow";
+    if (n >= 1) return "priority-chip-red";
+    return "priority-chip-gray";
+  }
+
   // Efeito para buscar o log aberto de baixa eficiência para cada máquina ativa
   useEffect(() => {
     async function fetchLowEffLogs() {
@@ -331,6 +342,8 @@ export default function Painel({
           const lidas = Number(ativa?.scanned_count || 0);
           const saldo = ativa ? Math.max(0, (Number(ativa.boxes) || 0) - lidas) : 0;
 
+          const priorityValue = machinePriorities?.[m];
+
           return (
             <div key={m} className="column">
               <div
@@ -355,12 +368,11 @@ export default function Painel({
                     <span className="semprog-timer">{semProgText}</span>
                   )}
                 </div>
-
-                {opCode && (
-                  <div className="hdr-right op-inline" style={{ marginLeft: "auto" }}>
-                    O.P - {opCode}
-                  </div>
-                )}
+                <div className="hdr-right" style={{ marginLeft: "auto" }}>
+                  <span className={`priority-chip ${priorityTone(priorityValue)}`}>
+                    PRIORIDADE: {priorityValue ?? "-"}
+                  </span>
+                </div>
               </div>
 
               <div className="column-body">

@@ -13,11 +13,13 @@ import Registro from './abas/Registro'
 import Pet01 from './pages/Pet01'
 import Pet02 from './pages/Pet02'
 import Pet03 from './pages/Pet03'
+import Prioridade from './pages/Prioridade'
 import useOrders from './hooks/useOrders'
 import useAuthAdmin from './hooks/useAuthAdmin'
 import GlobalModals from './components/GlobalModals'
 import Apontamento from './abas/Apontamento'
 import { DateTime } from 'luxon';
+import { supabase } from './lib/supabaseClient'
 
 export default function App(){
   const [tab,setTab] = useState('painel')
@@ -43,6 +45,10 @@ export default function App(){
   const [tick, setTick] = useState(0)
   useEffect(()=>{ const id=setInterval(()=>setTick(t=>t+1),1000); return ()=>clearInterval(id) },[])
 
+  // prioridades por máquina (persistidas no Supabase)
+  const [machinePriorities, setMachinePriorities] = useState({})
+  const [prioritiesLoading, setPrioritiesLoading] = useState(false)
+
   const { authUser, authChecked, isAdmin } = useAuthAdmin()
 
   const {
@@ -63,6 +69,88 @@ export default function App(){
   }, [finalizando?.id])
 
   const location = useLocation();
+
+  // Busca prioridades do Supabase
+  useEffect(() => {
+    async function loadPriorities() {
+      setPrioritiesLoading(true)
+      try {
+        const { data, error } = await supabase
+          .from('machine_priorities')
+          .select('machine_id, priority')
+          .order('machine_id', { ascending: true })
+
+        if (!error && Array.isArray(data)) {
+          const mapped = {}
+          data.forEach((row) => {
+            mapped[row.machine_id] = row.priority
+          })
+          setMachinePriorities(mapped)
+        } else if (error) {
+          console.warn('Falha ao carregar prioridades:', error)
+        }
+      } catch (err) {
+        console.warn('Erro ao buscar prioridades:', err)
+      } finally {
+        setPrioritiesLoading(false)
+      }
+    }
+
+    loadPriorities()
+
+    // assinatura realtime para refletir atualizações
+    const channel = supabase
+      .channel('machine-priorities')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'machine_priorities' },
+        (payload) => {
+          const row = payload.new || payload.old
+          if (!row) return
+          setMachinePriorities((prev) => {
+            const next = { ...prev }
+            if (payload.eventType === 'DELETE') {
+              delete next[row.machine_id]
+            } else {
+              next[row.machine_id] = row.priority
+            }
+            return next
+          })
+        }
+      )
+      .subscribe()
+
+    return () => {
+      try {
+        supabase.removeChannel(channel)
+      } catch (err) {
+        console.warn('Falha ao remover canal de prioridades:', err)
+      }
+    }
+  }, [])
+
+  async function handlePriorityChange(machineId, priorityValue) {
+    try {
+      const val = priorityValue === '' || priorityValue == null ? null : Number(priorityValue)
+      const payload = {
+        machine_id: machineId,
+        priority: val,
+        updated_by: authUser?.email || null,
+      }
+      const { data, error } = await supabase.from('machine_priorities').upsert(payload).select()
+      if (error) {
+        alert('Não foi possível salvar a prioridade agora.')
+        console.warn('Erro ao salvar prioridade:', error)
+        return
+      }
+      if (data && data[0]) {
+        setMachinePriorities((prev) => ({ ...prev, [machineId]: data[0].priority }))
+      }
+    } catch (err) {
+      alert('Erro ao salvar prioridade.')
+      console.warn('Erro ao salvar prioridade:', err)
+    }
+  }
 
   // Atalhos de teclado: Ctrl+L (Login) e Ctrl+I (Cadastro Itens)
   useEffect(() => {
@@ -158,6 +246,19 @@ export default function App(){
         />
       </>
     );
+  }
+
+  if (location && location.pathname === '/prioridade') {
+    return (
+      <div className="app">
+        <Prioridade
+          machinePriorities={machinePriorities}
+          onChangePriority={handlePriorityChange}
+          loading={prioritiesLoading}
+          authUser={authUser}
+        />
+      </div>
+    )
   }
 
     if (location && location.pathname === '/pet-02') {
@@ -292,10 +393,10 @@ export default function App(){
           paradas={paradas}
           tick={tick}
           onStatusChange={handleStatusChange}
-          setStartModal={setStartModal}
-          setFinalizando={setFinalizando}
           lastFinalizadoPorMaquina={lastFinalizadoPorMaquina}
           onScanned={fetchOrdensAbertas}
+          authUser={authUser}
+          machinePriorities={machinePriorities}
         />
       )}
 
