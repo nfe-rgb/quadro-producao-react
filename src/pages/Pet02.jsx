@@ -1,5 +1,5 @@
 // src/pages/Pet01.jsx
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "../lib/supabaseClient";
 import Etiqueta from "../components/Etiqueta";
 import { getTurnoAtual, statusClass } from "../lib/utils";
@@ -27,8 +27,15 @@ export default function Pet02({
   const [scans, setScans] = useState([]);
 
   const [refugoForm, setRefugoForm] = useState({ operador: "", turno: "", quantidade: "", motivo: "",});
- 
+
   const [showRefugo, setShowRefugo] = useState(false);
+
+  // responsável do turno (P2)
+  const [responsavelTurno, setResponsavelTurno] = useState("");
+  const [responsavelModalOpen, setResponsavelModalOpen] = useState(false);
+  const [responsavelInput, setResponsavelInput] = useState("");
+  const [shiftInfo, setShiftInfo] = useState(null); // { shiftKey, start, end }
+  const [responsavelKey, setResponsavelKey] = useState("");
 
 
   // toast de notificação superior
@@ -125,6 +132,128 @@ const [currentShift, setCurrentShift] = useState(() => {
   function showToast(msg, type = "ok", ms = 2400) {
     setToast({ visible: true, type, msg });
     setTimeout(() => setToast((t) => ({ ...t, visible: false })), ms);
+  }
+
+  // Resolve janelas de turno considerando o dia e cruzamento de meia-noite
+  const buildShiftIntervals = useCallback((nowBr, dayOffset = 0) => {
+    const jsDay = (nowBr.weekday % 7 + dayOffset + 7) % 7; // 0 = domingo
+    const base = nowBr.plus({ days: dayOffset }).startOf("day");
+    const intervals = [];
+    const pushInterval = (hIni, mIni, hFim, mFim, shiftKey) => {
+      let start = base.set({ hour: hIni, minute: mIni, second: 0, millisecond: 0 });
+      let end = base.set({ hour: hFim, minute: mFim, second: 0, millisecond: 0 });
+      if (end <= start) end = end.plus({ days: 1 });
+      intervals.push({ shiftKey, start, end });
+    };
+
+    if (jsDay >= 1 && jsDay <= 5) { // segunda a sexta
+      pushInterval(5, 15, 13, 45, "1");
+      pushInterval(13, 45, 22, 15, "2");
+      pushInterval(22, 15, 5, 15, "3");
+    } else if (jsDay === 6) { // sábado
+      pushInterval(5, 15, 9, 15, "1");
+      pushInterval(9, 15, 13, 15, "2");
+    } else if (jsDay === 0) { // domingo
+      pushInterval(23, 15, 5, 15, "3");
+    }
+
+    return intervals;
+  }, []);
+
+  const resolveCurrentShiftWindow = useCallback(() => {
+    const nowBr = DateTime.now().setZone("America/Sao_Paulo");
+    const intervals = [...buildShiftIntervals(nowBr, -1), ...buildShiftIntervals(nowBr, 0)];
+    const match = intervals.find((it) => nowBr >= it.start && nowBr < it.end);
+    if (!match) return null;
+    return { shiftKey: match.shiftKey, start: match.start, end: match.end };
+  }, [buildShiftIntervals]);
+
+  const fetchShiftResponsible = useCallback(async (info, key) => {
+    try {
+      const { data, error } = await supabase
+        .from("shift_responsibles")
+        .select("id, operator, responsible, responsavel, shift, machine_id, effective_date, created_at")
+        .eq("machine_id", "P2")
+        .eq("shift", String(info.shiftKey))
+        .gte("created_at", info.start.toUTC().toISO())
+        .lt("created_at", info.end.toUTC().toISO())
+        .order("created_at", { ascending: false })
+        .limit(1);
+
+      if (error) throw error;
+      const row = data && data[0];
+      const nome = row?.operator || row?.responsible || row?.responsavel || "";
+      if (nome) {
+        setResponsavelTurno(nome);
+        setResponsavelInput(nome);
+        setResponsavelModalOpen(false);
+      } else {
+        setResponsavelTurno("");
+        setResponsavelInput("");
+        setResponsavelModalOpen(true);
+      }
+      setResponsavelKey(key);
+    } catch (err) {
+      console.warn("Erro ao buscar responsável do turno:", err);
+      setResponsavelModalOpen(true);
+      setResponsavelKey(key);
+    }
+  }, []);
+
+  // força captura do responsável do turno no início de cada janela de turno
+  useEffect(() => {
+    let mounted = true;
+
+    async function evaluateShiftResponsible() {
+      const info = resolveCurrentShiftWindow();
+      if (!mounted) return;
+      setShiftInfo(info);
+      if (!info || !info.shiftKey) {
+        setResponsavelModalOpen(false);
+        return;
+      }
+
+      const key = `${info.shiftKey}-${info.start.toISODate()}`;
+      const needsFetch = responsavelKey !== key || !responsavelTurno;
+      if (needsFetch) {
+        await fetchShiftResponsible(info, key);
+      }
+    }
+
+    evaluateShiftResponsible();
+    const id = setInterval(evaluateShiftResponsible, 60000);
+    return () => { mounted = false; clearInterval(id); };
+  }, [resolveCurrentShiftWindow, fetchShiftResponsible, responsavelKey, responsavelTurno]);
+
+  async function salvarResponsavelTurno() {
+    if (!shiftInfo || !shiftInfo.shiftKey) return;
+    const nome = (responsavelInput || "").trim();
+    if (!nome) {
+      showToast("Informe o operador responsável.", "err");
+      return;
+    }
+
+    try {
+      const nowBr = DateTime.now().setZone("America/Sao_Paulo");
+      const payload = {
+        machine_id: "P2",
+        shift: String(shiftInfo.shiftKey),
+        operator: nome,
+        effective_date: shiftInfo.start.toISODate(),
+        created_at: nowBr.toUTC().toISO(),
+      };
+
+      const { error } = await supabase.from("shift_responsibles").upsert([payload]);
+      if (error) throw error;
+
+      setResponsavelTurno(nome);
+      setResponsavelModalOpen(false);
+      setResponsavelKey(`${shiftInfo.shiftKey}-${shiftInfo.start.toISODate()}`);
+      showToast("Responsável registrado.", "ok");
+    } catch (err) {
+      console.error("Erro ao salvar responsável do turno:", err);
+      showToast("Falha ao registrar responsável.", "err");
+    }
   }
 
 // Substitua sua função biparWithCode por esta (coloque no mesmo escopo)
@@ -480,6 +609,37 @@ if (typeof window !== "undefined") {
           <div className="pet01-no-next">Nenhum item na fila</div>
         )}
       </div>
+
+{/* MODAL — RESPONSÁVEL DO TURNO */}
+{responsavelModalOpen && (
+  <div className="pet01-modal-bg" role="dialog" aria-modal>
+    <div className="pet01-modal">
+      <h3>Responsável do Turno</h3>
+      <p style={{ marginTop: 4, color: '#444' }}>
+        Informe o operador responsável da P2 para o Turno {shiftInfo?.shiftKey || ""}.
+      </p>
+
+      <label style={{ marginTop: 12 }}>Operador *</label>
+      <input
+        className="input"
+        value={responsavelInput}
+        onChange={(e) => setResponsavelInput(e.target.value)}
+        autoFocus
+      />
+
+      <div className="pet01-modal-buttons" style={{ justifyContent: 'flex-end', marginTop: 12 }}>
+        <button
+          type="button"
+          className="orange"
+          onClick={salvarResponsavelTurno}
+          disabled={!responsavelInput.trim()}
+        >
+          Confirmar
+        </button>
+      </div>
+    </div>
+  </div>
+)}
 
 {/* MODAL — REFUGO (FINAL E CORRIGIDO) */}
 {showRefugo && (

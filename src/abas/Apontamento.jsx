@@ -19,6 +19,7 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false }) {
   const [orders, setOrders] = useState([]); // O.S relevantes
   const [ordersAll, setOrdersAll] = useState([]); // Todas as O.S registradas
   const [paradas, setParadas] = useState([]); // Paradas de máquina
+  const [shiftResponsibles, setShiftResponsibles] = useState([]); // Responsáveis por turno
   const [turnoFiltro, setTurnoFiltro] = useState('todos');
   const [filtroMaquina, setFiltroMaquina] = useState('todas');
   const [periodo, setPeriodo] = useState('hoje');
@@ -238,7 +239,7 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false }) {
   // Reconsulta completa do período atual
   const refetchData = useCallback(async () => {
     if (!filtroStart || !filtroEnd) {
-      setBipagens([]); setRefugos([]); setParadas([]); setApontamentos([]); setOrders([]);
+      setBipagens([]); setRefugos([]); setParadas([]); setApontamentos([]); setOrders([]); setShiftResponsibles([]);
       return;
     }
 
@@ -267,13 +268,20 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false }) {
         .gte('created_at', filtroStart.toISOString())
         .lte('created_at', filtroEnd.toISOString());
 
-      const [bipRes, refRes, parRes, apRes] = await Promise.all([bipQuery, refQuery, paradaQuery, apontQuery]);
-      const { data: bip } = bipRes || {}; const { data: ref } = refRes || {}; const { data: par } = parRes || {}; const { data: aps } = apRes || {};
+      const shiftRespQuery = supabase
+        .from('shift_responsibles')
+        .select('*')
+        .gte('created_at', filtroStart.toISOString())
+        .lte('created_at', filtroEnd.toISOString());
+
+      const [bipRes, refRes, parRes, apRes, respRes] = await Promise.all([bipQuery, refQuery, paradaQuery, apontQuery, shiftRespQuery]);
+      const { data: bip } = bipRes || {}; const { data: ref } = refRes || {}; const { data: par } = parRes || {}; const { data: aps } = apRes || {}; const { data: resp } = respRes || {};
 
       setBipagens(bip || []);
       setRefugos(ref || []);
       setParadas(par || []);
       setApontamentos(aps || []);
+      setShiftResponsibles(resp || []);
 
       // buscar orders relevantes
       const orderIdsSet = new Set();
@@ -305,6 +313,7 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false }) {
         setRefugos([]);
         setOrders([]);
         setParadas([]);
+        setShiftResponsibles([]);
         return;
       }
 
@@ -334,19 +343,27 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false }) {
           .gte('created_at', filtroStart.toISOString())
           .lte('created_at', filtroEnd.toISOString());
 
+        const shiftRespQuery = supabase
+          .from('shift_responsibles')
+          .select('*')
+          .gte('created_at', filtroStart.toISOString())
+          .lte('created_at', filtroEnd.toISOString());
+
         // fetch bipagens, refugos e paradas
-        const [{ data: bip }, { data: ref }, { data: par }, { data: aps }] = await Promise.all([bipQuery, refQuery, paradaQuery, apontQuery]);
+        const [{ data: bip }, { data: ref }, { data: par }, { data: aps }, { data: resp }] = await Promise.all([bipQuery, refQuery, paradaQuery, apontQuery, shiftRespQuery]);
 
         if (!mounted) return;
         const bipagensData = bip || [];
         const refugosData = ref || [];
         const paradasData = par || [];
         const apontData = aps || [];
+        const respData = resp || [];
 
         setBipagens(bipagensData);
         setRefugos(refugosData);
         setParadas(paradasData);
         setApontamentos(apontData);
+        setShiftResponsibles(respData);
 
         // extrair order_id únicos de ambas as tabelas
         const orderIdsSet = new Set();
@@ -380,6 +397,7 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false }) {
           setRefugos([]);
           setOrders([]);
           setParadas([]);
+          setShiftResponsibles([]);
         }
       } finally {
       }
@@ -426,6 +444,21 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false }) {
     (orders || []).forEach(o => { if (o && o.id != null) map[String(o.id)] = o; });
     return map;
   }, [orders]);
+
+  // Último responsável informado por turno/máquina dentro do período filtrado
+  const responsavelPorTurno = useMemo(() => {
+    const map = {};
+    (shiftResponsibles || []).forEach(r => {
+      const key = `${r.shift}-${r.machine_id}`;
+      const nome = r.operator || r.responsavel || r.responsible || '';
+      const ts = r.created_at ? new Date(r.created_at).getTime() : 0;
+      if (!nome) return;
+      if (!map[key] || ts > map[key].ts) {
+        map[key] = { nome, ts };
+      }
+    });
+    return map;
+  }, [shiftResponsibles]);
 
   // Agrupa por turno e máquina e calcula refugo %
   const agrupadoPorTurno = useMemo(() => {
@@ -638,11 +671,24 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false }) {
                       const paradasMs = horasParadasPorTurno[t.key]?.[maq] || 0;
                       const eficienciaPct = totalTurnoMs > 0 ? Math.max(0, Math.min(100, ((totalTurnoMs - paradasMs) / totalTurnoMs) * 100)) : 0;
 
+                      const respKey = `${t.key}-${maq}`;
+                      const respInfo = responsavelPorTurno[respKey];
+
                       return (
                         <div key={t.key} className="turno-card">
-                          <div className="turno-label" style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                            <BigDonutPct pct={eficienciaPct} />
-                            {t.label}
+                          <div className="turno-label">
+                            <div className="turno-donut">
+                            {/*<BigDonutPct pct={eficienciaPct} />*/}
+                            </div>
+                            <div className="turno-texts">
+                              <div className="turno-resp-line">
+                                {respInfo?.nome ? (
+                                  <>Turno {t.key} - {respInfo.nome}</>
+                                ) : (
+                                  t.label
+                                )}
+                              </div>
+                            </div>
                           </div>
 
                           <div

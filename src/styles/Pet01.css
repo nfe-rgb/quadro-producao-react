@@ -527,8 +527,8 @@ body:fullscreen .pet01-logo {
   box-shadow: 0 8px 30px rgba(0,0,0,0.18);
 }
 .pet01-toast.show { top: 12px; opacity: 1; pointer-events: auto; }
-.pet01-toast.ok { background: linear-gradient(90deg,#27ae60,#2ecc71); }
-.pet01-toast.err { background: linear-gradient(90deg,#c0392b,#e74c3c); }
+.pet01-toast.ok { background: linear-gradient(90deg,#27ae60,#2ecc71);z-index: 100000; }
+.pet01-toast.err { background: linear-gradient(90deg,#c0392b,#e74c3c); z-index: 100000; }
 
 /* Se precisar ajustar timer pill estilo (usar as mesmas classes do painel) */
 .pet01-timer.red { background: rgba(231,76,60,0.12); border:1px solid rgba(231,76,60,0.18); color:#C62828; }
