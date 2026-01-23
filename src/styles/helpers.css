@@ -1,0 +1,19 @@
+/* =======================
+   Helpers
+   ======================= */
+.grid { display:grid; gap: 12px; }
+.grid2{
+  display:grid;
+  grid-template-columns: repeat(2, minmax(0,1fr));
+  gap: 12px;
+}
+.grid2 .flex {
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: flex-end;
+}
+.flex { display:flex; gap:8px; align-items:center; }
+.sep  { height:1px; background: var(--border); margin: 10px 0; }
+.label{ font-size:13px; color: var(--muted); margin-bottom: 6px; font-weight: 600; letter-spacing:.3px; }
+.muted{ color: var(--muted); font-style: italic; }
+.small{ font-size: 14px; line-height: 1.35; }

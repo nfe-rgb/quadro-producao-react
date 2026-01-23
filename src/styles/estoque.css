@@ -1,0 +1,173 @@
+.estoque-page {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.estoque-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.estoque-title {
+  margin: 0;
+  font-size: 22px;
+  color: var(--text-strong);
+}
+
+.estoque-sub {
+  margin: 2px 0 0;
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+.estoque-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.estoque-tabs {
+  display: inline-flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.estoque-tabbtn {
+  border: 1px solid var(--border);
+  background: #fff;
+  padding: 10px 14px;
+  border-radius: 10px;
+  cursor: pointer;
+  font-weight: 700;
+  color: var(--text);
+  transition: all 0.15s ease;
+}
+
+.estoque-tabbtn.active {
+  background: linear-gradient(90deg, var(--primary), var(--secondary));
+  color: #fff;
+  border-color: transparent;
+  box-shadow: 0 6px 14px rgba(2, 119, 189, 0.16);
+}
+
+.estoque-card {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.04);
+}
+
+.estoque-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.estoque-card-head h3 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.estoque-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.estoque-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 720px;
+}
+
+.estoque-table th,
+.estoque-table td {
+  padding: 10px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  font-size: 14px;
+}
+
+.estoque-table th {
+  background: #f7f9fb;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.estoque-empty {
+  text-align: center;
+  color: var(--text-muted);
+  padding: 14px 8px;
+}
+
+.estoque-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.estoque-form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+}
+
+.estoque-form label {
+  font-weight: 600;
+  color: var(--text);
+  font-size: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.estoque-form input,
+.estoque-form select {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 14px;
+}
+
+.estoque-form-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.estoque-alert {
+  background: #fff6e5;
+  color: #ad6800;
+  border: 1px solid #ffe2ad;
+  padding: 10px 12px;
+  border-radius: 10px;
+  margin-bottom: 10px;
+}
+
+.estoque-negative {
+  color: #b02a37;
+  font-weight: 700;
+}
+
+@media (max-width: 768px) {
+  .estoque-title {
+    font-size: 20px;
+  }
+
+  .estoque-card {
+    padding: 12px;
+  }
+
+  .estoque-table {
+    min-width: 620px;
+  }
+}

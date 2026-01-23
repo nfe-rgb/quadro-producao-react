@@ -1,0 +1,95 @@
+/* ===== Etiqueta (dentro dos cards) – otimizada para TV ===== */
+
+.etiqueta {
+  position: relative !important;
+  font-size: clamp(19px, 1.9vw, 30px); /* um pouco maior que antes */
+  line-height: 1.35;
+  color: #0b1a26; /* texto bem escuro */
+  font-weight: 600;
+}
+
+.etiqueta > div {
+  margin: 8px 0;
+}
+
+/* rótulos (bolder, cor forte) */
+.etiqueta b {
+  color: #00334d; /* azul petróleo escuro */
+  font-weight: 900;
+  letter-spacing: .2px;
+  margin-right: 6px;
+}
+
+/* primeira linha (O.P) ainda mais destacada */
+.etiqueta > div:first-child {
+  font-size: clamp(20px, 2vw, 32px);
+  color: #00263a;
+  font-weight: 800;
+}
+/* Item da FILA marcado como "produção interrompida" */
+.fila-item.fila-interrompida {
+  background: linear-gradient(180deg, #ffe6b3 0%, #fff8e1 100%);
+  border: 1px solid rgba(255, 193, 7, 0.6);
+  box-shadow: 0 0 0 2px rgba(255, 215, 96, 0.15) inset;
+}
+.stop-reason-below {
+  text-align: center;
+  line-height: 1.35;
+  font-weight: 600;
+}
+.etiqueta-weekend {
+  background: #e6f2ff;
+  border: 2px solid #1e90ff;
+}
+
+.weekend-motivo {
+  color: #0b3b66;
+  text-align: center;
+  font-weight: 600;
+  margin-top: 4px;
+}
+
+.card {
+ position: relative !important;
+}
+
+/* === PÍLULAS DE LIDAS / SALDO NAS ETIQUETAS === */
+.pill-row {
+  position: absolute !important;
+  top: 60px !important;
+  right: -8px !important;
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: flex-end !important;
+  width: auto !important;
+  gap: 6px !important;
+  margin: 0 !important;  /* remove o empurrão */
+  padding: 0 !important;
+  width: auto !important;
+  z-index: 10 !important;
+}
+
+.pill {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 6px !important;
+  font-size: 1.0rem !important;
+  padding: 8px 15px !important;
+  border: 1px solid #ddd;
+  border-radius: 15px;
+  background: #fafafa;
+  color: #333;
+  box-shadow: 0 6px 14px rgba(2,8,23,0.06) !important;
+  white-space: nowrap;
+  font-weight: 800;
+  min-width: 84px;
+  transition: all 0.2s ease;
+}
+
+/* Efeito de destaque leve ao passar o mouse */
+.pill:hover {
+  transform: scale(1.05);
+  filter: brightness(1.05);
+}
+

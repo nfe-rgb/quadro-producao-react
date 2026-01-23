@@ -1,0 +1,21 @@
+/* Modal sempre acima de tudo, independente do container pai */
+.modalbg{
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: 99999 !important;
+  background: rgba(38,50,56,.35);
+  display: grid;
+  place-items: center;
+}
+
+.modal{
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  width: min(720px, 92vw);
+  max-height: 90vh;           /* evita ultrapassar a tela */
+  overflow: auto;             /* rola o conteúdo se ficar grande */
+  padding: 18px;
+  box-shadow: 0 20px 50px rgba(0,0,0,.25);
+}

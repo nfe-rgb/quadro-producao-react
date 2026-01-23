@@ -1,0 +1,115 @@
+/* =======================
+   Kanban (Painel)
+   ======================= */
+.board{
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 16px;
+}
+.column{
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  overflow: hidden;
+  display: flex; flex-direction: column;
+  box-shadow: var(--shadow);
+}
+.column-header{
+  padding: 12px 14px;
+  font-weight: 800;
+  background: linear-gradient(180deg, rgba(2,119,189,.06), rgba(255,255,255,0));
+  border-bottom: 1px solid var(--border);
+  letter-spacing:.4px;
+  color: var(--text);
+}
+.column-body{
+  padding: 12px;
+  display: flex; flex-direction: column; gap: 10px;
+}
+
+/* Cronômetro no cabeçalho (ao lado do nome da máquina) */
+.parada-timer{
+  font-weight: 800;
+  margin-left: 10px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(198,40,40,.12);
+  color: #C62828;
+  font-size: 18px;
+}
+.loweff-timer{
+  font-weight: 800;
+  margin-left: 10px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(255, 193, 7, 0.12);
+  color: #7a5a00;
+  font-size: 18px;
+}
+
+/* Texto da O.P na faixa do header, tamanho normal */
+.op-inline{
+  font-weight: 800;
+  letter-spacing: .3px;
+  font-size: clamp(14px, 1.05vw, 18px); /* moderado, não gigante */
+  color: #0f172a;
+}
+.semprog-timer {
+  font-weight: 800;
+  margin-left: 10px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(60, 146, 226, 0.12);
+  color: #1051dd;
+  font-size: 18px;
+}
+.priority-block{
+  display:flex;
+  align-items:center;
+  gap:12px;
+  padding:12px;
+  border:1px solid var(--border);
+  border-radius:12px;
+  background: rgba(15,23,42,0.04);
+}
+.priority-label{
+  font-size:18px;
+  font-weight:900;
+  letter-spacing:1px;
+  color:#0f172a;
+  align-items: center;
+}
+.priority-value{
+  font-size:28px;
+  font-weight:900;
+  color:#111827;
+}
+.priority-input{
+  margin-left:auto;
+  width:90px;
+  padding:6px 8px;
+  border:1px solid #cbd5e1;
+  border-radius:10px;
+  font-size:16px;
+  font-weight:700;
+  color:#0f172a;
+  background:#fff;
+  box-shadow: inset 0 1px 2px rgba(0,0,0,0.06);
+}
+.priority-chip{
+  display:inline-flex;
+  align-items:center;
+  gap:4px;
+  padding:4px 8px;
+  border-radius:999px;
+  font-weight:800;
+  font-size:13px;
+  border:1px solid transparent;
+}
+.priority-chip-gray{ background:#e2e8f0; color:#0f172a; border-color:#cbd5e1; }
+.priority-chip-green{ background:#e2e8f0; color:#0f172a; border-color:#cbd5e1; }
+.priority-chip-yellow{ background:#e2e8f0; color:#0f172a; border-color:#cbd5e1; }
+.priority-chip-red{ background:#e2e8f0; color:#0f172a; border-color:#cbd5e1; }
+.priority-edit{ display:flex; flex-direction:column; gap:8px; padding:8px 0; }
+.priority-edit-row{ display:flex; align-items:center; gap:10px; }
+.priority-hint{ font-size:12px; color:#475569; }

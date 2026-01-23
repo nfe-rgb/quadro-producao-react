@@ -1,0 +1,53 @@
+/* Cartões e status */
+.card{
+  border: 1px solid var(--border);
+  background: var(--card);
+  border-radius: 12px;
+  padding: 12px;
+  box-shadow: var(--shadow);
+  color: var(--text);
+}
+/* Fundo mais suave e texto escuro (sem perder o código de cor) */
+.card.green {
+  border-left: 8px solid #1B5E20;
+  background: linear-gradient(180deg, #b7e1b9 0%, #eaf5eb 100%);
+  color: #0a2e0a; /* texto escuro */
+}
+
+.card.yellow {
+  border-left: 8px solid #E65100;
+  background: linear-gradient(180deg, #ffe6b3 0%, #fff8e1 100%);
+  color: #3a2500;
+}
+
+.card.red {
+  border-left: 8px solid #B71C1C;
+  background: linear-gradient(180deg, #f5b5b5 0%, #ffebeb 100%);
+  color: #3a0a0a;
+  animation: pulse-card-red 1.2s ease-in-out infinite;
+}
+
+@keyframes pulse-card-red {
+  0%   { box-shadow: 0 0 0 0 rgba(198,40,40,0.4); }
+  50%  { box-shadow: 0 0 15px 4px rgba(198,40,40,0.25); }
+  100% { box-shadow: 0 0 0 0 rgba(198,40,40,0.4); }
+}
+/* borda mais visível em telas brilhantes */
+.card {
+  border: 2px solid rgba(0,0,0,.08);
+}
+/* 🔶 FILA: destaque amarelo quando produção foi cortada */
+.fila-item-interrupted {
+  background: #fff7cc;       /* amarelo claro */
+  border: 1px solid #f2c200; /* borda amarelo */
+  box-shadow: 0 0 0 2px rgba(242,194,0,0.2);
+}
+
+/* 🔶 REGISTRO: cartão amarelo do evento “Produção interrompida” */
+.tl-card.tl-interrupt {
+  background: #fff7cc;
+  border-left: 4px solid #f2c200;
+}
+.tl-card.tl-interrupt .tl-title {
+  font-weight: 700;
+}

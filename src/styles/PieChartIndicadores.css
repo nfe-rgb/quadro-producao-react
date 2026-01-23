@@ -1,0 +1,235 @@
+/* Efeito de botão nos indicadores laterais */
+.summary-item {
+  cursor: pointer;
+  border-radius: 8px;
+  transition: background 0.25s, box-shadow 0.25s, transform 0.18s;
+}
+.summary-item:hover, .summary-item:focus {
+  background: linear-gradient(90deg, #f0f4ff 60%, #eaf6ff 100%);
+  box-shadow: 0 2px 12px rgba(0, 120, 255, 0.08);
+  transform: translateY(-2px) scale(1.03);
+}
+@media (max-width: 600px) {
+  .piechart-row.single {
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+  }
+  .piechart-container {
+    width: 100%;
+    min-width: 0;
+    justify-content: center;
+    align-items: center;
+  }
+  .piechart-svg {
+    width: 98vw;
+    max-width: 98vw;
+    height: auto;
+    min-width: 220px;
+    max-height: 220px;
+  }
+  .summary-side {
+    min-width: 0 !important;
+    width: 100%;
+    margin-top: 12px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+  }
+  .summary-item {
+    font-size: 13px !important;
+    margin-bottom: 4px !important;
+    gap: 6px !important;
+  }
+}
+/* CONTEINER GERAL */
+.piechart-wrapper {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
+  padding: 16px;
+  width: 100%;
+}
+
+/* BOTÃO DE FILTRO BONITO */
+.filtro-btn {
+  background: linear-gradient(135deg, #0056d6, #0099ff);
+  border: none;
+  padding: 8px 16px;
+  border-radius: 10px;
+  cursor: pointer;
+  color: #fff;
+  font-weight: 600;
+  font-size: 14px;
+  transition: 0.25s ease;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+}
+
+.filtro-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.25);
+}
+
+/* GRÁFICO */
+.piechart-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.piechart-row {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  justify-content: center;
+}
+
+.piechart-legend {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 180px;
+}
+
+.legend-item {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 6px 8px;
+  border-radius: 6px;
+}
+
+.legend-hovered {
+  background: rgba(0,0,0,0.03);
+}
+
+.legend-color {
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  flex: 0 0 14px;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.12);
+}
+
+.legend-texts {
+  display: flex;
+  flex-direction: column;
+}
+
+.legend-label {
+  font-size: 13px;
+  color: #333;
+  font-weight: 600;
+}
+
+.legend-values {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+}
+
+.legend-value {
+  font-weight: 700;
+}
+
+.legend-pct {
+  font-size: 12px;
+  color: #666;
+}
+
+.piechart-svg {
+  overflow: visible;
+}
+
+/* SLICES */
+.slice {
+  cursor: pointer;
+  transition: transform 0.25s ease, filter 0.25s ease;
+}
+
+.slice:hover {
+  filter: brightness(1.12);
+}
+
+.hovered {
+  stroke: #333;
+  stroke-width: 2.5;
+}
+
+/* BURACO DO CENTRO */
+.center-hole {
+  fill: #ffffff;
+  filter: drop-shadow(0 0 4px rgba(0,0,0,0.15));
+}
+
+/* TEXTO CENTRAL */
+.center-title {
+  font-size: 16px;
+  font-weight: 700;
+  fill: #333;
+  pointer-events: none;
+  text-anchor: middle;
+}
+
+/* TEXTO DE HOVER FORA DO GRAFICO */
+.hover-info-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  width: 280px;
+  min-height: 28px;
+  margin: 6px auto 0 auto;
+  text-align: center;
+}
+
+.hover-info {
+  font-size: 14px;
+  font-weight: 600;
+  color: #222;
+  text-align: center;
+}
+
+.hover-placeholder {
+  font-size: 13px;
+  color: #666;
+  text-align: center;
+}
+
+.parada-count {
+  margin-top: 6px;
+  font-size: 14px;
+  color: #333;
+  text-align: center;
+}
+
+.parada-count strong {
+  font-weight: 800;
+}
+
+@media (max-width: 600px) {
+  .piechart-wrapper {
+    padding: 8px;
+    gap: 8px;
+  }
+  .piechart-container {
+    width: 100%;
+    min-width: 0;
+    justify-content: center;
+    align-items: center;
+  }
+  .piechart-svg {
+    width: 100vw;
+    max-width: 98vw;
+    height: auto;
+    min-width: 220px;
+    max-height: 220px;
+  }
+  .center-title {
+    font-size: 14px;
+  }
+  .hover-info {
+    font-size: 13px;
+  }
+}
