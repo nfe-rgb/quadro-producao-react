@@ -792,7 +792,7 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false }) {
                             title="Clique para ver registros por hora"
                             role="button"
                           >
-                            {/^I[1-6]$/.test(maq) ? (
+                            {/^(P[1-4]|I[1-6])$/.test(maq) ? (
                               <>Peças Boas: <span className="destaque-value">{dados.producaoPecas}</span></>
                             ) : (
                               <>Caixas bipadas: <span className="destaque-value">{dados.bipadas}</span></>
@@ -973,7 +973,7 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false }) {
                 onChange={(e) => setManualForm((f) => ({ ...f, machine: e.target.value }))}
               >
                 <option value="">Selecione...</option>
-                {MAQUINAS.filter((m) => /^I[1-6]$/.test(m)).map((m) => (
+                {MAQUINAS.filter((m) => /^(P[1-4]|I[1-6])$/.test(m)).map((m) => (
                   <option key={m} value={m}>{m}</option>
                 ))}
               </select>
