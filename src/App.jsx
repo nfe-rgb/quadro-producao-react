@@ -12,6 +12,7 @@ import NovaOrdem from './abas/NovaOrdem'
 import Registro from './abas/Registro'
 import Estoque from './abas/Estoque'
 import Rastreio from './abas/Rastreio'
+import Gestao from './abas/Gestao'
 import Pet01 from './pages/Pet01'
 import Pet02 from './pages/Pet02'
 import Pet03 from './pages/Pet03'
@@ -52,7 +53,7 @@ export default function App(){
   const [machinePriorities, setMachinePriorities] = useState({})
   const [prioritiesLoading, setPrioritiesLoading] = useState(false)
 
-  const { authUser, authChecked, isAdmin } = useAuthAdmin()
+  const { authUser, authChecked, isAdmin, accessLevel } = useAuthAdmin()
 
   const {
     ordens, finalizadas, paradas,
@@ -208,7 +209,8 @@ export default function App(){
   }
 
   useEffect(() => {
-    if (authChecked && !authUser && tab === 'estoque') {
+    if (!authChecked) return
+    if (!authUser && (tab === 'estoque' || tab === 'gestao')) {
       setTab('painel')
     }
   }, [authChecked, authUser, tab])
@@ -456,10 +458,13 @@ export default function App(){
         )}
         <button className={`tabbtn ${tab==='registro'?'active':''}`} onClick={()=>setTab('registro')}>Paradas</button>
         <button className={`tabbtn ${tab==='rastreio'?'active':''}`} onClick={()=>setTab('rastreio')}>Rastreio</button>
-        {authUser && (
+        {authUser && accessLevel === 2 && (
           <button className={`tabbtn ${tab==='estoque'?'active':''}`} onClick={()=>setTab('estoque')}>Estoque</button>
         )}
         <button className={`tabbtn ${tab==='apontamento'?'active':''}`} onClick={()=>setTab('apontamento')}>Apontamento</button>
+        {authUser && (
+          <button className={`tabbtn ${tab==='gestao'?'active':''}`} onClick={()=>setTab('gestao')}>Gestão</button>
+        )}
       </div>
 
       {tab === 'login' && <Login />}
@@ -510,7 +515,7 @@ export default function App(){
         />
       )}
 
-      {tab === 'nova' && (
+      {tab === 'nova' && accessLevel === 2 && (
         isAdmin ? (
           <NovaOrdem form={form} setForm={setForm} criarOrdem={() => criarOrdem(form, setForm, setTab)} />
         ) : (
@@ -529,12 +534,23 @@ export default function App(){
         <Rastreio />
       )}
 
-      {tab === 'estoque' && authUser && (
+      {tab === 'estoque' && accessLevel === 2 && authUser && (
         <Estoque />
       )}
 
       {tab === 'apontamento' && (
         <Apontamento isAdmin={isAdmin} />
+      )}
+
+      {tab === 'gestao' && (
+        authUser && (accessLevel === 1 || accessLevel === 2) ? (
+          <Gestao />
+        ) : (
+          <div style={{ padding: 24 }}>
+            <h2>Acesso Negado</h2>
+            <p>Esta página não está disponível.</p>
+          </div>
+        )
       )}
 
       {/* Modais centralizados */}

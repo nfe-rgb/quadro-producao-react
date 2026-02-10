@@ -1,7 +1,7 @@
 // src/hooks/useAuthAdmin.js
 import { useEffect, useState, useMemo } from 'react'
 import { supabase } from '../lib/supabaseClient'
-import { ADMIN_EMAILS } from '../lib/constants'
+import { ADMIN_EMAILS, ACCESS_LEVEL_1_EMAILS, ACCESS_LEVEL_2_EMAILS } from '../lib/constants'
 
 export default function useAuthAdmin(){
   const [authUser, setAuthUser] = useState(null)
@@ -23,5 +23,14 @@ export default function useAuthAdmin(){
     return !!email && Array.isArray(ADMIN_EMAILS) && ADMIN_EMAILS.map(e => e.toLowerCase()).includes(email)
   }, [authUser])
 
-  return { authUser, authChecked, isAdmin }
+  const accessLevel = useMemo(() => {
+    const email = authUser?.email?.toLowerCase()
+    if (!email) return 0
+    if (isAdmin) return 2
+    if (Array.isArray(ACCESS_LEVEL_2_EMAILS) && ACCESS_LEVEL_2_EMAILS.map(e => e.toLowerCase()).includes(email)) return 2
+    if (Array.isArray(ACCESS_LEVEL_1_EMAILS) && ACCESS_LEVEL_1_EMAILS.map(e => e.toLowerCase()).includes(email)) return 1
+    return 0
+  }, [authUser, isAdmin])
+
+  return { authUser, authChecked, isAdmin, accessLevel }
 }
