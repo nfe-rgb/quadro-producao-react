@@ -12,8 +12,6 @@ import Modal from '../components/Modal';
 export default function Apontamento({ isAdmin: _unusedIsAdminProp = false }) {
   const adminObj = typeof useAuthAdmin === 'function' ? useAuthAdmin() : { isAdmin: false, authUser: null };
   const isAdmin = Boolean(adminObj && adminObj.isAdmin); // só libera para admin verdadeiro
-  const authEmail = String(adminObj?.authUser?.email || '').toLowerCase();
-  const canSeeValorization = authEmail === 'nfe@savantiplasticos.com.br';
   const [bipagens, setBipagens] = useState([]);
   const [refugos, setRefugos] = useState([]);
   const [apontamentos, setApontamentos] = useState([]); // Produção manual das injetoras
@@ -463,7 +461,7 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false }) {
       try {
         const { data, error } = await supabase
           .from('items')
-          .select('code, unit_value')
+          .select('code, unit_value, cycle_seconds, cavities')
           .in('code', Array.from(codes));
         if (error) throw error;
         if (!active) return;
@@ -534,6 +532,9 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false }) {
           padraoPorCaixa: 1,
           manualEntries: [],
           valorTotal: 0,
+          metaPecasTurno: 0,
+          metaValorTurno: 0,
+          hasMetaTurno: false,
         };
       });
     });
@@ -591,10 +592,20 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false }) {
       return Number.isFinite(n) ? n : 0;
     };
     const getUnitValueFromOrder = (order) => getUnitValueFromProduct(order?.product || '');
+    const getItemMetaFromProduct = (productStr) => {
+      const code = extractItemCodeFromOrderProduct(productStr);
+      if (!code) return { unitValue: 0, cycleSeconds: 0, cavities: 0 };
+      const raw = itemsMap && itemsMap[code] ? itemsMap[code] : null;
+      const unitValue = Number(raw?.unit_value) || 0;
+      const cycleSeconds = Number(raw?.cycle_seconds) || 0;
+      const cavities = Number(raw?.cavities) || 0;
+      return { unitValue, cycleSeconds, cavities };
+    };
 
     Object.keys(porTurno).forEach(turnoKey => {
       Object.keys(porTurno[turnoKey]).forEach(maq => {
         const dados = porTurno[turnoKey][maq];
+        const producaoPorProduto = {};
 
         // Reinicia acumulador monetário a cada cálculo
         dados.valorTotal = 0;
@@ -620,6 +631,10 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false }) {
           const std = parsePiecesPerBox(stdRaw) || 0;
           somaPecas += std;
           if (std > 0) standardsSet.add(std);
+          const productKey = String(c.product || c.order?.product || '').trim();
+          if (productKey && std > 0) {
+            producaoPorProduto[productKey] = (producaoPorProduto[productKey] || 0) + std;
+          }
           const unitVal = getUnitValueFromOrder(c.order) || getUnitValueFromProduct(c.product);
           if (std > 0 && unitVal > 0) {
             dados.valorTotal += std * unitVal;
@@ -635,10 +650,32 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false }) {
         (dados.manualEntries || []).forEach(me => {
           const unitVal = getUnitValueFromProduct(me.product || (me.order ? me.order.product : ''));
           const qty = Number(me.good_qty) || 0;
+          const productKey = String(me.product || me.order?.product || '').trim();
+          if (productKey && qty > 0) {
+            producaoPorProduto[productKey] = (producaoPorProduto[productKey] || 0) + qty;
+          }
           if (unitVal > 0 && qty > 0) {
             dados.valorTotal += qty * unitVal;
           }
         });
+
+        const produtoPredominante = Object.keys(producaoPorProduto).sort((a, b) => (producaoPorProduto[b] || 0) - (producaoPorProduto[a] || 0))[0] || '';
+        const turnoMs = duracaoTurnoPorPeriodo?.[turnoKey] || 0;
+        const turnoHoras = turnoMs > 0 ? (turnoMs / (1000 * 60 * 60)) : 0;
+        const itemMeta = getItemMetaFromProduct(produtoPredominante);
+        const piecesPerHour = itemMeta.cycleSeconds > 0 && itemMeta.cavities > 0
+          ? (3600 / itemMeta.cycleSeconds) * itemMeta.cavities
+          : 0;
+        const metaPecas = piecesPerHour > 0 && turnoHoras > 0
+          ? Math.round(piecesPerHour * turnoHoras)
+          : 0;
+        const metaValor = metaPecas > 0 && itemMeta.unitValue > 0
+          ? (metaPecas * itemMeta.unitValue)
+          : 0;
+
+        dados.metaPecasTurno = metaPecas;
+        dados.metaValorTurno = metaValor;
+        dados.hasMetaTurno = metaPecas > 0;
 
         const refugoPecas = Number(dados.refugo) || 0;
         let pct = 0;
@@ -650,7 +687,7 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false }) {
     });
 
     return porTurno;
-  }, [bipagens, refugos, ordersMap, apontamentos, itemsMap]);
+  }, [bipagens, refugos, ordersMap, apontamentos, itemsMap, duracaoTurnoPorPeriodo]);
 
   // RENDER
   return (
@@ -823,12 +860,6 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false }) {
                           >
                             Horas Paradas: <span className="destaque-value">{formatMsToHHmm(horasParadasPorTurno[t.key]?.[maq] || 0)}</span>
                           </div>
-
-                          {canSeeValorization && (
-                            <div style={{ marginTop: 6, fontSize: 13, color: '#333' }}>
-                              Valorização: <strong>{formatBRL(dados.valorTotal || 0)}</strong>
-                            </div>
-                          )}
 
                           {isOpen && (
                             <div className="registros">

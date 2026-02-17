@@ -419,6 +419,7 @@ export default function useOrders(){
 
   async function confirmarParada({ ordem, operador, motivo, obs, data, hora, endLowEffAtStopStart }) {
     if (!operador || !data || !hora) { alert('Preencha operador, data e hora.'); return }
+    if (!String(motivo || '').trim()) { alert('Selecione o motivo da parada.'); return }
     const started_at = localDateTimeToISO(data, hora)
 
     const overlapMsg = await validarSobreposicaoParada({ machineId: ordem.machine_id, startedAt: started_at })
@@ -445,7 +446,7 @@ export default function useOrders(){
 
     // 2) Registra parada
     const ins = await supabase.from('machine_stops')
-      .insert([{ order_id: ordem.id, machine_id: ordem.machine_id, started_by: operador, started_at, reason: motivo, notes: obs }])
+      .insert([{ order_id: ordem.id, machine_id: ordem.machine_id, started_by: operador, started_at, reason: String(motivo).trim(), notes: obs }])
       .select('*').maybeSingle()
     if (ins.error) { alert('Erro ao registrar parada: ' + ins.error.message); return }
 

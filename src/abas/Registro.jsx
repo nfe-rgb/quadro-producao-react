@@ -1120,10 +1120,15 @@ export default function Registro({ registroGrupos = [], openSet, toggleOpen, isA
     if(!editEv) return
     try{
       if(editEv.type === 'stop'){
+        const reason = String(editForm.reason || '').trim()
+        if(!reason){
+          alert('Motivo da parada é obrigatório.')
+          return
+        }
         const updates = {
           started_at: localInputToIso(editForm.started),
           resumed_at: editForm.ended ? localInputToIso(editForm.ended) : null,
-          reason: editForm.reason || null,
+          reason,
           notes: editForm.notes || null,
         }
         const { error } = await supabase.from('machine_stops').update(updates).eq('id', editEv.rawId)
@@ -1256,7 +1261,7 @@ export default function Registro({ registroGrupos = [], openSet, toggleOpen, isA
                             rawId: log.id
                           });
                         }
-                        ;(gr.stops || []).forEach(st => { if (safe(st.started_at)) events.push({ id: `stop-${st.id}`, type: 'stop', title: 'Parada', when: st.started_at, end: safe(st.resumed_at) ? st.resumed_at : null, who: st.started_by || '-', reason: st.reason || '-', notes: st.notes || '', rawId: st.id }) })
+                        ;(gr.stops || []).forEach(st => { if (safe(st.started_at)) events.push({ id: `stop-${st.id}`, type: 'stop', title: 'Parada', when: st.started_at, end: safe(st.resumed_at) ? st.resumed_at : null, who: st.started_by || '-', reason: st.reason || '', notes: st.notes || '', rawId: st.id }) })
                         if (safe(o.finalized_at)) events.push({ id: `end-${o.id}`, type: 'end', title: 'Fim da produção', when: o.finalized_at, who: o.finalized_by || '-' })
                         if (!events.length) events.push({ id: `empty-${o.id}`, type: 'empty', title: 'Sem eventos', when: null })
                         events.sort((a, b) => (toTime(a.when) || 0) - (toTime(b.when) || 0))
@@ -1350,7 +1355,7 @@ export default function Registro({ registroGrupos = [], openSet, toggleOpen, isA
                                             <div className="flex" style={{ justifyContent: 'flex-end' }}>
                                               <button className="btn" onClick={() => {
                                                 setEditEv({ type: 'stop', id: ev.id, rawId: ev.rawId })
-                                                setEditForm({ started: isoToLocalInput(ev.when), ended: isoToLocalInput(ev.end), reason: ev.reason || '', notes: ev.notes || '' })
+                                                setEditForm({ started: isoToLocalInput(ev.when), ended: isoToLocalInput(ev.end), reason: MOTIVOS_PARADA.includes(ev.reason) ? ev.reason : '', notes: ev.notes || '' })
                                               }}>Corrigir</button>
                                             </div>
                                           )}

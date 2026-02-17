@@ -14,7 +14,19 @@ const toPosFloat = (v) => {
   const n = parseFloat(String(v).replace(',', '.').trim())
   return Number.isFinite(n) && n > 0 ? n : null
 }
+const toNonNegFloat = (v) => {
+  const n = parseFloat(String(v).replace(',', '.').trim())
+  return Number.isFinite(n) && n >= 0 ? n : null
+}
 const cleanText = (v) => String(v ?? '').trim()
+const INSUMO_TECH_DEFAULTS = {
+  color: '-',
+  cycle_seconds: 1,
+  cavities: 1,
+  part_weight_g: 1,
+  unit_value: 0,
+  resin: '-',
+}
 
 // Cabeçalhos esperados (CSV)
 const EXPECTED_HEADERS = [
@@ -56,7 +68,7 @@ export default function CadastroItens() {
     setError(null)
     const { data, error } = await supabase
       .from('items')
-      .select('id, code, description, color, cycle_seconds, cavities, part_weight_g, unit_value, resin, created_at')
+      .select('*')
       .order('code', { ascending: true })
     if (error) {
       setError(error.message)
@@ -73,11 +85,30 @@ export default function CadastroItens() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authChecked, isAdmin])
 
+  const isProdutoAcabado = (item) => {
+    const type = String(item?.item_type || '').trim().toLowerCase()
+    if (type === 'produto_acabado') return true
+    if (type === 'insumo') return false
+    return String(item?.code || '').trim().startsWith('5')
+  }
+
+  const produtoAcabadoItems = useMemo(
+    () => (Array.isArray(items) ? items.filter(isProdutoAcabado) : []),
+    [items]
+  )
+
+  const insumoItems = useMemo(
+    () => (Array.isArray(items) ? items.filter((item) => !isProdutoAcabado(item)) : []),
+    [items]
+  )
+
   // ============== FORM / MODAL (sempre declarar hooks) ==============
   const [open, setOpen] = useState(false)
   const [saving, setSaving] = useState(false)
   const [editing, setEditing] = useState(null)
+  const [listType, setListType] = useState('insumo')
   const [form, setForm] = useState({
+    itemType: 'produto_acabado',
     code: '',
     description: '',
     color: '',
@@ -86,11 +117,15 @@ export default function CadastroItens() {
     part_weight_g: '',
     unit_value: '',
     resin: '',
+    unidade: '',
+    cliente: '',
+    estoque_minimo: '',
   })
   const [formErr, setFormErr] = useState(null)
 
   const resetForm = () => {
     setForm({
+      itemType: 'produto_acabado',
       code: '',
       description: '',
       color: '',
@@ -99,13 +134,19 @@ export default function CadastroItens() {
       part_weight_g: '',
       unit_value: '',
       resin: '',
+      unidade: '',
+      cliente: '',
+      estoque_minimo: '',
     })
     setFormErr(null)
   }
   const startEdit = (item) => {
+    const code = cleanText(item.code)
+    const itemType = String(code).startsWith('5') ? 'produto_acabado' : 'insumo'
     setEditing(item)
     setForm({
-      code: cleanText(item.code),
+      itemType,
+      code,
       description: cleanText(item.description),
       color: cleanText(item.color),
       cycle_seconds: String(item.cycle_seconds ?? ''),
@@ -113,6 +154,9 @@ export default function CadastroItens() {
       part_weight_g: String(item.part_weight_g ?? ''),
       unit_value: String(item.unit_value ?? ''),
       resin: cleanText(item.resin),
+      unidade: cleanText(item.unidade),
+      cliente: cleanText(item.cliente),
+      estoque_minimo: String(item.estoque_minimo ?? ''),
     })
     setFormErr(null)
     setOpen(true)
@@ -122,10 +166,22 @@ export default function CadastroItens() {
     setForm((prev) => ({ ...prev, [name]: value }))
   }
   const validate = () => {
+    const itemType = cleanText(form.itemType)
     const code = cleanText(form.code)
     const description = cleanText(form.description)
     if (!code) return 'Código é obrigatório.'
     if (!description) return 'Descrição é obrigatória.'
+
+    if (itemType === 'insumo') {
+      const unidade = cleanText(form.unidade)
+      const cliente = cleanText(form.cliente)
+      const estoque_minimo = toNonNegFloat(form.estoque_minimo)
+      if (!unidade) return 'Unidade é obrigatória para insumo.'
+      if (!cliente) return 'Cliente é obrigatório para insumo.'
+      if (estoque_minimo == null) return 'Estoque mínimo deve ser um número maior ou igual a 0.'
+      return null
+    }
+
     const cycle_seconds = toPosFloat(form.cycle_seconds)
     const cavities = toPosInt(form.cavities)
     const part_weight_g = toPosFloat(form.part_weight_g)
@@ -140,16 +196,36 @@ export default function CadastroItens() {
     setFormErr(null)
     const err = validate()
     if (err) { setFormErr(err); return }
-    const payload = {
+    const payloadBase = {
       code: cleanText(form.code),
       description: cleanText(form.description),
-      color: cleanText(form.color),
-      cycle_seconds: toPosFloat(form.cycle_seconds),
-      cavities: toPosInt(form.cavities),
-      part_weight_g: toPosFloat(form.part_weight_g),
-      unit_value: toPosFloat(form.unit_value),
-      resin: cleanText(form.resin),
+      item_type: cleanText(form.itemType) || 'produto_acabado',
     }
+    const payload = form.itemType === 'insumo'
+      ? {
+          ...payloadBase,
+          unidade: cleanText(form.unidade),
+          cliente: cleanText(form.cliente),
+          estoque_minimo: toNonNegFloat(form.estoque_minimo),
+          color: cleanText(form.color) || INSUMO_TECH_DEFAULTS.color,
+          cycle_seconds: toPosFloat(form.cycle_seconds) ?? INSUMO_TECH_DEFAULTS.cycle_seconds,
+          cavities: toPosInt(form.cavities) ?? INSUMO_TECH_DEFAULTS.cavities,
+          part_weight_g: toPosFloat(form.part_weight_g) ?? INSUMO_TECH_DEFAULTS.part_weight_g,
+          unit_value: toNonNegFloat(form.unit_value) ?? INSUMO_TECH_DEFAULTS.unit_value,
+          resin: cleanText(form.resin) || INSUMO_TECH_DEFAULTS.resin,
+        }
+      : {
+          ...payloadBase,
+          color: cleanText(form.color),
+          cycle_seconds: toPosFloat(form.cycle_seconds),
+          cavities: toPosInt(form.cavities),
+          part_weight_g: toPosFloat(form.part_weight_g),
+          unit_value: toPosFloat(form.unit_value),
+          resin: cleanText(form.resin),
+          unidade: null,
+          cliente: null,
+          estoque_minimo: null,
+        }
     setSaving(true)
     let q = null
     if (editing?.id) {
@@ -343,61 +419,120 @@ export default function CadastroItens() {
           )}
 
           {/* LISTAGEM DE ITENS */}
-          <div style={{ border: '1px solid #eee', borderRadius: 12, overflow: 'hidden' }}>
-            <div style={{ padding: 12, background: '#fafafa', borderBottom: '1px solid #eee' }}>
-              <strong>Itens cadastrados</strong>
-            </div>
-
-            {loading ? (
-              <div style={{ padding: 16 }}>Carregando…</div>
-            ) : error ? (
-              <div style={{ padding: 16, color: '#b00020' }}>Erro: {error}</div>
-            ) : items.length === 0 ? (
-              <div style={{ padding: 16, opacity: 0.7 }}>Nenhum item cadastrado ainda.</div>
-            ) : (
-              <div style={{ width: '100%', overflowX: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                  <thead>
-                    <tr style={{ background: '#f6f6f6' }}>
-                      <th style={th}>Código</th>
-                      <th style={th}>Descrição</th>
-                      <th style={th}>Cor</th>
-                      <th style={th}>Ciclo (s)</th>
-                      <th style={th}>Cav.</th>
-                      <th style={th}>Peso (g)</th>
-                      <th style={th}>Valor (R$)</th>
-                      <th style={th}>Resina</th>
-                      <th style={th}>Criado em</th>
-                      <th style={th}>Ações</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {items.map((it) => (
-                      <tr key={it.id} style={{ borderTop: '1px solid #eee' }}>
-                        <td style={td}>{it.code}</td>
-                        <td style={td}>{it.description}</td>
-                        <td style={td}>{it.color}</td>
-                        <td style={tdNum}>{it.cycle_seconds}</td>
-                        <td style={tdNum}>{it.cavities}</td>
-                        <td style={tdNum}>{it.part_weight_g}</td>
-                        <td style={tdNum}>{it.unit_value}</td>
-                        <td style={td}>{it.resin}</td>
-                        <td style={td}>{formatDate(it.created_at)}</td>
-                        <td style={{ ...td, whiteSpace: 'nowrap' }}>
-                          <button
-                            onClick={() => startEdit(it)}
-                            style={{ padding: '6px 10px', borderRadius: 10, border: '1px solid #ddd', background: '#fff', cursor: 'pointer', fontWeight: 600 }}
-                          >
-                            Editar
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+          {loading ? (
+            <div style={{ padding: 16 }}>Carregando…</div>
+          ) : error ? (
+            <div style={{ padding: 16, color: '#b00020' }}>Erro: {error}</div>
+          ) : items.length === 0 ? (
+            <div style={{ padding: 16, opacity: 0.7 }}>Nenhum item cadastrado ainda.</div>
+          ) : (
+            <div style={{ border: '1px solid #eee', borderRadius: 12, overflow: 'hidden' }}>
+              <div style={{ padding: 12, background: '#fafafa', borderBottom: '1px solid #eee', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  onClick={() => setListType('insumo')}
+                  style={listType === 'insumo' ? btnTypeActive : btnType}
+                >
+                  Insumos ({insumoItems.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setListType('produto_acabado')}
+                  style={listType === 'produto_acabado' ? btnTypeActive : btnType}
+                >
+                  Produtos acabados ({produtoAcabadoItems.length})
+                </button>
               </div>
-            )}
-          </div>
+
+              {listType === 'insumo' ? (
+                insumoItems.length === 0 ? (
+                  <div style={{ padding: 16, opacity: 0.7 }}>Nenhum insumo cadastrado.</div>
+                ) : (
+                  <div style={{ width: '100%', overflowX: 'auto' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                      <thead>
+                        <tr style={{ background: '#f6f6f6' }}>
+                          <th style={th}>Código</th>
+                          <th style={th}>Descrição</th>
+                          <th style={th}>Unidade</th>
+                          <th style={th}>Cliente</th>
+                          <th style={th}>Estoque mínimo</th>
+                          <th style={th}>Criado em</th>
+                          <th style={th}>Ações</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {insumoItems.map((it) => (
+                          <tr key={it.id} style={{ borderTop: '1px solid #eee' }}>
+                            <td style={td}>{it.code}</td>
+                            <td style={td}>{it.description}</td>
+                            <td style={td}>{it.unidade || '-'}</td>
+                            <td style={td}>{it.cliente || '-'}</td>
+                            <td style={tdNum}>{it.estoque_minimo ?? '-'}</td>
+                            <td style={td}>{formatDate(it.created_at)}</td>
+                            <td style={{ ...td, whiteSpace: 'nowrap' }}>
+                              <button
+                                onClick={() => startEdit(it)}
+                                style={{ padding: '6px 10px', borderRadius: 10, border: '1px solid #ddd', background: '#fff', cursor: 'pointer', fontWeight: 600 }}
+                              >
+                                Editar
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )
+              ) : (
+                produtoAcabadoItems.length === 0 ? (
+                  <div style={{ padding: 16, opacity: 0.7 }}>Nenhum produto acabado cadastrado.</div>
+                ) : (
+                  <div style={{ width: '100%', overflowX: 'auto' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                      <thead>
+                        <tr style={{ background: '#f6f6f6' }}>
+                          <th style={th}>Código</th>
+                          <th style={th}>Descrição</th>
+                          <th style={th}>Cor</th>
+                          <th style={th}>Ciclo (s)</th>
+                          <th style={th}>Cav.</th>
+                          <th style={th}>Peso (g)</th>
+                          <th style={th}>Valor (R$)</th>
+                          <th style={th}>Resina</th>
+                          <th style={th}>Criado em</th>
+                          <th style={th}>Ações</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {produtoAcabadoItems.map((it) => (
+                          <tr key={it.id} style={{ borderTop: '1px solid #eee' }}>
+                            <td style={td}>{it.code}</td>
+                            <td style={td}>{it.description}</td>
+                            <td style={td}>{it.color}</td>
+                            <td style={tdNum}>{it.cycle_seconds}</td>
+                            <td style={tdNum}>{it.cavities}</td>
+                            <td style={tdNum}>{it.part_weight_g}</td>
+                            <td style={tdNum}>{it.unit_value}</td>
+                            <td style={td}>{it.resin}</td>
+                            <td style={td}>{formatDate(it.created_at)}</td>
+                            <td style={{ ...td, whiteSpace: 'nowrap' }}>
+                              <button
+                                onClick={() => startEdit(it)}
+                                style={{ padding: '6px 10px', borderRadius: 10, border: '1px solid #ddd', background: '#fff', cursor: 'pointer', fontWeight: 600 }}
+                              >
+                                Editar
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )
+              )}
+            </div>
+          )}
 
           {/* MODAL: CADASTRO DE ITEM */}
           <Modal open={open} onClose={() => !saving && setOpen(false)} title={editing?.id ? 'Editar item' : 'Cadastrar item'}>
@@ -408,22 +543,49 @@ export default function CadastroItens() {
                 </div>
               )}
 
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  onClick={() => setForm((prev) => ({ ...prev, itemType: 'produto_acabado' }))}
+                  style={form.itemType === 'produto_acabado' ? btnTypeActive : btnType}
+                >
+                  Produto acabado
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setForm((prev) => ({ ...prev, itemType: 'insumo' }))}
+                  style={form.itemType === 'insumo' ? btnTypeActive : btnType}
+                >
+                  Insumo
+                </button>
+              </div>
+
               <div style={grid2}>
                 <Field label="Código*" name="code" value={form.code} onChange={onChange} placeholder="Ex.: ABC-123" />
                 <Field label="Descrição*" name="description" value={form.description} onChange={onChange} placeholder="Nome da peça" />
               </div>
 
-              <div style={grid3}>
-                <Field label="Cor" name="color" value={form.color} onChange={onChange} placeholder="Ex.: Preto" />
-                <Field label="Ciclo (segundos)*" name="cycle_seconds" value={form.cycle_seconds} onChange={onChange} inputMode="decimal" placeholder="Ex.: 12.5" />
-                <Field label="Cavidades*" name="cavities" value={form.cavities} onChange={onChange} inputMode="numeric" placeholder="Ex.: 4" />
-              </div>
+              {form.itemType === 'insumo' ? (
+                <div style={grid3}>
+                  <Field label="Unidade*" name="unidade" value={form.unidade} onChange={onChange} placeholder="Ex.: KG / L / UN" />
+                  <Field label="Cliente*" name="cliente" value={form.cliente} onChange={onChange} placeholder="Nome do cliente" />
+                  <Field label="Estoque mínimo*" name="estoque_minimo" value={form.estoque_minimo} onChange={onChange} inputMode="decimal" placeholder="Ex.: 100" />
+                </div>
+              ) : (
+                <>
+                  <div style={grid3}>
+                    <Field label="Cor" name="color" value={form.color} onChange={onChange} placeholder="Ex.: Preto" />
+                    <Field label="Ciclo (segundos)*" name="cycle_seconds" value={form.cycle_seconds} onChange={onChange} inputMode="decimal" placeholder="Ex.: 12.5" />
+                    <Field label="Cavidades*" name="cavities" value={form.cavities} onChange={onChange} inputMode="numeric" placeholder="Ex.: 4" />
+                  </div>
 
-              <div style={grid3}>
-                <Field label="Peso da peça (g)*" name="part_weight_g" value={form.part_weight_g} onChange={onChange} inputMode="decimal" placeholder="Ex.: 8.7" />
-                <Field label="Valor unitário (R$)*" name="unit_value" value={form.unit_value} onChange={onChange} inputMode="decimal" placeholder="Ex.: 0.32" />
-                <Field label="Resina utilizada" name="resin" value={form.resin} onChange={onChange} placeholder="Ex.: PP / PEAD / ABS…" />
-              </div>
+                  <div style={grid3}>
+                    <Field label="Peso da peça (g)*" name="part_weight_g" value={form.part_weight_g} onChange={onChange} inputMode="decimal" placeholder="Ex.: 8.7" />
+                    <Field label="Valor unitário (R$)*" name="unit_value" value={form.unit_value} onChange={onChange} inputMode="decimal" placeholder="Ex.: 0.32" />
+                    <Field label="Resina utilizada" name="resin" value={form.resin} onChange={onChange} placeholder="Ex.: PP / PEAD / ABS…" />
+                  </div>
+                </>
+              )}
 
               <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 8 }}>
                 <button disabled={saving} onClick={() => setOpen(false)} style={btnGhost}>Cancelar</button>
@@ -492,6 +654,20 @@ const btnGhost = {
   background: '#fff',
   cursor: 'pointer',
   fontWeight: 600,
+}
+const btnType = {
+  padding: '8px 12px',
+  borderRadius: 10,
+  border: '1px solid #ddd',
+  background: '#fff',
+  cursor: 'pointer',
+  fontWeight: 600,
+}
+const btnTypeActive = {
+  ...btnType,
+  border: '1px solid #0a7',
+  background: '#eafaf5',
+  color: '#0a7',
 }
 
 // ======= Utils locais =======

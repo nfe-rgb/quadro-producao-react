@@ -1,5 +1,5 @@
 // src/lib/constants.js
-export const ADMIN_EMAILS = ['nfe@savantiplasticos.com.br','suporte@savantiplasticos.com.br','qualidade@savantiplasticos.com.br'];
+export const ADMIN_EMAILS = ['nfe@savantiplasticos.com.br','suporte@savantiplasticos.com.br','qualidade@savantiplasticos.com.br','adm@savantiplasticos.com.br'];
 
 export const ACCESS_LEVEL_1_EMAILS = ['pcp@savantiplasticos.com.br'];
 export const ACCESS_LEVEL_2_EMAILS = [];

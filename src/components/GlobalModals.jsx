@@ -175,6 +175,10 @@ export default function GlobalModals({
             <div className="flex" style={{justifyContent:'flex-end', gap:8}}>
               <button className="btn ghost" onClick={()=>setStopModal(null)}>Cancelar</button>
               <button className="btn primary" onClick={async ()=>{
+                if (!String(stopModal.motivo || '').trim()) {
+                  alert('Selecione o motivo da parada.')
+                  return
+                }
                 const normalized = { ...stopModal, data: safeDate(stopModal.data), hora: safeTime(stopModal.hora) }
                 if (typeof onConfirmStop === 'function') await onConfirmStop(normalized)
                 setStopModal(null)

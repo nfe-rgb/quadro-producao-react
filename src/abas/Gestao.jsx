@@ -3,6 +3,7 @@ import { DateTime } from 'luxon';
 import { supabase } from '../lib/supabaseClient';
 import { MAQUINAS } from '../lib/constants';
 import { formatMsToHHmm } from '../lib/paradasPorTurno';
+import { getTurnoAtual } from '../lib/utils';
 import '../styles/Gestao.css';
 
 const parsePiecesPerBox = (val) => {
@@ -12,6 +13,28 @@ const parsePiecesPerBox = (val) => {
   const digitsOnly = s.replace(/[^0-9]/g, '');
   if (!digitsOnly) return 0;
   return parseInt(digitsOnly, 10);
+};
+
+const parseFlexibleNumber = (val) => {
+  if (val == null) return 0;
+  if (typeof val === 'number') return Number.isFinite(val) ? val : 0;
+  const s = String(val).trim();
+  if (!s) return 0;
+  const normalized = s
+    .replace(/\.(?=\d{3}(\D|$))/g, '')
+    .replace(',', '.')
+    .replace(/[^\d.-]/g, '');
+  const n = Number(normalized);
+  return Number.isFinite(n) ? n : 0;
+};
+
+const formatMinutesToHM = (minutes) => {
+  const mins = Math.max(0, Number(minutes) || 0);
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  if (h > 0 && m > 0) return `${h}h ${m}min`;
+  if (h > 0) return `${h}h`;
+  return `${m}min`;
 };
 
 const formatBRL = (val) => {
@@ -66,16 +89,44 @@ function getPeriodoRange(p, selectedDate) {
   return { start, end };
 }
 
+function getTurnoIntervalsDiaLocal(date) {
+  const dia = date.getDay();
+  if (dia === 0) {
+    return [{ ini: 23 * 60, fim: 24 * 60, turnoKey: '3' }];
+  }
+  if (dia >= 1 && dia <= 5) {
+    return [
+      { ini: 5 * 60, fim: 13 * 60 + 30, turnoKey: '1' },
+      { ini: 13 * 60 + 30, fim: 22 * 60, turnoKey: '2' },
+      { ini: 22 * 60, fim: 24 * 60, turnoKey: '3' },
+      { ini: 0, fim: 5 * 60, turnoKey: '3' },
+    ];
+  }
+  if (dia === 6) {
+    return [
+      { ini: 0, fim: 5 * 60, turnoKey: '3' },
+      { ini: 5 * 60, fim: 9 * 60, turnoKey: '1' },
+      { ini: 9 * 60, fim: 13 * 60, turnoKey: '2' },
+    ];
+  }
+  return [];
+}
+
 export default function Gestao() {
   const [periodo, setPeriodo] = useState('hoje');
   const [selectedDate, setSelectedDate] = useState('');
+  const [viewMode, setViewMode] = useState('resumo');
 
   const [bipagens, setBipagens] = useState([]);
   const [refugos, setRefugos] = useState([]);
   const [paradas, setParadas] = useState([]);
   const [apontamentos, setApontamentos] = useState([]);
   const [orders, setOrders] = useState([]);
+  const [openOrders, setOpenOrders] = useState([]);
   const [itemsMap, setItemsMap] = useState({});
+  const [valorViewType, setValorViewType] = useState('setor');
+  const [valorSetorFiltro, setValorSetorFiltro] = useState('pet');
+  const [valorMachineFiltro, setValorMachineFiltro] = useState(MAQUINAS[0] || '');
 
   const periodoRange = useMemo(() => getPeriodoRange(periodo, selectedDate), [periodo, selectedDate]);
   const filtroStart = periodoRange.start;
@@ -83,6 +134,32 @@ export default function Gestao() {
 
   const grupoPET = useMemo(() => MAQUINAS.filter(m => String(m).toUpperCase().startsWith('P')), []);
   const grupoINJ = useMemo(() => MAQUINAS.filter(m => String(m).toUpperCase().startsWith('I')), []);
+
+  const duracaoTurnoHoras = useMemo(() => {
+    if (!filtroStart || !filtroEnd) return { '1': 0, '2': 0, '3': 0 };
+    const resMs = { '1': 0, '2': 0, '3': 0 };
+
+    let cursor = DateTime.fromJSDate(filtroStart).setZone('America/Sao_Paulo').startOf('day');
+    const endZ = DateTime.fromJSDate(filtroEnd).setZone('America/Sao_Paulo').endOf('day');
+
+    while (cursor <= endZ) {
+      const fatias = getTurnoIntervalsDiaLocal(cursor.toJSDate());
+      fatias.forEach((f) => {
+        let iniMin = f.ini;
+        let fimMin = f.fim;
+        if (fimMin <= iniMin) fimMin += 24 * 60;
+        const durMin = Math.max(0, fimMin - iniMin);
+        resMs[f.turnoKey] = (resMs[f.turnoKey] || 0) + (durMin * 60 * 1000);
+      });
+      cursor = cursor.plus({ days: 1 });
+    }
+
+    return {
+      '1': (resMs['1'] || 0) / (1000 * 60 * 60),
+      '2': (resMs['2'] || 0) / (1000 * 60 * 60),
+      '3': (resMs['3'] || 0) / (1000 * 60 * 60),
+    };
+  }, [filtroStart, filtroEnd]);
 
   useEffect(() => {
     let mounted = true;
@@ -169,8 +246,60 @@ export default function Gestao() {
   }, [filtroStart, filtroEnd]);
 
   useEffect(() => {
+    let active = true;
+
+    async function fetchOpenOrders() {
+      try {
+        const { data, error } = await supabase
+          .from('orders')
+          .select(`
+            id,
+            machine_id,
+            pos,
+            code,
+            product,
+            qty,
+            boxes,
+            standard,
+            scanned_count:production_scans(count)
+          `)
+          .eq('finalized', false)
+          .order('machine_id', { ascending: true })
+          .order('pos', { ascending: true });
+
+        if (error) throw error;
+        if (!active) return;
+
+        const normalized = (data || []).map(row => {
+          const sc = row.scanned_count;
+          if (Array.isArray(sc) && sc.length > 0 && typeof sc[0]?.count !== 'undefined') {
+            return { ...row, scanned_count: Number(sc[0].count || 0) };
+          }
+          if (sc && typeof sc === 'object' && typeof sc.count !== 'undefined') {
+            return { ...row, scanned_count: Number(sc.count || 0) };
+          }
+          return { ...row, scanned_count: typeof sc === 'number' ? sc : Number(sc || 0) };
+        });
+
+        setOpenOrders(normalized);
+      } catch (err) {
+        console.warn('Falha ao buscar ordens abertas para linha do tempo:', err);
+        if (active) setOpenOrders([]);
+      }
+    }
+
+    fetchOpenOrders();
+
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
     const codes = new Set();
     (orders || []).forEach(o => {
+      const code = extractItemCodeFromOrderProduct(o?.product);
+      if (code) codes.add(code);
+    });
+    (openOrders || []).forEach(o => {
       const code = extractItemCodeFromOrderProduct(o?.product);
       if (code) codes.add(code);
     });
@@ -188,7 +317,7 @@ export default function Gestao() {
       try {
         const { data, error } = await supabase
           .from('items')
-          .select('code, unit_value, part_weight_g')
+          .select('code, unit_value, part_weight_g, cycle_seconds, cavities')
           .in('code', Array.from(codes));
         if (error) throw error;
         if (!active) return;
@@ -206,7 +335,7 @@ export default function Gestao() {
     })();
 
     return () => { active = false; };
-  }, [orders, apontamentos]);
+  }, [orders, openOrders, apontamentos]);
 
   const ordersMap = useMemo(() => {
     const map = {};
@@ -216,12 +345,107 @@ export default function Gestao() {
 
   const getItemMetaFromProduct = (productStr) => {
     const code = extractItemCodeFromOrderProduct(productStr);
-    if (!code) return { unitValue: 0, weightKg: 0 };
+    if (!code) return { unitValue: 0, weightKg: 0, cycleSeconds: 0, cavities: 0 };
     const raw = itemsMap && itemsMap[code] ? itemsMap[code] : null;
     const unitValue = Number(raw?.unit_value) || 0;
     const weightKg = (Number(raw?.part_weight_g) || 0) / 1000;
-    return { unitValue, weightKg };
+    const cycleSeconds = Number(raw?.cycle_seconds) || 0;
+    const cavities = Number(raw?.cavities) || 0;
+    return { unitValue, weightKg, cycleSeconds, cavities };
   };
+
+  const valorizacaoPorTurno = useMemo(() => {
+    const machineList = valorViewType === 'maquina'
+      ? (valorMachineFiltro ? [valorMachineFiltro] : [])
+      : (valorSetorFiltro === 'inj' ? grupoINJ : grupoPET);
+
+    const machineSet = new Set(machineList.map(m => String(m)));
+    const byShiftMachine = {
+      '1': Object.fromEntries(machineList.map(m => [m, { producedPieces: 0, valor: 0, productPieces: {} }])),
+      '2': Object.fromEntries(machineList.map(m => [m, { producedPieces: 0, valor: 0, productPieces: {} }])),
+      '3': Object.fromEntries(machineList.map(m => [m, { producedPieces: 0, valor: 0, productPieces: {} }])),
+    };
+
+    const pushProduct = (bucket, product, qty) => {
+      const key = String(product || '').trim();
+      if (!key || qty <= 0) return;
+      bucket.productPieces[key] = (bucket.productPieces[key] || 0) + qty;
+    };
+
+    (bipagens || []).forEach((b) => {
+      const machine = String(b.machine_id || '');
+      if (!machineSet.has(machine)) return;
+      const shift = String(b.shift || getTurnoAtual(b.created_at));
+      if (!byShiftMachine[shift] || !byShiftMachine[shift][machine]) return;
+
+      const order = b.order_id != null ? ordersMap[String(b.order_id)] : null;
+      const std = parsePiecesPerBox(order?.standard);
+      if (std <= 0) return;
+      const product = order?.product || '';
+      const { unitValue } = getItemMetaFromProduct(product);
+
+      const bucket = byShiftMachine[shift][machine];
+      bucket.producedPieces += std;
+      if (unitValue > 0) bucket.valor += std * unitValue;
+      pushProduct(bucket, product, std);
+    });
+
+    (apontamentos || []).forEach((a) => {
+      const machine = String(a.machine_id || '');
+      if (!machineSet.has(machine)) return;
+      const shift = String(a.shift || getTurnoAtual(a.created_at));
+      if (!byShiftMachine[shift] || !byShiftMachine[shift][machine]) return;
+
+      const qty = Number(a.good_qty) || 0;
+      if (qty <= 0) return;
+      const order = a.order_id != null ? ordersMap[String(a.order_id)] : null;
+      const product = a.product || order?.product || '';
+      const { unitValue } = getItemMetaFromProduct(product);
+
+      const bucket = byShiftMachine[shift][machine];
+      bucket.producedPieces += qty;
+      if (unitValue > 0) bucket.valor += qty * unitValue;
+      pushProduct(bucket, product, qty);
+    });
+
+    const rows = ['1', '2', '3'].map((shift) => {
+      let producedPieces = 0;
+      let valorAtual = 0;
+      let metaPecas = 0;
+      let metaValor = 0;
+
+      machineList.forEach((machine) => {
+        const bucket = byShiftMachine[shift]?.[machine];
+        if (!bucket) return;
+        producedPieces += bucket.producedPieces;
+        valorAtual += bucket.valor;
+
+        const predominantProduct = Object.keys(bucket.productPieces || {}).sort((a, b) => (bucket.productPieces[b] || 0) - (bucket.productPieces[a] || 0))[0] || '';
+        if (!predominantProduct) return;
+
+        const { cycleSeconds, cavities, unitValue } = getItemMetaFromProduct(predominantProduct);
+        const piecesPerHour = cycleSeconds > 0 && cavities > 0 ? (3600 / cycleSeconds) * cavities : 0;
+        const shiftHours = Number(duracaoTurnoHoras[shift] || 0);
+        if (piecesPerHour <= 0 || shiftHours <= 0) return;
+
+        const machineMetaPecas = Math.round(piecesPerHour * shiftHours);
+        if (machineMetaPecas > 0) {
+          metaPecas += machineMetaPecas;
+          if (unitValue > 0) metaValor += machineMetaPecas * unitValue;
+        }
+      });
+
+      return {
+        shift,
+        producedPieces,
+        valorAtual,
+        metaPecas,
+        metaValor,
+      };
+    });
+
+    return { machineList, rows };
+  }, [valorViewType, valorMachineFiltro, valorSetorFiltro, grupoINJ, grupoPET, bipagens, apontamentos, ordersMap, duracaoTurnoHoras, itemsMap]);
 
   const resumoSetores = useMemo(() => {
     const buildSummary = (maquinas) => {
@@ -305,6 +529,70 @@ export default function Gestao() {
       inj: buildSummary(grupoINJ),
     };
   }, [bipagens, refugos, paradas, apontamentos, ordersMap, itemsMap, grupoPET, grupoINJ, filtroStart, filtroEnd]);
+
+  const timelineByMachine = useMemo(() => {
+    const now = DateTime.now().setZone('America/Sao_Paulo');
+    const grouped = Object.fromEntries(MAQUINAS.map(m => [m, []]));
+
+    (openOrders || []).forEach(order => {
+      const machine = String(order?.machine_id || '');
+      if (!grouped[machine]) return;
+      grouped[machine].push(order);
+    });
+
+    return MAQUINAS.map(machine => {
+      const queue = [...(grouped[machine] || [])].sort((a, b) => (a.pos ?? 999) - (b.pos ?? 999));
+      let cursor = now;
+      let canAdvance = true;
+
+      const rows = queue.map((order, index) => {
+        const isCurrent = index === 0;
+        const itemCode = extractItemCodeFromOrderProduct(order?.product);
+        const itemMeta = itemCode ? itemsMap[itemCode] : null;
+        const cycleSeconds = Number(itemMeta?.cycle_seconds) || 0;
+        const cavities = Number(itemMeta?.cavities) || 0;
+        const piecesPerHour = cycleSeconds > 0 && cavities > 0 ? (3600 / cycleSeconds) * cavities : 0;
+
+        const totalPieces = parseFlexibleNumber(order?.qty);
+        const totalBoxes = parseFlexibleNumber(order?.boxes);
+        const scannedBoxes = Number(order?.scanned_count) || 0;
+        const saldoBoxes = Math.max(0, totalBoxes - scannedBoxes);
+        const piecesPerBox = totalBoxes > 0 && totalPieces > 0 ? (totalPieces / totalBoxes) : 0;
+
+        const remainingPieces = isCurrent
+          ? (saldoBoxes > 0 && piecesPerBox > 0 ? saldoBoxes * piecesPerBox : totalPieces)
+          : totalPieces;
+
+        const durationMinutes = piecesPerHour > 0 && remainingPieces > 0
+          ? Math.ceil((remainingPieces / piecesPerHour) * 60)
+          : null;
+
+        const startAt = canAdvance ? cursor : null;
+        const timeToStartMinutes = startAt ? Math.max(0, Math.round(startAt.diff(now, 'minutes').minutes)) : null;
+
+        let endAt = null;
+        if (canAdvance && durationMinutes != null) {
+          endAt = startAt.plus({ minutes: durationMinutes });
+          cursor = endAt;
+        } else {
+          canAdvance = false;
+        }
+
+        return {
+          id: order.id,
+          code: order.code,
+          machine,
+          isCurrent,
+          startAt,
+          endAt,
+          timeToStartMinutes,
+          durationMinutes,
+        };
+      });
+
+      return { machine, rows };
+    });
+  }, [openOrders, itemsMap]);
 
   const renderScrapRows = (summary) => {
     const rows = Object.keys(summary.scrapByReason || {}).map(reason => {
@@ -453,12 +741,128 @@ export default function Gestao() {
               />
             </div>
           )}
+
+          <button
+            className="btn"
+            onClick={() => setViewMode(v => (v === 'resumo' ? 'timeline' : 'resumo'))}
+          >
+            {viewMode === 'resumo' ? 'Entrar em linha do tempo' : 'Voltar para gestão'}
+          </button>
         </div>
 
-        <div className="gestao-sectors">
-          {renderSetor('PET', resumoSetores.pet)}
-          {renderSetor('Injecao', resumoSetores.inj)}
+        <div className="gestao-table card" style={{ marginBottom: 12 }}>
+          <div className="gestao-table-title">Valorização por Turno</div>
+          <div className="gestao-val-filters">
+            <div className="select-wrap">
+              <select
+                className="period-select"
+                value={valorViewType}
+                onChange={(e) => setValorViewType(e.target.value)}
+              >
+                <option value="setor">Aglomerado por setor</option>
+                <option value="maquina">Por máquina</option>
+              </select>
+            </div>
+
+            {valorViewType === 'setor' ? (
+              <div className="select-wrap">
+                <select
+                  className="period-select"
+                  value={valorSetorFiltro}
+                  onChange={(e) => setValorSetorFiltro(e.target.value)}
+                >
+                  <option value="pet">PET</option>
+                  <option value="inj">Injeção</option>
+                </select>
+              </div>
+            ) : (
+              <div className="select-wrap">
+                <select
+                  className="period-select"
+                  value={valorMachineFiltro}
+                  onChange={(e) => setValorMachineFiltro(e.target.value)}
+                >
+                  {MAQUINAS.map((m) => (
+                    <option key={m} value={m}>{m}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+          </div>
+
+          <table>
+            <thead>
+              <tr>
+                <th>Turno</th>
+                <th>Produção</th>
+                <th>Meta (peças)</th>
+                <th>Valorização</th>
+                <th>Meta (R$)</th>
+              </tr>
+            </thead>
+            <tbody>
+              {valorizacaoPorTurno.rows.map((row) => (
+                <tr key={row.shift}>
+                  <td>Turno {row.shift}</td>
+                  <td>{formatInt(row.producedPieces)} peças</td>
+                  <td>{row.metaPecas > 0 ? `${formatInt(row.metaPecas)} peças` : '—'}</td>
+                  <td>{formatBRL(row.valorAtual)}</td>
+                  <td>{row.metaValor > 0 ? formatBRL(row.metaValor) : '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
+
+        {viewMode === 'resumo' ? (
+          <div className="gestao-sectors">
+            {renderSetor('PET', resumoSetores.pet)}
+            {renderSetor('Injecao', resumoSetores.inj)}
+          </div>
+        ) : (
+          <div className="gestao-timeline-wrap">
+            {timelineByMachine.every(group => group.rows.length === 0) ? (
+              <div className="gestao-empty">Sem ordens abertas para exibir na linha do tempo.</div>
+            ) : (
+              timelineByMachine
+                .filter(group => group.rows.length > 0)
+                .map(group => (
+                  <div key={group.machine} className="gestao-timeline-machine card">
+                    <div className="gestao-table-title">Máquina {group.machine}</div>
+                    <div className="gestao-timeline-list">
+                      {group.rows.map((row) => (
+                        <div key={row.id} className="gestao-timeline-item">
+                          <div className="gestao-timeline-dot" />
+                          <div className="gestao-timeline-content">
+                            <div className="gestao-timeline-head">
+                              <strong>O.P {row.code || '—'}</strong>
+                              <span className="gestao-kpi-sub">{row.isCurrent ? 'Em produção' : 'Na fila'}</span>
+                            </div>
+                            {row.startAt ? (
+                              <div className="gestao-kpi-sub">
+                                Entrada prevista: {row.startAt.toFormat('dd/LL/yyyy - HH:mm')}
+                                {!row.isCurrent && row.timeToStartMinutes != null ? ` (em ${formatMinutesToHM(row.timeToStartMinutes)})` : ''}
+                              </div>
+                            ) : (
+                              <div className="gestao-kpi-sub">Entrada prevista: sem cálculo disponível</div>
+                            )}
+                            {row.endAt ? (
+                              <div className="gestao-kpi-sub">Fim estimado: {row.endAt.toFormat('dd/LL/yyyy - HH:mm')}</div>
+                            ) : (
+                              <div className="gestao-kpi-sub">Fim estimado: sem cálculo disponível</div>
+                            )}
+                            <div className="gestao-kpi-sub">
+                              Duração estimada: {row.durationMinutes != null ? formatMinutesToHM(row.durationMinutes) : 'sem cálculo disponível'}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
