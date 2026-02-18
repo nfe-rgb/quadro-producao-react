@@ -93,3 +93,30 @@
   filter: brightness(1.05);
 }
 
+/* Variante compacta para painel TV: mantém cards dentro da etiqueta */
+.small.compact-pills-layout {
+  padding-right: 118px;
+  padding-bottom: 54px;
+}
+
+.pill-row.compact-inside {
+  top: 60px !important;
+  right: 0px !important;
+  bottom: 6px !important;
+  margin: 0 !important;  /* remove o empurrão */
+  gap: 4px !important;
+}
+
+.pill.compact-pill {
+  font-size: 0.8rem !important;
+  padding: 4px 8px !important;
+  min-width: 78px;
+  border-radius: 10px;
+  line-height: 1.1;
+  gap: 4px !important;
+}
+
+.pill.compact-pill b {
+  font-size: 1.02em;
+}
+

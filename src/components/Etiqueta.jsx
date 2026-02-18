@@ -1,6 +1,6 @@
 // src/components/Etiqueta.jsx
 
-export default function Etiqueta({ o, variant = 'painel', saldoCaixas, lidasCaixas }) {
+export default function Etiqueta({ o, variant = 'painel', saldoCaixas, lidasCaixas, compactPills = false }) {
   if (!o) return null
 
   const opCode = o.code || o.op_code || o.o?.code || o.ordem?.code
@@ -97,7 +97,10 @@ export default function Etiqueta({ o, variant = 'painel', saldoCaixas, lidasCaix
 
   // ===== variante PAINEL =====
   return (
-    <div className={`small ${isWeekendStop ? 'etiqueta-weekend' : ''}`} style={{ position: 'relative' }}>
+    <div
+      className={`small ${isWeekendStop ? 'etiqueta-weekend' : ''} ${compactPills ? 'compact-pills-layout' : ''}`}
+      style={{ position: 'relative' }}
+    >
       {interrompida && <div className="badge-interrompida">⚠️ Produção Interrompida</div>}
  
       {o.customer && <div><b>Cliente:</b> {o.customer}</div>}
@@ -109,14 +112,14 @@ export default function Etiqueta({ o, variant = 'painel', saldoCaixas, lidasCaix
         <>
           <div><b>Volumes:</b> {o.boxes}</div>
           {(typeof lidasCaixas === 'number' || typeof saldoCaixas === 'number') && (
-            <div className="pill-row">
+            <div className={`pill-row ${compactPills ? 'compact-inside' : ''}`}>
               {typeof lidasCaixas === 'number' && (
-                <span className="pill" title="Caixas já bipadas">
+                <span className={`pill ${compactPills ? 'compact-pill' : ''}`} title="Caixas já bipadas">
                   Apontadas: <b>{lidasCaixas}</b>
                 </span>
               )}
               {typeof saldoCaixas === 'number' && (
-                <span className={`pill ${saldoClass}`} title={`Faltam ${saldoCaixas} caixas`}>
+                <span className={`pill ${saldoClass} ${compactPills ? 'compact-pill' : ''}`} title={`Faltam ${saldoCaixas} caixas`}>
                   Saldo: <b>{saldoCaixas}</b>
                 </span>
               )}

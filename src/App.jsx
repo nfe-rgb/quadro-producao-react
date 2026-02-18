@@ -13,6 +13,7 @@ import Registro from './abas/Registro'
 import Estoque from './abas/Estoque'
 import Rastreio from './abas/Rastreio'
 import Gestao from './abas/Gestao'
+import PainelTV from './abas/PainelTV'
 import Pet01 from './pages/Pet01'
 import Pet02 from './pages/Pet02'
 import Pet03 from './pages/Pet03'
@@ -48,6 +49,9 @@ export default function App(){
 
   const [tick, setTick] = useState(0)
   useEffect(()=>{ const id=setInterval(()=>setTick(t=>t+1),1000); return ()=>clearInterval(id) },[])
+
+  const [openSet, setOpenSet] = useState(()=>new Set())
+  function toggleOpen(id){ setOpenSet(prev=>{ const n=new Set(prev); if(n.has(id)) n.delete(id); else n.add(id); return n }) }
 
   // prioridades por máquina (persistidas no Supabase)
   const [machinePriorities, setMachinePriorities] = useState({})
@@ -315,6 +319,19 @@ export default function App(){
     )
   }
 
+  if (location && String(location.pathname || '').toLowerCase() === '/tv') {
+    return (
+      <div className="app" style={{ padding: 0 }}>
+        <PainelTV
+          ativosPorMaquina={ativosPorMaquina}
+          paradas={paradas}
+          tick={tick}
+          lastFinalizadoPorMaquina={lastFinalizadoPorMaquina}
+        />
+      </div>
+    )
+  }
+
     if (location && location.pathname === '/pet-02') {
     const ativosP2 = ordens.filter(o => o.machine_id === 'P2' && !o.finalized).sort((a,b)=>(a.pos??999)-(b.pos??999))
     return (
@@ -430,9 +447,6 @@ export default function App(){
   }
 
   // controle de abas e renderização
-
-  const [openSet, setOpenSet] = useState(()=>new Set())
-  function toggleOpen(id){ setOpenSet(prev=>{ const n=new Set(prev); if(n.has(id)) n.delete(id); else n.add(id); return n }) }
 
   return (
     <div className={`app ${tab === 'painel' ? 'has-meta' : ''}`}>

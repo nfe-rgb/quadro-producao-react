@@ -1,0 +1,133 @@
+.tv-wrapper {
+  min-height: 100vh;
+  height: 100vh;
+  width: 100%;
+  padding: 8px;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  gap: 8px;
+}
+
+.tv-header {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.tv-title {
+  margin: 0;
+  font-size: clamp(18px, 2vh, 26px);
+  font-weight: 900;
+  color: var(--text);
+}
+
+.tv-board {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  min-height: 0;
+}
+
+.tv-column {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  min-height: 0;
+}
+
+.tv-column-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 8px 10px;
+}
+
+.tv-column-body {
+  min-height: 0;
+  padding: 8px;
+}
+
+.tv-header-timers {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.tv-machine-name {
+  font-size: clamp(15px, 1.8vh, 22px);
+  font-weight: 900;
+  letter-spacing: 0.4px;
+}
+
+.tv-items-grid {
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 1fr;
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.tv-item-wrap {
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  gap: 4px;
+}
+
+.tv-item-wrap > .card {
+  min-height: 0;
+  padding: 6px;
+  overflow: hidden;
+}
+
+.tv-item-title {
+  font-size: clamp(10px, 0.95vh, 12px);
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text);
+  opacity: 0.85;
+}
+
+.tv-item-title-muted {
+  color: var(--muted);
+}
+
+.tv-op-inline {
+  margin-bottom: 4px;
+  font-size: clamp(11px, 1.1vh, 15px);
+}
+
+.tv-item-wrap .small {
+  font-size: clamp(11px, 1.05vh, 14px);
+  line-height: 1.2;
+}
+
+.tv-item-empty {
+  margin-top: 2px;
+  font-size: clamp(11px, 1.05vh, 14px);
+  color: var(--muted);
+}
+
+@media (max-aspect-ratio: 16/9) {
+  .tv-board {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-rows: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 3000px) {
+  .tv-board {
+    gap: 10px;
+  }
+
+  .tv-column-body {
+    padding: 10px;
+  }
+
+  .tv-item-wrap > .card {
+    padding: 8px;
+  }
+}
