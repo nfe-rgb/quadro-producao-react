@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import { fmtDateTime } from '../lib/utils'
 import Modal from '../components/Modal'
@@ -11,30 +11,7 @@ const TABS = [
   { id: 'compras', label: 'Compras' },
 ]
 
-const STORAGE_PURCHASES_KEY = 'estoque_compras_v1'
-const STORAGE_REQUISITIONS_KEY = 'estoque_requisicoes_v1'
-const STORAGE_RETURNS_KEY = 'estoque_retornos_v1'
-
 const nowIsoDate = () => new Date().toISOString().slice(0, 10)
-
-const readStoredRows = (key) => {
-  try {
-    const raw = localStorage.getItem(key)
-    if (!raw) return []
-    const parsed = JSON.parse(raw)
-    return Array.isArray(parsed) ? parsed : []
-  } catch {
-    return []
-  }
-}
-
-const writeStoredRows = (key, value) => {
-  try {
-    localStorage.setItem(key, JSON.stringify(Array.isArray(value) ? value : []))
-  } catch {
-    // silencioso para evitar travar UI em ambiente sem storage
-  }
-}
 
 const toPositiveNumber = (value) => {
   const parsed = Number(String(value ?? '').replace(',', '.').trim())
@@ -43,11 +20,17 @@ const toPositiveNumber = (value) => {
 
 const normalize = (value) => String(value ?? '').trim()
 const normalizeClientValue = (value) => normalize(value).toLowerCase()
+const isUnitUN = (value) => normalize(value).toUpperCase() === 'UN'
 const matchesAllowedClient = (value, allowedClientNormalized) => {
   if (!allowedClientNormalized) return true
   return normalizeClientValue(value) === allowedClientNormalized
 }
 const isFinishedProductCode = (code) => normalize(code).startsWith('5')
+const extractFinishedCodeFromOrderProduct = (productValue) => {
+  const normalized = normalize(productValue)
+  if (!normalized) return ''
+  return normalize(normalized.split('-')[0])
+}
 
 const makeId = () => {
   if (typeof crypto !== 'undefined' && crypto?.randomUUID) {
@@ -83,6 +66,54 @@ const formatQty = (value) => {
   return number.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 3 })
 }
 
+const formatQtyByUnit = (value, unit) => {
+  const number = Number(value)
+  if (!Number.isFinite(number)) return '-'
+  if (isUnitUN(unit)) {
+    return Math.round(number).toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })
+  }
+  return formatQty(number)
+}
+
+const formatQtyPerPiece = (value) => {
+  const number = Number(value)
+  if (!Number.isFinite(number)) return '-'
+  return number.toLocaleString('pt-BR', { minimumFractionDigits: 4, maximumFractionDigits: 6 })
+}
+
+const mapPurchaseFromDb = (row) => ({
+  id: row.id,
+  date: row.date,
+  invoiceNumber: row.invoice_number,
+  itemCode: row.item_code,
+  product: row.product,
+  client: row.client,
+  quantity: Number(row.quantity),
+  unitValue: Number(row.unit_value),
+  balance: Number(row.balance),
+  createdAt: row.created_at,
+})
+
+const mapRequisitionFromDb = (row) => ({
+  id: row.id,
+  itemCode: row.item_code,
+  op: row.op,
+  client: row.client,
+  quantity: Number(row.quantity),
+  createdAt: row.created_at,
+  allocations: Array.isArray(row.allocations) ? row.allocations : [],
+})
+
+const mapReturnFromDb = (row) => ({
+  id: row.id,
+  op: row.op,
+  itemCode: row.item_code,
+  itemDescription: row.item_description,
+  quantity: Number(row.quantity),
+  createdAt: row.created_at,
+  allocations: Array.isArray(row.allocations) ? row.allocations : [],
+})
+
 const emptyPurchaseForm = {
   date: nowIsoDate(),
   invoiceNumber: '',
@@ -94,10 +125,8 @@ const emptyPurchaseForm = {
 }
 
 const emptyRequisitionForm = {
-  itemCode: '',
   op: '',
-  client: '',
-  quantity: '',
+  opQuantity: '',
 }
 
 const emptyReturnForm = {
@@ -108,7 +137,6 @@ const emptyReturnForm = {
 }
 
 export default function Estoque({ readOnly = false, allowedClient = '' }) {
-  const didLegacyReturnMigrationRef = useRef(false)
   const [tab, setTab] = useState('inventario')
   const [inventoryClientFilter, setInventoryClientFilter] = useState('')
   const [items, setItems] = useState([])
@@ -120,27 +148,65 @@ export default function Estoque({ readOnly = false, allowedClient = '' }) {
   const [purchaseError, setPurchaseError] = useState('')
   const [requisitionError, setRequisitionError] = useState('')
   const [requisitionInfo, setRequisitionInfo] = useState('')
+  const [requisitionOpContext, setRequisitionOpContext] = useState({
+    loading: false,
+    finishedItemCode: '',
+    client: '',
+    product: '',
+  })
   const [returnForm, setReturnForm] = useState(emptyReturnForm)
   const [returnError, setReturnError] = useState('')
   const [returnInfo, setReturnInfo] = useState('')
   const [usageModal, setUsageModal] = useState({ open: false, purchase: null, rows: [] })
-  const [purchases, setPurchases] = useState(() => readStoredRows(STORAGE_PURCHASES_KEY))
-  const [requisitions, setRequisitions] = useState(() => readStoredRows(STORAGE_REQUISITIONS_KEY))
-  const [returns, setReturns] = useState(() => readStoredRows(STORAGE_RETURNS_KEY))
+  const [purchases, setPurchases] = useState([])
+  const [requisitions, setRequisitions] = useState([])
+  const [returns, setReturns] = useState([])
+  const [itemStructures, setItemStructures] = useState([])
+  const [requisitionManualByCode, setRequisitionManualByCode] = useState({})
   const allowedClientNormalized = useMemo(() => normalizeClientValue(allowedClient), [allowedClient])
 
   useEffect(() => {
     fetchItems()
+    fetchStockMovements()
+    fetchItemStructures()
   }, [])
 
   useEffect(() => {
     const channel = supabase
-      .channel('estoque-items-realtime')
+      .channel('estoque-realtime')
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'items' },
         () => {
           fetchItems()
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'estoque_purchases' },
+        () => {
+          fetchStockMovements()
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'estoque_requisitions' },
+        () => {
+          fetchStockMovements()
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'estoque_returns' },
+        () => {
+          fetchStockMovements()
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'item_structures' },
+        () => {
+          fetchItemStructures()
         }
       )
       .subscribe()
@@ -149,18 +215,6 @@ export default function Estoque({ readOnly = false, allowedClient = '' }) {
       supabase.removeChannel(channel)
     }
   }, [])
-
-  useEffect(() => {
-    writeStoredRows(STORAGE_PURCHASES_KEY, purchases)
-  }, [purchases])
-
-  useEffect(() => {
-    writeStoredRows(STORAGE_REQUISITIONS_KEY, requisitions)
-  }, [requisitions])
-
-  useEffect(() => {
-    writeStoredRows(STORAGE_RETURNS_KEY, returns)
-  }, [returns])
 
   function buildReturnAllocationPlan(op, itemCode, quantity, returnsBase = []) {
     const matchingRequisitions = [...(requisitions || [])]
@@ -233,97 +287,72 @@ export default function Estoque({ readOnly = false, allowedClient = '' }) {
     return { ok: true, allocations: allocationsApplied }
   }
 
-  useEffect(() => {
-    if (didLegacyReturnMigrationRef.current) return
-    if (!Array.isArray(purchases) || !Array.isArray(returns) || !Array.isArray(requisitions)) return
+  async function fetchStockMovements() {
+    try {
+      const [purchasesRes, requisitionsRes, returnsRes] = await Promise.all([
+        supabase.from('estoque_purchases').select('*').order('created_at', { ascending: false }),
+        supabase.from('estoque_requisitions').select('*').order('created_at', { ascending: false }),
+        supabase.from('estoque_returns').select('*').order('created_at', { ascending: false }),
+      ])
 
-    const legacyPurchases = purchases.filter((row) => row?.origin === 'return')
-    if (legacyPurchases.length === 0) {
-      didLegacyReturnMigrationRef.current = true
+      if (purchasesRes.error) throw purchasesRes.error
+      if (requisitionsRes.error) throw requisitionsRes.error
+      if (returnsRes.error) throw returnsRes.error
+
+      setPurchases((purchasesRes.data || []).map(mapPurchaseFromDb))
+      setRequisitions((requisitionsRes.data || []).map(mapRequisitionFromDb))
+      setReturns((returnsRes.data || []).map(mapReturnFromDb))
+    } catch (err) {
+      setError(err?.message || 'Não foi possível carregar os lançamentos de estoque.')
+    }
+  }
+
+  async function fetchItemStructures() {
+    try {
+      const { data, error: queryError } = await supabase
+        .from('item_structures')
+        .select('*')
+
+      if (queryError) throw queryError
+      setItemStructures(data || [])
+    } catch (err) {
+      setError(err?.message || 'Não foi possível carregar as estruturas dos itens.')
+    }
+  }
+
+  async function resolveRequisitionOpContext(opValue) {
+    const op = normalize(opValue)
+    if (!op) {
+      setRequisitionOpContext({ loading: false, finishedItemCode: '', client: '', product: '' })
       return
     }
 
-    let nextPurchases = [...purchases]
-    let nextReturns = [...returns]
-    let migratedCount = 0
+    setRequisitionOpContext((prev) => ({ ...prev, loading: true }))
+    try {
+      const { data, error: queryError } = await supabase
+        .from('orders')
+        .select('code, customer, product, created_at')
+        .eq('code', op)
+        .order('created_at', { ascending: false })
+        .limit(1)
 
-    for (const legacy of legacyPurchases) {
-      const legacyPurchaseId = normalize(legacy?.id)
-      if (!legacyPurchaseId) continue
+      if (queryError) throw queryError
 
-      const usedInReq = (requisitions || []).some((req) =>
-        (req?.allocations || []).some((allocation) => normalize(allocation?.purchaseId) === legacyPurchaseId)
-      )
-      if (usedInReq) continue
+      const order = Array.isArray(data) && data.length > 0 ? data[0] : null
+      const finishedItemCode = extractFinishedCodeFromOrderProduct(order?.product)
+      const client = normalize(order?.customer)
+      const product = normalize(order?.product)
 
-      const op = normalize(legacy?.returnOp)
-      const itemCode = normalize(legacy?.itemCode)
-      const quantity = toPositiveNumber(legacy?.quantity)
-      if (!op || !itemCode || !quantity) continue
-
-      const plan = buildReturnAllocationPlan(op, itemCode, quantity, nextReturns)
-      if (!plan?.ok) continue
-
-      const addMap = new Map()
-      ;(plan.allocations || []).forEach((allocation) => {
-        const pid = normalize(allocation?.purchaseId)
-        const q = Number(allocation?.returnedQty)
-        if (!pid || !Number.isFinite(q) || q <= 0) return
-        addMap.set(pid, (addMap.get(pid) || 0) + q)
+      setRequisitionOpContext({
+        loading: false,
+        finishedItemCode,
+        client,
+        product,
       })
-
-      nextPurchases = nextPurchases
-        .map((purchase) => {
-          const pid = normalize(purchase?.id)
-          if (!addMap.has(pid)) return purchase
-          const currentBalance = Number(purchase?.balance)
-          const nextBalance = Number.isFinite(currentBalance)
-            ? currentBalance + Number(addMap.get(pid) || 0)
-            : Number(addMap.get(pid) || 0)
-          return { ...purchase, balance: nextBalance }
-        })
-        .filter((purchase) => normalize(purchase?.id) !== legacyPurchaseId)
-
-      const sameReturnIdx = nextReturns.findIndex((ret) => {
-        if (Array.isArray(ret?.allocations) && ret.allocations.length > 0) return false
-        return normalize(ret?.op) === op && normalize(ret?.itemCode) === itemCode && Number(ret?.quantity) === Number(quantity)
-      })
-
-      if (sameReturnIdx >= 0) {
-        nextReturns[sameReturnIdx] = {
-          ...nextReturns[sameReturnIdx],
-          allocations: plan.allocations,
-        }
-      } else {
-        const fallbackItemDesc = normalize(
-          (items || []).find((it) => normalize(it?.code) === itemCode)?.description || itemCode
-        )
-
-        nextReturns = [
-          {
-            id: makeId(),
-            op,
-            itemCode,
-            itemDescription: normalize(legacy?.product || fallbackItemDesc),
-            quantity,
-            createdAt: legacy?.createdAt || new Date().toISOString(),
-            allocations: plan.allocations,
-          },
-          ...nextReturns,
-        ]
-      }
-
-      migratedCount += 1
+    } catch {
+      setRequisitionOpContext({ loading: false, finishedItemCode: '', client: '', product: '' })
     }
-
-    if (migratedCount > 0) {
-      setPurchases(nextPurchases)
-      setReturns(nextReturns)
-      setReturnInfo(`Ajuste automático aplicado em ${migratedCount} lançamento(s) antigo(s) de retorno.`)
-    }
-
-    didLegacyReturnMigrationRef.current = true
-  }, [purchases, returns, requisitions, items])
+  }
 
   async function fetchItems() {
     setLoading(true)
@@ -494,16 +523,40 @@ export default function Estoque({ readOnly = false, allowedClient = '' }) {
     return set
   }, [requisitions, returns])
 
-  const requisitionCodeOptions = useMemo(() => {
-    const set = new Set()
-    ;(purchases || []).forEach((row) => {
-      const code = normalize(row?.itemCode)
-      const balance = Number(row?.balance)
-      if (!code || !Number.isFinite(balance) || balance <= 0) return
-      set.add(code)
-    })
-    return Array.from(set).sort((a, b) => a.localeCompare(b, 'pt-BR'))
-  }, [purchases])
+  const requisitionStructureRows = useMemo(() => {
+    const finishedItemCode = normalize(requisitionOpContext.finishedItemCode)
+    const opQty = toPositiveNumber(requisitionForm.opQuantity) || 0
+    if (!finishedItemCode) return []
+
+    return (itemStructures || [])
+      .filter((row) => normalize(row?.finished_item_code) === finishedItemCode)
+      .map((row) => {
+        const inputCode = normalize(row?.input_item_code)
+        const qtyPerPiece = Number(row?.quantity_per_piece)
+        const source = itemByCode[inputCode]
+        const sourceUnit = normalize(source?.unidade)
+        const availableStock = Number(purchaseBalanceByCode[inputCode] || 0)
+        const totalRaw = Number.isFinite(qtyPerPiece) ? qtyPerPiece * opQty : 0
+        const totalRequired = isUnitUN(sourceUnit) ? Math.round(totalRaw) : totalRaw
+        const manualRaw = requisitionManualByCode[inputCode]
+        const manualParsed = toPositiveNumber(manualRaw)
+        const manualQty = manualParsed
+          ? (isUnitUN(sourceUnit) ? Math.round(manualParsed) : manualParsed)
+          : null
+        const requestedQty = manualQty || totalRequired
+
+        return {
+          itemCode: inputCode,
+          description: source?.description || '-',
+          unidade: source?.unidade || '-',
+          availableStock,
+          qtyPerPiece,
+          totalRequired,
+          requestedQty,
+          manualRaw: manualRaw ?? '',
+        }
+      })
+  }, [itemStructures, requisitionOpContext.finishedItemCode, requisitionForm.opQuantity, itemByCode, purchaseBalanceByCode, requisitionManualByCode])
 
   function handlePurchaseFieldChange(e) {
     const { name, value } = e.target
@@ -527,7 +580,7 @@ export default function Estoque({ readOnly = false, allowedClient = '' }) {
     setPurchaseError('')
   }
 
-  function handlePurchaseSubmit(e) {
+  async function handlePurchaseSubmit(e) {
     e.preventDefault()
     setPurchaseError('')
 
@@ -568,27 +621,49 @@ export default function Estoque({ readOnly = false, allowedClient = '' }) {
       return
     }
 
-    const row = {
+    const payload = {
       id: makeId(),
       date,
-      invoiceNumber,
-      itemCode,
+      invoice_number: invoiceNumber,
+      item_code: itemCode,
       product,
       client,
       quantity,
-      unitValue,
+      unit_value: unitValue,
       balance: quantity,
-      createdAt: new Date().toISOString(),
     }
 
-    setPurchases((prev) => [row, ...(prev || [])])
-    resetPurchaseForm()
-    setShowPurchaseForm(false)
+    try {
+      const { data, error: insertError } = await supabase
+        .from('estoque_purchases')
+        .insert(payload)
+        .select('*')
+        .single()
+
+      if (insertError) throw insertError
+
+      setPurchases((prev) => [mapPurchaseFromDb(data), ...(prev || [])])
+      resetPurchaseForm()
+      setShowPurchaseForm(false)
+    } catch (err) {
+      setPurchaseError(err?.message || 'Não foi possível salvar a compra no Supabase.')
+    }
   }
 
   function handleRequisitionFieldChange(e) {
     const { name, value } = e.target
     setRequisitionForm((prev) => ({ ...prev, [name]: value }))
+
+    if (name === 'op') {
+      setRequisitionManualByCode({})
+      resolveRequisitionOpContext(value)
+    }
+  }
+
+  function handleManualRequisitionChange(itemCode, value) {
+    const code = normalize(itemCode)
+    if (!code) return
+    setRequisitionManualByCode((prev) => ({ ...prev, [code]: value }))
   }
 
   function handleReturnFieldChange(e) {
@@ -606,7 +681,7 @@ export default function Estoque({ readOnly = false, allowedClient = '' }) {
     })
   }
 
-  function handleReturnSubmit(e) {
+  async function handleReturnSubmit(e) {
     e.preventDefault()
     setReturnError('')
     setReturnInfo('')
@@ -654,54 +729,82 @@ export default function Estoque({ readOnly = false, allowedClient = '' }) {
       typedDescription || sourceItem?.description || itemCode
     )
 
-    const returnRow = {
-      id: makeId(),
-      op,
-      itemCode,
-      itemDescription: product,
-      quantity,
-      createdAt: new Date().toISOString(),
-      allocations: allocationsApplied,
-    }
-
-    setReturns((prev) => [returnRow, ...(prev || [])])
-    setPurchases((prev) =>
-      (prev || []).map((purchase) => {
-        const currentId = normalize(purchase?.id)
-        if (!purchaseBalanceAddMap.has(currentId)) return purchase
-        const currentBalance = Number(purchase?.balance)
+    try {
+      const purchaseUpdates = Array.from(purchaseBalanceAddMap.entries()).map(([id, qtyToAdd]) => {
+        const source = (purchases || []).find((purchase) => normalize(purchase?.id) === id)
+        const currentBalance = Number(source?.balance)
         const nextBalance = Number.isFinite(currentBalance)
-          ? currentBalance + Number(purchaseBalanceAddMap.get(currentId) || 0)
-          : Number(purchaseBalanceAddMap.get(currentId) || 0)
-        return { ...purchase, balance: nextBalance }
+          ? currentBalance + Number(qtyToAdd || 0)
+          : Number(qtyToAdd || 0)
+
+        return supabase
+          .from('estoque_purchases')
+          .update({ balance: nextBalance })
+          .eq('id', id)
       })
-    )
-    setReturnForm(emptyReturnForm)
-    setReturnInfo(`Retorno lançado com sucesso na(s) NF(s) original(is): ${allocationsApplied.length}.`)
+
+      const purchaseUpdateResults = await Promise.all(purchaseUpdates)
+      const purchaseUpdateError = purchaseUpdateResults.find((result) => result.error)?.error
+      if (purchaseUpdateError) throw purchaseUpdateError
+
+      const returnPayload = {
+        id: makeId(),
+        op,
+        item_code: itemCode,
+        item_description: product,
+        quantity,
+        allocations: allocationsApplied,
+      }
+
+      const { data: returnData, error: returnInsertError } = await supabase
+        .from('estoque_returns')
+        .insert(returnPayload)
+        .select('*')
+        .single()
+
+      if (returnInsertError) throw returnInsertError
+
+      setReturns((prev) => [mapReturnFromDb(returnData), ...(prev || [])])
+      setPurchases((prev) =>
+        (prev || []).map((purchase) => {
+          const currentId = normalize(purchase?.id)
+          if (!purchaseBalanceAddMap.has(currentId)) return purchase
+          const currentBalance = Number(purchase?.balance)
+          const nextBalance = Number.isFinite(currentBalance)
+            ? currentBalance + Number(purchaseBalanceAddMap.get(currentId) || 0)
+            : Number(purchaseBalanceAddMap.get(currentId) || 0)
+          return { ...purchase, balance: nextBalance }
+        })
+      )
+      setReturnForm(emptyReturnForm)
+      setReturnInfo(`Retorno lançado com sucesso na(s) NF(s) original(is): ${allocationsApplied.length}.`)
+    } catch (err) {
+      setReturnError(err?.message || 'Não foi possível salvar o retorno no Supabase.')
+    }
   }
 
-  function handleRequisitionSubmit(e) {
+  async function handleRequisitionSubmit(e) {
     e.preventDefault()
     setRequisitionError('')
     setRequisitionInfo('')
 
-    const itemCode = normalize(requisitionForm.itemCode)
     const op = normalize(requisitionForm.op)
-    const client = normalize(requisitionForm.client)
-    const qtyRequested = toPositiveNumber(requisitionForm.quantity)
-
-    if (!itemCode) {
-      setRequisitionError('Informe o código do item para requisitar.')
-      return
-    }
-
-    if (!qtyRequested) {
-      setRequisitionError('Quantidade da requisição deve ser maior que zero.')
-      return
-    }
+    const finishedItemCode = normalize(requisitionOpContext.finishedItemCode)
+    const client = normalize(requisitionOpContext.client)
+    const opQuantity = toPositiveNumber(requisitionForm.opQuantity)
 
     if (!op) {
       setRequisitionError('Informe a O.P da requisição.')
+      return
+    }
+
+    if (!opQuantity) {
+      setRequisitionError('Quantidade da O.P deve ser maior que zero.')
+      return
+    }
+
+    if (!finishedItemCode) {
+      setRequisitionError('Não foi possível identificar o produto acabado desta O.P.')
       return
     }
 
@@ -710,68 +813,124 @@ export default function Estoque({ readOnly = false, allowedClient = '' }) {
       return
     }
 
-    const availableRows = [...(purchases || [])]
-      .filter((row) => {
-        const sameCode = normalize(row?.itemCode) === itemCode
-        const balance = Number(row?.balance)
-        return sameCode && Number.isFinite(balance) && balance > 0
-      })
-      .sort(sortByFifoDate)
-
-    const availableTotal = availableRows.reduce((sum, row) => sum + Number(row.balance || 0), 0)
-
-    if (availableTotal < qtyRequested) {
-      setRequisitionError(
-        `Estoque insuficiente para ${itemCode}. Disponível: ${formatQty(availableTotal)}.`
-      )
+    if (requisitionStructureRows.length === 0) {
+      setRequisitionError('Este produto acabado não possui estrutura cadastrada.')
       return
     }
 
-    let remaining = qtyRequested
+    const plannedRows = requisitionStructureRows
+      .filter((row) => Number(row.requestedQty) > 0)
+
+    if (plannedRows.length === 0) {
+      setRequisitionError('Nenhum insumo foi informado para requisição.')
+      return
+    }
+
+    const workingBalanceByPurchase = new Map(
+      (purchases || []).map((purchase) => [normalize(purchase?.id), Number(purchase?.balance) || 0])
+    )
+
     const allocationMap = new Map()
-    const allocations = []
+    const requisitionInsertRows = []
 
-    for (const row of availableRows) {
-      if (remaining <= 0) break
-      const currentBalance = Number(row.balance || 0)
-      if (currentBalance <= 0) continue
+    for (const structureRow of plannedRows) {
+      const itemCode = normalize(structureRow.itemCode)
+      const qtyRequested = Number(structureRow.requestedQty)
 
-      const usedQty = Math.min(currentBalance, remaining)
-      const nextBalance = currentBalance - usedQty
+      const availableRows = [...(purchases || [])]
+        .filter((row) => {
+          const sameCode = normalize(row?.itemCode) === itemCode
+          if (!sameCode) return false
+          const rowId = normalize(row?.id)
+          const balance = Number(workingBalanceByPurchase.get(rowId) || 0)
+          return Number.isFinite(balance) && balance > 0
+        })
+        .sort(sortByFifoDate)
 
-      allocationMap.set(row.id, nextBalance)
-      allocations.push({
-        purchaseId: row.id,
-        invoiceNumber: row.invoiceNumber,
-        date: row.date,
-        usedQty,
-        balanceAfter: nextBalance,
+      const availableTotal = availableRows.reduce((sum, row) => {
+        const rowId = normalize(row?.id)
+        return sum + Number(workingBalanceByPurchase.get(rowId) || 0)
+      }, 0)
+
+      if (availableTotal < qtyRequested) {
+        setRequisitionError(
+          `Estoque insuficiente para ${itemCode}. Disponível: ${formatQty(availableTotal)}.`
+        )
+        return
+      }
+
+      let remaining = qtyRequested
+      const allocations = []
+
+      for (const row of availableRows) {
+        if (remaining <= 0) break
+        const rowId = normalize(row?.id)
+        const currentBalance = Number(workingBalanceByPurchase.get(rowId) || 0)
+        if (currentBalance <= 0) continue
+
+        const usedQty = Math.min(currentBalance, remaining)
+        const nextBalance = currentBalance - usedQty
+
+        workingBalanceByPurchase.set(rowId, nextBalance)
+        allocationMap.set(row.id, nextBalance)
+        allocations.push({
+          purchaseId: row.id,
+          invoiceNumber: row.invoiceNumber,
+          date: row.date,
+          usedQty,
+          balanceAfter: nextBalance,
+          finishedItemCode,
+          opQuantity,
+          quantityPerPiece: Number(structureRow.qtyPerPiece || 0),
+        })
+        remaining -= usedQty
+      }
+
+      requisitionInsertRows.push({
+        id: makeId(),
+        item_code: itemCode,
+        op,
+        client,
+        quantity: qtyRequested,
+        allocations,
       })
-      remaining -= usedQty
     }
 
-    setPurchases((prev) =>
-      (prev || []).map((row) => {
-        if (!allocationMap.has(row.id)) return row
-        return { ...row, balance: allocationMap.get(row.id) }
-      })
-    )
+    try {
+      const purchaseUpdates = Array.from(allocationMap.entries()).map(([id, balance]) =>
+        supabase
+          .from('estoque_purchases')
+          .update({ balance })
+          .eq('id', id)
+      )
 
-    const req = {
-      id: makeId(),
-      itemCode,
-      op,
-      client,
-      quantity: qtyRequested,
-      createdAt: new Date().toISOString(),
-      allocations,
+      const purchaseUpdateResults = await Promise.all(purchaseUpdates)
+      const purchaseUpdateError = purchaseUpdateResults.find((result) => result.error)?.error
+      if (purchaseUpdateError) throw purchaseUpdateError
+
+      const { data: reqData, error: reqError } = await supabase
+        .from('estoque_requisitions')
+        .insert(requisitionInsertRows)
+        .select('*')
+
+      if (reqError) throw reqError
+
+      setPurchases((prev) =>
+        (prev || []).map((row) => {
+          if (!allocationMap.has(row.id)) return row
+          return { ...row, balance: allocationMap.get(row.id) }
+        })
+      )
+      setRequisitions((prev) => [...(reqData || []).map(mapRequisitionFromDb), ...(prev || [])])
+      setRequisitionForm(emptyRequisitionForm)
+      setRequisitionManualByCode({})
+      setRequisitionOpContext({ loading: false, finishedItemCode: '', client: '', product: '' })
+      setRequisitionInfo(
+        `Requisição concluída pela estrutura. ${requisitionInsertRows.length} insumo(s) processado(s).`
+      )
+    } catch (err) {
+      setRequisitionError(err?.message || 'Não foi possível salvar a requisição no Supabase.')
     }
-
-    setRequisitions((prev) => [req, ...(prev || [])])
-    setRequisitionForm(emptyRequisitionForm)
-    setRequisitionInfo(
-      `Requisição concluída. Consumo em ${allocations.length} nota(s) fiscal(is).`
-    )
   }
 
   function openUsageModal(purchaseRow) {
@@ -910,22 +1069,6 @@ export default function Estoque({ readOnly = false, allowedClient = '' }) {
             <form className="estoque-form" onSubmit={handleRequisitionSubmit}>
               <div className="estoque-form-grid">
                 <label>
-                  Cod Item
-                  <input
-                    name="itemCode"
-                    value={requisitionForm.itemCode}
-                    onChange={handleRequisitionFieldChange}
-                    list="requisicao-codes"
-                    placeholder="Ex.: 40123"
-                  />
-                  <datalist id="requisicao-codes">
-                    {requisitionCodeOptions.map((code) => (
-                      <option key={code} value={code} />
-                    ))}
-                  </datalist>
-                </label>
-
-                <label>
                   O.P
                   <input
                     name="op"
@@ -936,27 +1079,74 @@ export default function Estoque({ readOnly = false, allowedClient = '' }) {
                 </label>
 
                 <label>
-                  Cliente
+                  Quantidade da O.P
                   <input
-                    name="client"
-                    value={requisitionForm.client}
-                    onChange={handleRequisitionFieldChange}
-                    placeholder="Cliente"
-                  />
-                </label>
-
-                <label>
-                  Quantidade
-                  <input
-                    name="quantity"
+                    name="opQuantity"
                     type="number"
                     min="0.001"
                     step="0.001"
-                    value={requisitionForm.quantity}
+                    value={requisitionForm.opQuantity}
                     onChange={handleRequisitionFieldChange}
-                    placeholder="Ex.: 25"
+                    placeholder="Ex.: 5000"
                   />
                 </label>
+              </div>
+
+              {requisitionForm.op && (
+                <div className="estoque-alert" style={{ marginBottom: 0 }}>
+                  {requisitionOpContext.loading
+                    ? 'Buscando dados da O.P…'
+                    : (requisitionOpContext.finishedItemCode
+                      ? `Produto: ${requisitionOpContext.product || requisitionOpContext.finishedItemCode} • Cliente: ${requisitionOpContext.client || '-'}`
+                      : 'O.P não encontrada ou sem produto válido para estrutura.')}
+                </div>
+              )}
+
+              <div className="estoque-table-wrap">
+                <table className="estoque-table">
+                  <thead>
+                    <tr>
+                      <th>Cod</th>
+                      <th>Descrição</th>
+                      <th>Unidade</th>
+                      <th>Estoque</th>
+                      <th>Quantidade</th>
+                      <th>Total</th>
+                      <th>Requisição</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {requisitionStructureRows.length === 0 && (
+                      <tr>
+                        <td colSpan="7" className="estoque-empty">
+                          Informe a O.P para carregar a estrutura automaticamente.
+                        </td>
+                      </tr>
+                    )}
+
+                    {requisitionStructureRows.map((row) => (
+                      <tr key={row.itemCode}>
+                        <td>{row.itemCode || '-'}</td>
+                        <td>{row.description || '-'}</td>
+                        <td>{row.unidade || '-'}</td>
+                        <td>{formatQtyByUnit(row.availableStock, row.unidade)}</td>
+                        <td>{formatQtyPerPiece(row.qtyPerPiece)}</td>
+                        <td>{formatQtyByUnit(row.totalRequired, row.unidade)}</td>
+                        <td>
+                          <input
+                            type="number"
+                            min={isUnitUN(row.unidade) ? '1' : '0.001'}
+                            step={isUnitUN(row.unidade) ? '1' : '0.001'}
+                            value={row.manualRaw}
+                            onChange={(e) => handleManualRequisitionChange(row.itemCode, e.target.value)}
+                            placeholder={formatQtyByUnit(row.totalRequired, row.unidade)}
+                            style={{ width: 120 }}
+                          />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
 
               <div className="estoque-form-actions">
@@ -993,8 +1183,10 @@ export default function Estoque({ readOnly = false, allowedClient = '' }) {
                 )}
 
                 {requisitionRows.map((row) => {
+                  const sourceItem = itemByCode[normalize(row.itemCode)]
+                  const sourceUnit = sourceItem?.unidade || ''
                   const notesText = (row.allocations || [])
-                    .map((a) => `${a.invoiceNumber}: ${formatQty(a.usedQty)}`)
+                    .map((a) => `${a.invoiceNumber}: ${formatQtyByUnit(a.usedQty, sourceUnit)}`)
                     .join(' • ')
 
                   return (
@@ -1002,7 +1194,7 @@ export default function Estoque({ readOnly = false, allowedClient = '' }) {
                       <td>{fmtDateTime(row.createdAt) || '-'}</td>
                       <td>{row.op || '-'}</td>
                       <td>{row.itemCode || '-'}</td>
-                      <td>{formatQty(row.quantity)}</td>
+                      <td>{formatQtyByUnit(row.quantity, sourceUnit)}</td>
                       <td>{notesText || '-'}</td>
                     </tr>
                   )

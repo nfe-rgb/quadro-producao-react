@@ -19,6 +19,24 @@ const toNonNegFloat = (v) => {
   return Number.isFinite(n) && n >= 0 ? n : null
 }
 const cleanText = (v) => String(v ?? '').trim()
+const isUnitUN = (value) => cleanText(value).toUpperCase() === 'UN'
+const formatQtyByUnit = (value, unit, maxFractionDigits = 3) => {
+  const number = Number(value)
+  if (!Number.isFinite(number)) return '-'
+  if (isUnitUN(unit)) {
+    return Math.round(number).toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })
+  }
+  return number.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: maxFractionDigits })
+}
+const formatQtyPerPiece = (value) => {
+  const number = Number(value)
+  if (!Number.isFinite(number)) return '-'
+  return number.toLocaleString('pt-BR', { minimumFractionDigits: 4, maximumFractionDigits: 6 })
+}
+const toStructureQty = (v) => {
+  const n = parseFloat(String(v ?? '').replace(',', '.').trim())
+  return Number.isFinite(n) && n > 0 ? n : null
+}
 const INSUMO_TECH_DEFAULTS = {
   color: '-',
   cycle_seconds: 1,
@@ -101,6 +119,162 @@ export default function CadastroItens() {
     () => (Array.isArray(items) ? items.filter((item) => !isProdutoAcabado(item)) : []),
     [items]
   )
+
+  const [openStructure, setOpenStructure] = useState(false)
+  const [structureItem, setStructureItem] = useState(null)
+  const [structureRows, setStructureRows] = useState([])
+  const [structureErr, setStructureErr] = useState(null)
+  const [structureSaving, setStructureSaving] = useState(false)
+  const [structureLoading, setStructureLoading] = useState(false)
+  const [structureOpQty, setStructureOpQty] = useState('1')
+  const [structureStockByCode, setStructureStockByCode] = useState({})
+  const [newStructureRow, setNewStructureRow] = useState({ itemCode: '', quantityPerPiece: '' })
+
+  async function openStructureModal(item) {
+    setOpenStructure(true)
+    setStructureItem(item)
+    setStructureRows([])
+    setStructureErr(null)
+    setStructureLoading(true)
+    setStructureStockByCode({})
+    setNewStructureRow({ itemCode: '', quantityPerPiece: '' })
+    setStructureOpQty('1')
+
+    const finishedCode = cleanText(item?.code)
+    if (!finishedCode) {
+      setStructureLoading(false)
+      setStructureErr('Item inválido para estrutura.')
+      return
+    }
+
+    try {
+      const [structureRes, purchasesRes] = await Promise.all([
+        supabase
+          .from('item_structures')
+          .select('*')
+          .eq('finished_item_code', finishedCode)
+          .order('created_at', { ascending: true }),
+        supabase
+          .from('estoque_purchases')
+          .select('item_code,balance')
+      ])
+
+      if (structureRes.error) throw structureRes.error
+      if (purchasesRes.error) throw purchasesRes.error
+
+      const stockMap = {}
+      ;(purchasesRes.data || []).forEach((row) => {
+        const code = cleanText(row?.item_code)
+        const balance = Number(row?.balance)
+        if (!code || !Number.isFinite(balance) || balance <= 0) return
+        stockMap[code] = (stockMap[code] || 0) + balance
+      })
+
+      setStructureStockByCode(stockMap)
+      setStructureRows(
+        (structureRes.data || []).map((row) => ({
+          id: row.id,
+          itemCode: cleanText(row.input_item_code),
+          quantityPerPiece: Number(row.quantity_per_piece),
+        }))
+      )
+    } catch (err) {
+      setStructureErr(err?.message || 'Não foi possível carregar a estrutura do item.')
+    } finally {
+      setStructureLoading(false)
+    }
+  }
+
+  function closeStructureModal() {
+    if (structureSaving) return
+    setOpenStructure(false)
+    setStructureItem(null)
+    setStructureRows([])
+    setStructureErr(null)
+    setStructureOpQty('1')
+    setStructureStockByCode({})
+    setNewStructureRow({ itemCode: '', quantityPerPiece: '' })
+  }
+
+  function handleAddStructureRow() {
+    const itemCode = cleanText(newStructureRow.itemCode)
+    const quantityPerPiece = toStructureQty(newStructureRow.quantityPerPiece)
+
+    if (!itemCode || !quantityPerPiece) {
+      setStructureErr('Informe item e quantidade por peça para adicionar à estrutura.')
+      return
+    }
+
+    const alreadyExists = structureRows.some((row) => cleanText(row.itemCode) === itemCode)
+    if (alreadyExists) {
+      setStructureErr('Este item já foi adicionado na estrutura.')
+      return
+    }
+
+    setStructureErr(null)
+    setStructureRows((prev) => [...prev, { id: null, itemCode, quantityPerPiece }])
+    setNewStructureRow({ itemCode: '', quantityPerPiece: '' })
+  }
+
+  function handleRemoveStructureRow(index) {
+    setStructureRows((prev) => prev.filter((_, idx) => idx !== index))
+  }
+
+  async function handleSaveStructure() {
+    if (!structureItem?.code) return
+    setStructureErr(null)
+
+    const finishedCode = cleanText(structureItem.code)
+    const normalizedRows = structureRows
+      .map((row) => ({
+        itemCode: cleanText(row.itemCode),
+        quantityPerPiece: toStructureQty(row.quantityPerPiece),
+      }))
+      .filter((row) => row.itemCode && row.quantityPerPiece)
+
+    const duplicateCodes = new Set()
+    const seen = new Set()
+    normalizedRows.forEach((row) => {
+      if (seen.has(row.itemCode)) duplicateCodes.add(row.itemCode)
+      seen.add(row.itemCode)
+    })
+    if (duplicateCodes.size > 0) {
+      setStructureErr('Existem insumos duplicados na estrutura.')
+      return
+    }
+
+    setStructureSaving(true)
+    try {
+      const { error: deleteErr } = await supabase
+        .from('item_structures')
+        .delete()
+        .eq('finished_item_code', finishedCode)
+
+      if (deleteErr) throw deleteErr
+
+      if (normalizedRows.length > 0) {
+        const payload = normalizedRows.map((row) => ({
+          finished_item_code: finishedCode,
+          input_item_code: row.itemCode,
+          quantity_per_piece: row.quantityPerPiece,
+        }))
+
+        const { error: insertErr } = await supabase
+          .from('item_structures')
+          .insert(payload)
+
+        if (insertErr) throw insertErr
+      }
+
+      setOpenStructure(false)
+      setStructureItem(null)
+      setStructureRows([])
+    } catch (err) {
+      setStructureErr(err?.message || 'Não foi possível salvar a estrutura do item.')
+    } finally {
+      setStructureSaving(false)
+    }
+  }
 
   // ============== FORM / MODAL (sempre declarar hooks) ==============
   const [open, setOpen] = useState(false)
@@ -518,6 +692,12 @@ export default function CadastroItens() {
                             <td style={td}>{formatDate(it.created_at)}</td>
                             <td style={{ ...td, whiteSpace: 'nowrap' }}>
                               <button
+                                onClick={() => openStructureModal(it)}
+                                style={{ padding: '6px 10px', borderRadius: 10, border: '1px solid #ddd', background: '#fff', cursor: 'pointer', fontWeight: 600, marginRight: 8 }}
+                              >
+                                Estrutura
+                              </button>
+                              <button
                                 onClick={() => startEdit(it)}
                                 style={{ padding: '6px 10px', borderRadius: 10, border: '1px solid #ddd', background: '#fff', cursor: 'pointer', fontWeight: 600 }}
                               >
@@ -590,6 +770,124 @@ export default function CadastroItens() {
               <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 8 }}>
                 <button disabled={saving} onClick={() => setOpen(false)} style={btnGhost}>Cancelar</button>
                 <button disabled={saving} onClick={handleSave} style={btnPrimary}>{saving ? 'Salvando…' : (editing?.id ? 'Atualizar' : 'Salvar')}</button>
+              </div>
+            </div>
+          </Modal>
+
+          <Modal
+            open={openStructure}
+            onClose={closeStructureModal}
+            closeOnBackdrop={false}
+            modalClassName="modal-xl"
+            title={structureItem ? `Estrutura do item • ${structureItem.code} - ${structureItem.description}` : 'Estrutura do item'}
+          >
+            <div style={{ display: 'grid', gap: 12 }}>
+              {structureErr && (
+                <div style={{ padding: 10, borderRadius: 10, background: '#fff3f3', color: '#a80000' }}>
+                  {structureErr}
+                </div>
+              )}
+
+              <label style={{ display: 'grid', gap: 6, maxWidth: 220 }}>
+                <span style={{ fontSize: 12, opacity: 0.9 }}>Quantidade da O.P (simulação de total)</span>
+                <input
+                  value={structureOpQty}
+                  onChange={(e) => setStructureOpQty(e.target.value)}
+                  inputMode="decimal"
+                  placeholder="Ex.: 1000"
+                  style={input}
+                />
+              </label>
+
+              {structureLoading ? (
+                <div style={{ padding: 8 }}>Carregando estrutura…</div>
+              ) : (
+                <div style={{ width: '100%', overflowX: 'auto', border: '1px solid #eee', borderRadius: 10 }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                    <thead>
+                      <tr style={{ background: '#f6f6f6' }}>
+                        <th style={th}>Cod</th>
+                        <th style={th}>Descrição</th>
+                        <th style={th}>Unidade</th>
+                        <th style={th}>Estoque</th>
+                        <th style={th}>Quantidade</th>
+                        <th style={th}>Total</th>
+                        <th style={th}>Ação</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {structureRows.length === 0 && (
+                        <tr>
+                          <td colSpan={7} style={{ ...td, opacity: 0.7 }}>Nenhum insumo na estrutura.</td>
+                        </tr>
+                      )}
+                      {structureRows.map((row, idx) => {
+                        const code = cleanText(row.itemCode)
+                        const source = insumoItems.find((it) => cleanText(it.code) === code)
+                        const unit = source?.unidade || ''
+                        const perPiece = toStructureQty(row.quantityPerPiece)
+                        const opQty = toStructureQty(structureOpQty) || 0
+                        const totalRaw = perPiece ? perPiece * opQty : null
+                        const total = totalRaw != null && isUnitUN(unit) ? Math.round(totalRaw) : totalRaw
+
+                        return (
+                          <tr key={row.id || `${code}-${idx}`} style={{ borderTop: '1px solid #eee' }}>
+                            <td style={td}>{code || '-'}</td>
+                            <td style={td}>{source?.description || '-'}</td>
+                            <td style={td}>{unit || '-'}</td>
+                            <td style={tdNum}>{formatQtyByUnit(structureStockByCode[code] || 0, unit, 3)}</td>
+                            <td style={tdNum}>{formatQtyPerPiece(row.quantityPerPiece || 0)}</td>
+                            <td style={tdNum}>{total != null ? formatQtyByUnit(total, unit, 3) : '-'}</td>
+                            <td style={td}>
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveStructureRow(idx)}
+                                style={{ padding: '6px 10px', borderRadius: 10, border: '1px solid #ddd', background: '#fff', cursor: 'pointer', fontWeight: 600 }}
+                              >
+                                Remover
+                              </button>
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              <div style={{ display: 'grid', gap: 8, border: '1px solid #eee', borderRadius: 10, padding: 10 }}>
+                <div style={{ fontWeight: 700 }}>Adicionar insumo na estrutura</div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1.5fr 1fr auto', gap: 8 }}>
+                  <select
+                    value={newStructureRow.itemCode}
+                    onChange={(e) => setNewStructureRow((prev) => ({ ...prev, itemCode: e.target.value }))}
+                    style={input}
+                  >
+                    <option value="">Selecione o insumo</option>
+                    {insumoItems.map((insumo) => (
+                      <option key={insumo.id || insumo.code} value={insumo.code}>
+                        {insumo.code} - {insumo.description}
+                      </option>
+                    ))}
+                  </select>
+
+                  <input
+                    value={newStructureRow.quantityPerPiece}
+                    onChange={(e) => setNewStructureRow((prev) => ({ ...prev, quantityPerPiece: e.target.value }))}
+                    placeholder="Qtd por peça"
+                    inputMode="decimal"
+                    style={input}
+                  />
+
+                  <button type="button" onClick={handleAddStructureRow} style={btnGhost}>Adicionar</button>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+                <button type="button" onClick={closeStructureModal} style={btnGhost} disabled={structureSaving}>Cancelar</button>
+                <button type="button" onClick={handleSaveStructure} style={btnPrimary} disabled={structureSaving}>
+                  {structureSaving ? 'Salvando…' : 'Salvar estrutura'}
+                </button>
               </div>
             </div>
           </Modal>

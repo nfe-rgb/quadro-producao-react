@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '../lib/supabaseClient.js'
 import { MAQUINAS } from '../lib/constants'
+import Modal from '../components/Modal'
 
 export default function NovaOrdem({ form, setForm, criarOrdem, setTab }) {
   // ====== Busca de itens ligada ao campo "Produto" ======
@@ -11,6 +12,8 @@ export default function NovaOrdem({ form, setForm, criarOrdem, setTab }) {
   const [err, setErr] = useState(null)
   const [pickedItem, setPickedItem] = useState(null)
   const [openList, setOpenList] = useState(false)
+  const [checkingItemCode, setCheckingItemCode] = useState(false)
+  const [missingItemModal, setMissingItemModal] = useState({ open: false, code: '' })
   const debRef = useRef(null)
   const listRef = useRef(null)
 
@@ -97,6 +100,61 @@ export default function NovaOrdem({ form, setForm, criarOrdem, setTab }) {
         ? f.color
         : (item.color || '')
     }))
+  }
+
+  async function handleCreateOrder() {
+    const term = String(qProd || '').trim()
+    if (!term) {
+      criarOrdem(form, setForm, setTab)
+      return
+    }
+
+    if (pickedItem && isExactProductMatch(term, pickedItem)) {
+      criarOrdem(form, setForm, setTab)
+      return
+    }
+
+    const codeGuess = term.split('-')[0]?.trim()
+    if (!codeGuess) {
+      criarOrdem(form, setForm, setTab)
+      return
+    }
+
+    setCheckingItemCode(true)
+    try {
+      const { data, error } = await supabase
+        .from('items')
+        .select('id, code, description, color, cycle_seconds, cavities, part_weight_g, unit_value, resin')
+        .eq('code', codeGuess)
+        .maybeSingle()
+
+      if (error) {
+        setErr(error.message || 'Não foi possível validar o código do item.')
+        return
+      }
+
+      if (!data) {
+        setMissingItemModal({ open: true, code: codeGuess })
+        return
+      }
+
+      const nextProduct = `${data.code} - ${data.description}`
+      const nextColor = (form.color && form.color !== '' && form.color !== data.color)
+        ? form.color
+        : (data.color || '')
+      const nextForm = {
+        ...form,
+        product: nextProduct,
+        color: nextColor,
+      }
+
+      setPickedItem(data)
+      setQProd(nextProduct)
+      setForm(nextForm)
+      criarOrdem(nextForm, setForm, setTab)
+    } finally {
+      setCheckingItemCode(false)
+    }
   }
 
   // fecha a lista ao clicar fora
@@ -236,8 +294,30 @@ export default function NovaOrdem({ form, setForm, criarOrdem, setTab }) {
         )}
 
         <div className="sep"></div>
-        <button className="btn primary" onClick={() => criarOrdem(form, setForm, setTab)}>Adicionar</button>
+        <button className="btn primary" onClick={handleCreateOrder} disabled={checkingItemCode}>
+          {checkingItemCode ? 'Validando item…' : 'Adicionar'}
+        </button>
       </div>
+
+      <Modal
+        open={missingItemModal.open}
+        onClose={() => setMissingItemModal({ open: false, code: '' })}
+        title="Item não cadastrado"
+      >
+        <div style={{ display: 'grid', gap: 12 }}>
+          <p style={{ margin: 0 }}>
+            O código <b>{missingItemModal.code || '-'}</b> ainda não foi cadastrado na base de itens.
+          </p>
+          <p style={{ margin: 0 }}>
+            Por favor, avisar o responsável para realizar o cadastro antes de criar a O.P.
+          </p>
+          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+            <button className="btn primary" onClick={() => setMissingItemModal({ open: false, code: '' })}>
+              Entendi
+            </button>
+          </div>
+        </div>
+      </Modal>
     </div>
   )
 }
