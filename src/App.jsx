@@ -26,6 +26,7 @@ import Apontamento from './abas/Apontamento'
 import { DateTime } from 'luxon';
 import { supabase } from './lib/supabaseClient'
 
+
 export default function App(){
   const [tab,setTab] = useState('login')
   const mouseSensor = useSensor(MouseSensor, { activationConstraint: { distance: 5 }})
