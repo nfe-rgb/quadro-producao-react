@@ -10,6 +10,7 @@ const TABS = [
   { id: 'retorno', label: 'Retorno' },
   { id: 'compras', label: 'Compras' },
 ]
+const MANUAL_PURCHASE_INVOICE = 'Lançamento Manual'
 
 const nowIsoDate = () => new Date().toISOString().slice(0, 10)
 
@@ -143,7 +144,13 @@ export default function Estoque({ readOnly = false, allowedClient = '' }) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [showPurchaseForm, setShowPurchaseForm] = useState(false)
+  const [purchaseEntryMode, setPurchaseEntryMode] = useState('nf')
   const [purchaseForm, setPurchaseForm] = useState(emptyPurchaseForm)
+  const [manualInventoryModalOpen, setManualInventoryModalOpen] = useState(false)
+  const [manualInventoryDate, setManualInventoryDate] = useState(nowIsoDate())
+  const [manualInventoryQtyByCode, setManualInventoryQtyByCode] = useState({})
+  const [manualInventorySaving, setManualInventorySaving] = useState(false)
+  const [manualInventoryError, setManualInventoryError] = useState('')
   const [requisitionForm, setRequisitionForm] = useState(emptyRequisitionForm)
   const [purchaseError, setPurchaseError] = useState('')
   const [requisitionError, setRequisitionError] = useState('')
@@ -482,6 +489,20 @@ export default function Estoque({ readOnly = false, allowedClient = '' }) {
     [purchases, allowedClientNormalized]
   )
 
+  const latestUnitValueByItemCode = useMemo(() => {
+    const map = {}
+    ;(purchases || [])
+      .slice()
+      .sort(sortByLatest)
+      .forEach((row) => {
+        const code = normalize(row?.itemCode)
+        const unitValue = Number(row?.unitValue)
+        if (!code || !Number.isFinite(unitValue) || unitValue <= 0) return
+        if (!map[code]) map[code] = unitValue
+      })
+    return map
+  }, [purchases])
+
   const requisitionRows = useMemo(
     () => [...(requisitions || [])]
       .filter((row) => matchesAllowedClient(row?.client, allowedClientNormalized))
@@ -575,9 +596,99 @@ export default function Estoque({ readOnly = false, allowedClient = '' }) {
     })
   }
 
+  function openManualInventoryModal() {
+    setManualInventoryError('')
+    setManualInventoryDate(nowIsoDate())
+    setManualInventoryQtyByCode({})
+    setManualInventoryModalOpen(true)
+  }
+
+  function closeManualInventoryModal() {
+    if (manualInventorySaving) return
+    setManualInventoryModalOpen(false)
+    setManualInventoryError('')
+  }
+
+  function handleManualInventoryQtyChange(itemCode, value) {
+    const code = normalize(itemCode)
+    if (!code) return
+    setManualInventoryQtyByCode((prev) => ({ ...prev, [code]: value }))
+  }
+
+  async function handleManualInventorySubmit() {
+    setManualInventoryError('')
+    const date = normalize(manualInventoryDate) || nowIsoDate()
+
+    const rowsToInsert = (purchasableItems || []).map((item) => {
+      const code = normalize(item?.code)
+      const unit = normalize(item?.unidade)
+      const rawQty = manualInventoryQtyByCode[code]
+      const parsed = toPositiveNumber(rawQty)
+      if (!parsed) return null
+
+      const quantity = isUnitUN(unit) ? Math.round(parsed) : parsed
+      if (!Number.isFinite(quantity) || quantity <= 0) return null
+
+      const itemUnitValue = Number(item?.unit_value)
+      const latestUnitValue = Number(latestUnitValueByItemCode[code])
+      const fallbackUnitValue = Number.isFinite(itemUnitValue) && itemUnitValue > 0
+        ? itemUnitValue
+        : (Number.isFinite(latestUnitValue) && latestUnitValue > 0 ? latestUnitValue : 1)
+
+      return {
+        id: makeId(),
+        date,
+        invoice_number: MANUAL_PURCHASE_INVOICE,
+        item_code: code,
+        product: normalize(item?.description || code),
+        client: normalize(item?.cliente || item?.client),
+        quantity,
+        unit_value: fallbackUnitValue,
+        balance: quantity,
+      }
+    }).filter(Boolean)
+
+    if (rowsToInsert.length === 0) {
+      setManualInventoryError('Informe pelo menos uma quantidade maior que zero para lançar o inventário manual.')
+      return
+    }
+
+    setManualInventorySaving(true)
+    try {
+      const { data, error: insertError } = await supabase
+        .from('estoque_purchases')
+        .insert(rowsToInsert)
+        .select('*')
+
+      if (insertError) throw insertError
+
+      const mapped = (data || []).map(mapPurchaseFromDb)
+      setPurchases((prev) => [...mapped, ...(prev || [])])
+      setManualInventoryModalOpen(false)
+      setManualInventoryQtyByCode({})
+      setManualInventoryError('')
+    } catch (err) {
+      setManualInventoryError(err?.message || 'Não foi possível salvar o inventário manual.')
+    } finally {
+      setManualInventorySaving(false)
+    }
+  }
+
   function resetPurchaseForm() {
     setPurchaseForm({ ...emptyPurchaseForm, date: nowIsoDate() })
     setPurchaseError('')
+    setPurchaseEntryMode('nf')
+  }
+
+  function openPurchaseForm(mode = 'nf') {
+    setShowPurchaseForm(true)
+    setPurchaseError('')
+    setPurchaseEntryMode(mode)
+    setPurchaseForm((prev) => ({
+      ...prev,
+      date: prev?.date || nowIsoDate(),
+      invoiceNumber: mode === 'manual' ? MANUAL_PURCHASE_INVOICE : (mode === purchaseEntryMode ? prev.invoiceNumber : ''),
+    }))
   }
 
   async function handlePurchaseSubmit(e) {
@@ -585,14 +696,16 @@ export default function Estoque({ readOnly = false, allowedClient = '' }) {
     setPurchaseError('')
 
     const date = normalize(purchaseForm.date) || nowIsoDate()
-    const invoiceNumber = normalize(purchaseForm.invoiceNumber)
+    const invoiceNumber = purchaseEntryMode === 'manual'
+      ? MANUAL_PURCHASE_INVOICE
+      : normalize(purchaseForm.invoiceNumber)
     const itemCode = normalize(purchaseForm.itemCode)
     const product = normalize(purchaseForm.product)
     const client = normalize(purchaseForm.client)
     const quantity = toPositiveNumber(purchaseForm.quantity)
     const unitValue = toPositiveNumber(purchaseForm.unitValue)
 
-    if (!invoiceNumber) {
+    if (purchaseEntryMode !== 'manual' && !invoiceNumber) {
       setPurchaseError('Informe a Nota Fiscal.')
       return
     }
@@ -1316,16 +1429,22 @@ export default function Estoque({ readOnly = false, allowedClient = '' }) {
           <div className="estoque-card-head">
             <h3>Compras</h3>
             {!readOnly && (
-              <button
-                className="btn primary"
-                onClick={() => {
-                  setShowPurchaseForm((prev) => !prev)
-                  setPurchaseError('')
-                }}
-                type="button"
-              >
-                {showPurchaseForm ? 'Fechar entrada' : 'Nova entrada (NF)'}
-              </button>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <button
+                  className="btn primary"
+                  onClick={() => {
+                    if (showPurchaseForm && purchaseEntryMode === 'nf') {
+                      setShowPurchaseForm(false)
+                      setPurchaseError('')
+                      return
+                    }
+                    openPurchaseForm('nf')
+                  }}
+                  type="button"
+                >
+                  {showPurchaseForm && purchaseEntryMode === 'nf' ? 'Fechar entrada' : 'Nova entrada (NF)'}
+                </button>
+              </div>
             )}
           </div>
 
@@ -1348,7 +1467,8 @@ export default function Estoque({ readOnly = false, allowedClient = '' }) {
                     name="invoiceNumber"
                     value={purchaseForm.invoiceNumber}
                     onChange={handlePurchaseFieldChange}
-                    placeholder="Ex.: 000123"
+                    placeholder={purchaseEntryMode === 'manual' ? MANUAL_PURCHASE_INVOICE : 'Ex.: 000123'}
+                    readOnly={purchaseEntryMode === 'manual'}
                   />
                 </label>
 
@@ -1504,6 +1624,88 @@ export default function Estoque({ readOnly = false, allowedClient = '' }) {
           </div>
         </div>
       )}
+
+      <Modal
+        open={manualInventoryModalOpen}
+        onClose={closeManualInventoryModal}
+        title="Lançamento manual de inventário"
+      >
+        <div className="estoque-form" style={{ marginBottom: 0 }}>
+          <div className="estoque-form-grid" style={{ gridTemplateColumns: '220px 1fr' }}>
+            <label>
+              Data
+              <input
+                type="date"
+                value={manualInventoryDate}
+                onChange={(e) => setManualInventoryDate(e.target.value)}
+              />
+            </label>
+
+            <label>
+              Nota Fiscal
+              <input value={MANUAL_PURCHASE_INVOICE} readOnly />
+            </label>
+          </div>
+
+          {manualInventoryError && <div className="estoque-alert">{manualInventoryError}</div>}
+
+          <div className="estoque-table-wrap">
+            <table className="estoque-table">
+              <thead>
+                <tr>
+                  <th>Cod Item</th>
+                  <th>Produto</th>
+                  <th>Cliente</th>
+                  <th>Unidade</th>
+                  <th>Estoque atual</th>
+                  <th>Quantidade (lançar)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {purchasableItems.length === 0 && (
+                  <tr>
+                    <td colSpan="6" className="estoque-empty">Nenhum insumo disponível para lançamento manual.</td>
+                  </tr>
+                )}
+                {purchasableItems.map((item) => {
+                  const code = normalize(item?.code)
+                  const unit = normalize(item?.unidade)
+                  const currentStock = Number(purchaseBalanceByCode[code] || 0)
+                  return (
+                    <tr key={item.id || code}>
+                      <td>{code || '-'}</td>
+                      <td>{item?.description || '-'}</td>
+                      <td>{item?.cliente || item?.client || '-'}</td>
+                      <td>{unit || '-'}</td>
+                      <td>{formatQtyByUnit(currentStock, unit)}</td>
+                      <td>
+                        <input
+                          type="number"
+                          min={isUnitUN(unit) ? '1' : '0.001'}
+                          step={isUnitUN(unit) ? '1' : '0.001'}
+                          value={manualInventoryQtyByCode[code] ?? ''}
+                          onChange={(e) => handleManualInventoryQtyChange(code, e.target.value)}
+                          placeholder="0"
+                          style={{ width: 140 }}
+                        />
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="estoque-form-actions" style={{ gap: 8 }}>
+            <button className="btn ghost" type="button" onClick={closeManualInventoryModal} disabled={manualInventorySaving}>
+              Cancelar
+            </button>
+            <button className="btn primary" type="button" onClick={handleManualInventorySubmit} disabled={manualInventorySaving}>
+              {manualInventorySaving ? 'Salvando…' : 'Salvar todos'}
+            </button>
+          </div>
+        </div>
+      </Modal>
 
       <Modal
         open={usageModal.open}
