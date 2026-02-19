@@ -57,8 +57,9 @@ export default function App(){
   const [machinePriorities, setMachinePriorities] = useState({})
   const [prioritiesLoading, setPrioritiesLoading] = useState(false)
 
-  const { authUser, authChecked, isAdmin, accessLevel, isMendes } = useAuthAdmin()
-  const hasEstoqueAccess = !!authUser && (accessLevel === 2 || isMendes)
+  const { authUser, authChecked, isAdmin, accessLevel, isMendes, isStockOnlyAccess } = useAuthAdmin()
+  const hasEstoqueAccess = !!authUser && (accessLevel === 2 || accessLevel === 3 || isMendes)
+  const hasGestaoAccess = !!authUser && !isMendes && !isStockOnlyAccess && (accessLevel === 1 || accessLevel === 2)
 
   const {
     ordens, paradas,
@@ -236,10 +237,15 @@ export default function App(){
       return
     }
 
-    if (tab === 'estoque' && accessLevel !== 2) {
+    if (tab === 'estoque' && accessLevel !== 2 && accessLevel !== 3) {
+      setTab('painel')
+      return
+    }
+
+    if (tab === 'gestao' && isStockOnlyAccess) {
       setTab('painel')
     }
-  }, [authChecked, authUser, tab, isMendes, accessLevel])
+  }, [authChecked, authUser, tab, isMendes, accessLevel, isStockOnlyAccess])
 
   async function handleSignOut() {
     try {
@@ -517,11 +523,11 @@ export default function App(){
               )}
               <button className={`tabbtn ${tab==='registro'?'active':''}`} onClick={()=>setTab('registro')}>Paradas</button>
               <button className={`tabbtn ${tab==='rastreio'?'active':''}`} onClick={()=>setTab('rastreio')}>Rastreio</button>
-              {authUser && accessLevel === 2 && (
+              {authUser && (accessLevel === 2 || accessLevel === 3) && (
                 <button className={`tabbtn ${tab==='estoque'?'active':''}`} onClick={()=>setTab('estoque')}>Estoque</button>
               )}
               <button className={`tabbtn ${tab==='apontamento'?'active':''}`} onClick={()=>setTab('apontamento')}>Apontamento</button>
-              {authUser && (
+              {hasGestaoAccess && (
                 <button className={`tabbtn ${tab==='gestao'?'active':''}`} onClick={()=>setTab('gestao')}>Gestão</button>
               )}
               <button className="tabbtn" onClick={handleSignOut}>Sair</button>
@@ -616,7 +622,7 @@ export default function App(){
       )}
 
       {tab === 'gestao' && !isMendes && (
-        authUser && (accessLevel === 1 || accessLevel === 2) ? (
+        hasGestaoAccess ? (
           <Gestao />
         ) : (
           <div style={{ padding: 24 }}>
