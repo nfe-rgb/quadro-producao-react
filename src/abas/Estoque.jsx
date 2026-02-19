@@ -42,6 +42,11 @@ const toPositiveNumber = (value) => {
 }
 
 const normalize = (value) => String(value ?? '').trim()
+const normalizeClientValue = (value) => normalize(value).toLowerCase()
+const matchesAllowedClient = (value, allowedClientNormalized) => {
+  if (!allowedClientNormalized) return true
+  return normalizeClientValue(value) === allowedClientNormalized
+}
 const isFinishedProductCode = (code) => normalize(code).startsWith('5')
 
 const makeId = () => {
@@ -102,9 +107,10 @@ const emptyReturnForm = {
   quantity: '',
 }
 
-export default function Estoque() {
+export default function Estoque({ readOnly = false, allowedClient = '' }) {
   const didLegacyReturnMigrationRef = useRef(false)
   const [tab, setTab] = useState('inventario')
+  const [inventoryClientFilter, setInventoryClientFilter] = useState('')
   const [items, setItems] = useState([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -121,9 +127,27 @@ export default function Estoque() {
   const [purchases, setPurchases] = useState(() => readStoredRows(STORAGE_PURCHASES_KEY))
   const [requisitions, setRequisitions] = useState(() => readStoredRows(STORAGE_REQUISITIONS_KEY))
   const [returns, setReturns] = useState(() => readStoredRows(STORAGE_RETURNS_KEY))
+  const allowedClientNormalized = useMemo(() => normalizeClientValue(allowedClient), [allowedClient])
 
   useEffect(() => {
     fetchItems()
+  }, [])
+
+  useEffect(() => {
+    const channel = supabase
+      .channel('estoque-items-realtime')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'items' },
+        () => {
+          fetchItems()
+        }
+      )
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
   }, [])
 
   useEffect(() => {
@@ -323,17 +347,48 @@ export default function Estoque() {
   const itemByCode = useMemo(() => {
     const map = {}
     ;(items || []).forEach((item) => {
+      if (!matchesAllowedClient(item?.cliente || item?.client, allowedClientNormalized)) return
       const code = normalize(item?.code)
       if (!code) return
       map[code] = item
     })
     return map
-  }, [items])
+  }, [items, allowedClientNormalized])
+
+  const scopedItems = useMemo(() => {
+    return (items || []).filter((item) => matchesAllowedClient(item?.cliente || item?.client, allowedClientNormalized))
+  }, [items, allowedClientNormalized])
 
   const purchasableItems = useMemo(
-    () => (items || []).filter((item) => !isFinishedProductCode(item?.code)),
-    [items]
+    () => (scopedItems || []).filter((item) => !isFinishedProductCode(item?.code)),
+    [scopedItems]
   )
+
+  const inventoryClientOptions = useMemo(() => {
+    const set = new Set()
+    ;(scopedItems || []).forEach((item) => {
+      const client = normalize(item?.cliente || item?.client)
+      if (!client) return
+      set.add(client)
+    })
+    return Array.from(set).sort((a, b) => a.localeCompare(b, 'pt-BR'))
+  }, [scopedItems])
+
+  useEffect(() => {
+    if (!inventoryClientFilter) return
+    const selectedNormalized = normalizeClientValue(inventoryClientFilter)
+    const stillExists = inventoryClientOptions.some(
+      (client) => normalizeClientValue(client) === selectedNormalized
+    )
+    if (!stillExists) {
+      setInventoryClientFilter('')
+    }
+  }, [inventoryClientFilter, inventoryClientOptions])
+
+  useEffect(() => {
+    if (!allowedClientNormalized) return
+    if (inventoryClientFilter) setInventoryClientFilter('')
+  }, [allowedClientNormalized, inventoryClientFilter])
 
   const purchaseBalanceByCode = useMemo(() => {
     const acc = {}
@@ -347,12 +402,19 @@ export default function Estoque() {
   }, [purchases])
 
   const inventoryRows = useMemo(() => {
-    const list = Array.isArray(items) ? items : []
+    const list = Array.isArray(scopedItems) ? scopedItems : []
+    const selectedClientNormalized = allowedClientNormalized
+      ? ''
+      : normalizeClientValue(inventoryClientFilter)
 
     return list
       .filter((item) => {
         const code = String(item?.code || '').trim()
         if (!code) return false
+        if (selectedClientNormalized) {
+          const itemClient = item?.cliente || item?.client
+          if (!matchesAllowedClient(itemClient, selectedClientNormalized)) return false
+        }
         return !code.startsWith('5')
       })
       .map((item) => {
@@ -381,21 +443,35 @@ export default function Estoque() {
         updatedAt: item.created_at ? fmtDateTime(item.created_at) : '-',
         }
       })
-  }, [items, purchaseBalanceByCode])
+  }, [scopedItems, purchaseBalanceByCode, inventoryClientFilter, allowedClientNormalized])
 
   const purchaseRows = useMemo(
-    () => [...(purchases || [])].sort(sortByLatest).slice(0, 30),
-    [purchases]
+    () => [...(purchases || [])]
+      .filter((row) => matchesAllowedClient(row?.client, allowedClientNormalized))
+      .sort(sortByLatest)
+      .slice(0, 30),
+    [purchases, allowedClientNormalized]
   )
 
   const requisitionRows = useMemo(
-    () => [...(requisitions || [])].sort(sortByLatest).slice(0, 20),
-    [requisitions]
+    () => [...(requisitions || [])]
+      .filter((row) => matchesAllowedClient(row?.client, allowedClientNormalized))
+      .sort(sortByLatest)
+      .slice(0, 20),
+    [requisitions, allowedClientNormalized]
   )
 
   const returnRows = useMemo(
-    () => [...(returns || [])].sort(sortByLatest).slice(0, 30),
-    [returns]
+    () => [...(returns || [])]
+      .filter((row) => {
+        if (!allowedClientNormalized) return true
+        const itemCode = normalize(row?.itemCode)
+        const sourceItem = (items || []).find((item) => normalize(item?.code) === itemCode)
+        return matchesAllowedClient(sourceItem?.cliente || sourceItem?.client, allowedClientNormalized)
+      })
+      .sort(sortByLatest)
+      .slice(0, 30),
+    [returns, items, allowedClientNormalized]
   )
 
   const purchaseHistoryIds = useMemo(() => {
@@ -694,7 +770,7 @@ export default function Estoque() {
     setRequisitions((prev) => [req, ...(prev || [])])
     setRequisitionForm(emptyRequisitionForm)
     setRequisitionInfo(
-      `Requisição concluída via FIFO. Consumo em ${allocations.length} nota(s) fiscal(is).`
+      `Requisição concluída. Consumo em ${allocations.length} nota(s) fiscal(is).`
     )
   }
 
@@ -748,7 +824,7 @@ export default function Estoque() {
       <div className="estoque-header">
         <div>
           <h2 className="estoque-title">Controle de Insumos</h2>
-          <p className="estoque-sub">Inventário, requisição FIFO, retorno e compras por Nota Fiscal.</p>
+          <p className="estoque-sub">Inventário, requisição, retorno e compras por Nota Fiscal.</p>
         </div>
       </div>
 
@@ -768,11 +844,21 @@ export default function Estoque() {
         <div className="estoque-card">
           <div className="estoque-card-head">
             <h3>Inventário</h3>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span className="pill">{inventoryRows.length} insumos</span>
-              <button className="btn ghost" onClick={fetchItems} disabled={loading}>
-                {loading ? 'Atualizando…' : 'Atualizar'}
-              </button>
+            <div className="estoque-inventory-controls">
+              {!allowedClientNormalized && (
+                <select
+                  className="estoque-filter-select"
+                  value={inventoryClientFilter}
+                  onChange={(e) => setInventoryClientFilter(e.target.value)}
+                  aria-label="Filtrar inventário por cliente"
+                  disabled={inventoryClientOptions.length === 0}
+                >
+                  <option value="">Todos os clientes</option>
+                  {inventoryClientOptions.map((client) => (
+                    <option key={client} value={client}>{client}</option>
+                  ))}
+                </select>
+              )}
             </div>
           </div>
           {error && <div className="estoque-alert">{error}</div>}
@@ -820,62 +906,68 @@ export default function Estoque() {
             <h3>Requisição</h3>
           </div>
 
-          <form className="estoque-form" onSubmit={handleRequisitionSubmit}>
-            <div className="estoque-form-grid">
-              <label>
-                Cod Item
-                <input
-                  name="itemCode"
-                  value={requisitionForm.itemCode}
-                  onChange={handleRequisitionFieldChange}
-                  list="requisicao-codes"
-                  placeholder="Ex.: 40123"
-                />
-                <datalist id="requisicao-codes">
-                  {requisitionCodeOptions.map((code) => (
-                    <option key={code} value={code} />
-                  ))}
-                </datalist>
-              </label>
+          {!readOnly && (
+            <form className="estoque-form" onSubmit={handleRequisitionSubmit}>
+              <div className="estoque-form-grid">
+                <label>
+                  Cod Item
+                  <input
+                    name="itemCode"
+                    value={requisitionForm.itemCode}
+                    onChange={handleRequisitionFieldChange}
+                    list="requisicao-codes"
+                    placeholder="Ex.: 40123"
+                  />
+                  <datalist id="requisicao-codes">
+                    {requisitionCodeOptions.map((code) => (
+                      <option key={code} value={code} />
+                    ))}
+                  </datalist>
+                </label>
 
-              <label>
-                O.P
-                <input
-                  name="op"
-                  value={requisitionForm.op}
-                  onChange={handleRequisitionFieldChange}
-                  placeholder="Ex.: OP-24010"
-                />
-              </label>
+                <label>
+                  O.P
+                  <input
+                    name="op"
+                    value={requisitionForm.op}
+                    onChange={handleRequisitionFieldChange}
+                    placeholder="Ex.: OP-24010"
+                  />
+                </label>
 
-              <label>
-                Cliente
-                <input
-                  name="client"
-                  value={requisitionForm.client}
-                  onChange={handleRequisitionFieldChange}
-                  placeholder="Cliente"
-                />
-              </label>
+                <label>
+                  Cliente
+                  <input
+                    name="client"
+                    value={requisitionForm.client}
+                    onChange={handleRequisitionFieldChange}
+                    placeholder="Cliente"
+                  />
+                </label>
 
-              <label>
-                Quantidade
-                <input
-                  name="quantity"
-                  type="number"
-                  min="0.001"
-                  step="0.001"
-                  value={requisitionForm.quantity}
-                  onChange={handleRequisitionFieldChange}
-                  placeholder="Ex.: 25"
-                />
-              </label>
-            </div>
+                <label>
+                  Quantidade
+                  <input
+                    name="quantity"
+                    type="number"
+                    min="0.001"
+                    step="0.001"
+                    value={requisitionForm.quantity}
+                    onChange={handleRequisitionFieldChange}
+                    placeholder="Ex.: 25"
+                  />
+                </label>
+              </div>
 
-            <div className="estoque-form-actions">
-              <button className="btn primary" type="submit">Requisitar (FIFO)</button>
-            </div>
-          </form>
+              <div className="estoque-form-actions">
+                <button className="btn primary" type="submit">Requisitar</button>
+              </div>
+            </form>
+          )}
+
+          {readOnly && (
+            <div className="estoque-alert">Visualização habilitada. Lançamentos de requisição estão bloqueados para este perfil.</div>
+          )}
 
           {requisitionError && <div className="estoque-alert">{requisitionError}</div>}
           {requisitionInfo && <div className="estoque-alert">{requisitionInfo}</div>}
@@ -888,7 +980,7 @@ export default function Estoque() {
                   <th>O.P</th>
                   <th>Cod Item</th>
                   <th>Quantidade</th>
-                  <th>Notas consumidas (FIFO)</th>
+                  <th>Notas consumidas</th>
                 </tr>
               </thead>
               <tbody>
@@ -927,64 +1019,70 @@ export default function Estoque() {
             <h3>Retorno</h3>
           </div>
 
-          <form className="estoque-form" onSubmit={handleReturnSubmit}>
-            <div className="estoque-form-grid">
-              <label>
-                O.P
-                <input
-                  name="op"
-                  value={returnForm.op}
-                  onChange={handleReturnFieldChange}
-                  placeholder="Ex.: OP-24010"
-                />
-              </label>
+          {!readOnly && (
+            <form className="estoque-form" onSubmit={handleReturnSubmit}>
+              <div className="estoque-form-grid">
+                <label>
+                  O.P
+                  <input
+                    name="op"
+                    value={returnForm.op}
+                    onChange={handleReturnFieldChange}
+                    placeholder="Ex.: OP-24010"
+                  />
+                </label>
 
-              <label>
-                Item
-                <input
-                  name="itemCode"
-                  value={returnForm.itemCode}
-                  onChange={handleReturnFieldChange}
-                  list="retorno-codes"
-                  placeholder="Ex.: 40123"
-                />
-                <datalist id="retorno-codes">
-                  {purchasableItems.map((item) => {
-                    const code = normalize(item?.code)
-                    if (!code) return null
-                    return <option key={code} value={code} />
-                  })}
-                </datalist>
-              </label>
+                <label>
+                  Item
+                  <input
+                    name="itemCode"
+                    value={returnForm.itemCode}
+                    onChange={handleReturnFieldChange}
+                    list="retorno-codes"
+                    placeholder="Ex.: 40123"
+                  />
+                  <datalist id="retorno-codes">
+                    {purchasableItems.map((item) => {
+                      const code = normalize(item?.code)
+                      if (!code) return null
+                      return <option key={code} value={code} />
+                    })}
+                  </datalist>
+                </label>
 
-              <label>
-                Descrição Item
-                <input
-                  name="itemDescription"
-                  value={returnForm.itemDescription}
-                  onChange={handleReturnFieldChange}
-                  placeholder="Descrição do item"
-                />
-              </label>
+                <label>
+                  Descrição Item
+                  <input
+                    name="itemDescription"
+                    value={returnForm.itemDescription}
+                    onChange={handleReturnFieldChange}
+                    placeholder="Descrição do item"
+                  />
+                </label>
 
-              <label>
-                Quantidade retornada
-                <input
-                  name="quantity"
-                  type="number"
-                  min="0.001"
-                  step="0.001"
-                  value={returnForm.quantity}
-                  onChange={handleReturnFieldChange}
-                  placeholder="Ex.: 3.5"
-                />
-              </label>
-            </div>
+                <label>
+                  Quantidade retornada
+                  <input
+                    name="quantity"
+                    type="number"
+                    min="0.001"
+                    step="0.001"
+                    value={returnForm.quantity}
+                    onChange={handleReturnFieldChange}
+                    placeholder="Ex.: 3.5"
+                  />
+                </label>
+              </div>
 
-            <div className="estoque-form-actions">
-              <button className="btn primary" type="submit">Lançar retorno</button>
-            </div>
-          </form>
+              <div className="estoque-form-actions">
+                <button className="btn primary" type="submit">Lançar retorno</button>
+              </div>
+            </form>
+          )}
+
+          {readOnly && (
+            <div className="estoque-alert">Visualização habilitada. Lançamentos de retorno estão bloqueados para este perfil.</div>
+          )}
 
           {returnError && <div className="estoque-alert">{returnError}</div>}
           {returnInfo && <div className="estoque-alert">{returnInfo}</div>}
@@ -1025,19 +1123,21 @@ export default function Estoque() {
         <div className="estoque-card">
           <div className="estoque-card-head">
             <h3>Compras</h3>
-            <button
-              className="btn primary"
-              onClick={() => {
-                setShowPurchaseForm((prev) => !prev)
-                setPurchaseError('')
-              }}
-              type="button"
-            >
-              {showPurchaseForm ? 'Fechar entrada' : 'Nova entrada (NF)'}
-            </button>
+            {!readOnly && (
+              <button
+                className="btn primary"
+                onClick={() => {
+                  setShowPurchaseForm((prev) => !prev)
+                  setPurchaseError('')
+                }}
+                type="button"
+              >
+                {showPurchaseForm ? 'Fechar entrada' : 'Nova entrada (NF)'}
+              </button>
+            )}
           </div>
 
-          {showPurchaseForm && (
+          {!readOnly && showPurchaseForm && (
             <form className="estoque-form" onSubmit={handlePurchaseSubmit}>
               <div className="estoque-form-grid">
                 <label>
@@ -1139,6 +1239,10 @@ export default function Estoque() {
                 <button className="btn primary" type="submit">Dar entrada</button>
               </div>
             </form>
+          )}
+
+          {readOnly && (
+            <div className="estoque-alert">Visualização habilitada. Lançamentos de compra estão bloqueados para este perfil.</div>
           )}
 
           {purchaseError && <div className="estoque-alert">{purchaseError}</div>}

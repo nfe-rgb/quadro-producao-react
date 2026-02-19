@@ -1,7 +1,7 @@
 // src/hooks/useAuthAdmin.js
 import { useEffect, useState, useMemo } from 'react'
 import { supabase } from '../lib/supabaseClient'
-import { ADMIN_EMAILS, ACCESS_LEVEL_1_EMAILS, ACCESS_LEVEL_2_EMAILS } from '../lib/constants'
+import { ADMIN_EMAILS, ACCESS_LEVEL_1_EMAILS, ACCESS_LEVEL_2_EMAILS, ACCESS_LEVEL_MENDES_EMAILS } from '../lib/constants'
 
 export default function useAuthAdmin(){
   const [authUser, setAuthUser] = useState(null)
@@ -9,13 +9,29 @@ export default function useAuthAdmin(){
 
   useEffect(() => {
     let active = true
+    let authSubscription = null
     ;(async () => {
       const { data } = await supabase.auth.getUser()
       if (!active) return
       setAuthUser(data?.user ?? null)
       setAuthChecked(true)
     })()
-    return () => { active = false }
+
+    const { data: listenerData } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (!active) return
+      setAuthUser(session?.user ?? null)
+      setAuthChecked(true)
+    })
+    authSubscription = listenerData?.subscription ?? null
+
+    return () => {
+      active = false
+      try {
+        authSubscription?.unsubscribe?.()
+      } catch {
+        // noop
+      }
+    }
   }, [])
 
   const isAdmin = useMemo(() => {
@@ -32,5 +48,14 @@ export default function useAuthAdmin(){
     return 0
   }, [authUser, isAdmin])
 
-  return { authUser, authChecked, isAdmin, accessLevel }
+  const isMendes = useMemo(() => {
+    const email = authUser?.email?.toLowerCase()
+    if (!email) return false
+    if (Array.isArray(ACCESS_LEVEL_MENDES_EMAILS) && ACCESS_LEVEL_MENDES_EMAILS.map(e => e.toLowerCase()).includes(email)) {
+      return true
+    }
+    return false
+  }, [authUser])
+
+  return { authUser, authChecked, isAdmin, accessLevel, isMendes }
 }

@@ -396,6 +396,14 @@ export default function Painel({
                       <div className="stop-reason-below">{openStop.reason}</div>
                     )}
 
+                    {ativa?.status === "BAIXA_EFICIENCIA" && ativa?.loweff_notes && (
+                      <div className="loweff-info-below">
+                        <div className="loweff-reason-below">
+                          {ativa.loweff_notes}
+                        </div>
+                      </div>
+                    )}
+
                     <div className="sep" />
 
                     <div className="grid2">

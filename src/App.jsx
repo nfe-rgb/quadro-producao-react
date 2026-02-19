@@ -1,5 +1,5 @@
 // src/App.jsx
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { DndContext, useSensor, useSensors, MouseSensor, TouchSensor } from '@dnd-kit/core'
 import { useLocation } from 'react-router-dom';
 
@@ -27,7 +27,7 @@ import { DateTime } from 'luxon';
 import { supabase } from './lib/supabaseClient'
 
 export default function App(){
-  const [tab,setTab] = useState('painel')
+  const [tab,setTab] = useState('login')
   const mouseSensor = useSensor(MouseSensor, { activationConstraint: { distance: 5 }})
   const touchSensor = useSensor(TouchSensor, { pressDelay: 150, activationConstraint: { distance: 5 }})
   const sensors = useSensors(mouseSensor, touchSensor)
@@ -57,11 +57,12 @@ export default function App(){
   const [machinePriorities, setMachinePriorities] = useState({})
   const [prioritiesLoading, setPrioritiesLoading] = useState(false)
 
-  const { authUser, authChecked, isAdmin, accessLevel } = useAuthAdmin()
+  const { authUser, authChecked, isAdmin, accessLevel, isMendes } = useAuthAdmin()
+  const hasEstoqueAccess = !!authUser && (accessLevel === 2 || isMendes)
 
   const {
-    ordens, finalizadas, paradas,
-    fetchOrdensAbertas, fetchOrdensFinalizadas, fetchParadas,
+    ordens, paradas,
+    fetchOrdensAbertas,
     criarOrdem, atualizar, enviarParaFila, finalizar,
     confirmarInicio, confirmarParada, confirmarRetomada, confirmarBaixaEf, confirmarEncerrarBaixaEf,
     ativosPorMaquina, registroGrupos, lastFinalizadoPorMaquina, onStatusChange
@@ -214,10 +215,46 @@ export default function App(){
 
   useEffect(() => {
     if (!authChecked) return
-    if (!authUser && (tab === 'estoque' || tab === 'gestao')) {
+    if (!authUser && tab !== 'login') {
+      setTab('login')
+      return
+    }
+    if (!authUser) return
+
+    if (isMendes) {
+      if (tab !== 'estoque' && tab !== 'login') {
+        setTab('estoque')
+      }
+      if (tab === 'login') {
+        setTab('estoque')
+      }
+      return
+    }
+
+    if (tab === 'login') {
+      setTab('painel')
+      return
+    }
+
+    if (tab === 'estoque' && accessLevel !== 2) {
       setTab('painel')
     }
-  }, [authChecked, authUser, tab])
+  }, [authChecked, authUser, tab, isMendes, accessLevel])
+
+  async function handleSignOut() {
+    try {
+      await supabase.auth.signOut()
+    } catch (err) {
+      console.warn('Falha ao encerrar sessão:', err)
+    } finally {
+      setTab('login')
+    }
+  }
+
+  function handleLoginSuccess(user) {
+    if (!user) return
+    setTab('painel')
+  }
 
   // pet pages quick-return (mantive comportamento)
   // rota de login para acesso via celular (/login)
@@ -464,24 +501,43 @@ export default function App(){
   </div>
 )}
 
-      <div className="tabs">
-        <button className={`tabbtn ${tab==='painel'?'active':''}`} onClick={()=>setTab('painel')}>Painel</button>
-        <button className={`tabbtn ${tab==='lista'?'active':''}`} onClick={()=>setTab('lista')}>Lista</button>
-        {isAdmin && (
-          <button className={`tabbtn ${tab==='nova'?'active':''}`} onClick={()=>setTab('nova')}>Nova Ordem</button>
-        )}
-        <button className={`tabbtn ${tab==='registro'?'active':''}`} onClick={()=>setTab('registro')}>Paradas</button>
-        <button className={`tabbtn ${tab==='rastreio'?'active':''}`} onClick={()=>setTab('rastreio')}>Rastreio</button>
-        {authUser && accessLevel === 2 && (
-          <button className={`tabbtn ${tab==='estoque'?'active':''}`} onClick={()=>setTab('estoque')}>Estoque</button>
-        )}
-        <button className={`tabbtn ${tab==='apontamento'?'active':''}`} onClick={()=>setTab('apontamento')}>Apontamento</button>
-        {authUser && (
-          <button className={`tabbtn ${tab==='gestao'?'active':''}`} onClick={()=>setTab('gestao')}>Gestão</button>
-        )}
-      </div>
+      {authUser && tab !== 'login' && (
+        <div className="tabs">
+          {isMendes ? (
+            <>
+              <button className={`tabbtn ${tab==='estoque'?'active':''}`} onClick={()=>setTab('estoque')}>Estoque</button>
+              <button className="tabbtn" onClick={handleSignOut}>Sair</button>
+            </>
+          ) : (
+            <>
+              <button className={`tabbtn ${tab==='painel'?'active':''}`} onClick={()=>setTab('painel')}>Painel</button>
+              <button className={`tabbtn ${tab==='lista'?'active':''}`} onClick={()=>setTab('lista')}>Lista</button>
+              {isAdmin && (
+                <button className={`tabbtn ${tab==='nova'?'active':''}`} onClick={()=>setTab('nova')}>Nova Ordem</button>
+              )}
+              <button className={`tabbtn ${tab==='registro'?'active':''}`} onClick={()=>setTab('registro')}>Paradas</button>
+              <button className={`tabbtn ${tab==='rastreio'?'active':''}`} onClick={()=>setTab('rastreio')}>Rastreio</button>
+              {authUser && accessLevel === 2 && (
+                <button className={`tabbtn ${tab==='estoque'?'active':''}`} onClick={()=>setTab('estoque')}>Estoque</button>
+              )}
+              <button className={`tabbtn ${tab==='apontamento'?'active':''}`} onClick={()=>setTab('apontamento')}>Apontamento</button>
+              {authUser && (
+                <button className={`tabbtn ${tab==='gestao'?'active':''}`} onClick={()=>setTab('gestao')}>Gestão</button>
+              )}
+              <button className="tabbtn" onClick={handleSignOut}>Sair</button>
+            </>
+          )}
+        </div>
+      )}
 
-      {tab === 'login' && <Login />}
+      {tab === 'login' && (
+        <Login
+          onAuthenticated={handleLoginSuccess}
+          authenticatedTitle="Acesso liberado"
+          authenticatedDescription="Clique em Continuar para abrir seu ambiente."
+          showAdminShortcut={false}
+        />
+      )}
 
       {tab === 'admin-itens' && (
         authChecked ? (
@@ -500,7 +556,7 @@ export default function App(){
         )
       )}
 
-      {tab === 'painel' && (
+      {tab === 'painel' && !isMendes && (
         <Painel
           ativosPorMaquina={ativosPorMaquina}
           paradas={paradas}
@@ -515,7 +571,7 @@ export default function App(){
         />
       )}
 
-      {tab === 'lista' && (
+      {tab === 'lista' && !isMendes && (
         <Lista
           ativosPorMaquina={ativosPorMaquina}
           sensors={sensors}
@@ -529,7 +585,7 @@ export default function App(){
         />
       )}
 
-      {tab === 'nova' && accessLevel === 2 && (
+      {tab === 'nova' && accessLevel === 2 && !isMendes && (
         isAdmin ? (
           <NovaOrdem form={form} setForm={setForm} criarOrdem={() => criarOrdem(form, setForm, setTab)} />
         ) : (
@@ -540,23 +596,26 @@ export default function App(){
         )
       )}
 
-      {tab === 'registro' && (
+      {tab === 'registro' && !isMendes && (
         <Registro registroGrupos={registroGrupos} openSet={openSet} toggleOpen={toggleOpen} isAdmin={isAdmin} />
       )}
 
-      {tab === 'rastreio' && (
+      {tab === 'rastreio' && !isMendes && (
         <Rastreio />
       )}
 
-      {tab === 'estoque' && accessLevel === 2 && authUser && (
-        <Estoque />
+      {tab === 'estoque' && hasEstoqueAccess && (
+        <Estoque
+          readOnly={isMendes}
+          allowedClient={isMendes ? 'Mendes' : ''}
+        />
       )}
 
-      {tab === 'apontamento' && (
+      {tab === 'apontamento' && !isMendes && (
         <Apontamento isAdmin={isAdmin} />
       )}
 
-      {tab === 'gestao' && (
+      {tab === 'gestao' && !isMendes && (
         authUser && (accessLevel === 1 || accessLevel === 2) ? (
           <Gestao />
         ) : (

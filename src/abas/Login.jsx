@@ -2,7 +2,12 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabaseClient.js'
 
-export default function Login() {
+export default function Login({
+  onAuthenticated,
+  authenticatedTitle = 'Você está autenticado',
+  authenticatedDescription,
+  showAdminShortcut = true,
+}) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [user, setUser] = useState(null)
@@ -26,6 +31,9 @@ export default function Login() {
     const { data, error } = await supabase.auth.signInWithPassword({ email, password })
     if (error) { setError(error.message); return }
     setUser(data.user)
+    if (typeof onAuthenticated === 'function' && data?.user) {
+      onAuthenticated(data.user)
+    }
   }
 
   async function signOut() {
@@ -38,12 +46,19 @@ export default function Login() {
   if (user) {
     return (
       <div style={{ padding: 24, display: 'grid', gap: 12, maxWidth: 420 }}>
-        <h2 style={{ margin: 0 }}>Você está autenticado</h2>
+        <h2 style={{ margin: 0 }}>{authenticatedTitle}</h2>
+        {authenticatedDescription ? <div>{authenticatedDescription}</div> : null}
         <div><b>E-mail:</b> {user.email}</div>
         <div style={{ display: 'flex', gap: 8 }}>
-          <button className="btn primary" onClick={() => { location.href = '/admin/itens' }}>
-            Ir para Cadastro de Itens
-          </button>
+          {showAdminShortcut ? (
+            <button className="btn primary" onClick={() => { location.href = '/admin/itens' }}>
+              Ir para Cadastro de Itens
+            </button>
+          ) : (
+            <button className="btn primary" onClick={() => { if (typeof onAuthenticated === 'function') onAuthenticated(user) }}>
+              Continuar
+            </button>
+          )}
           <button className="btn ghost" onClick={signOut}>Sair</button>
         </div>
       </div>
@@ -68,7 +83,7 @@ export default function Login() {
         </div>
       </form>
       <div style={{ fontSize: 12, opacity: 0.8 }}>
-        Precisa de acesso? Cadastre o e-mail no Supabase Studio (Authentication → Users).
+        Precisa de acesso? Cadastre o e-mail via solicitação WhatsApp.
       </div>
     </div>
   )

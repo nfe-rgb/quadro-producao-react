@@ -65,7 +65,8 @@
   min-height: 0;
   display: grid;
   grid-template-columns: 1fr;
-  grid-template-rows: repeat(2, minmax(0, 1fr));
+  grid-template-rows: auto auto;
+  align-content: start;
   gap: 6px;
 }
 
@@ -101,8 +102,8 @@
 }
 
 .tv-item-wrap .small {
-  font-size: clamp(11px, 1.05vh, 14px);
-  line-height: 1.2;
+  font-size: 11px;
+  line-height: 1.14;
 }
 
 .tv-item-empty {

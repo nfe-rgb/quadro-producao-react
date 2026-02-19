@@ -1,7 +1,8 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import Etiqueta from "../components/Etiqueta";
 import { MAQUINAS } from "../lib/constants";
 import { statusClass } from "../lib/utils";
+import { supabase } from "../lib/supabaseClient";
 import "../styles/PainelTV.css";
 
 function formatHHMMSS(totalSeconds) {
@@ -12,7 +13,13 @@ function formatHHMMSS(totalSeconds) {
   return `${hh}:${mm}:${ss}`;
 }
 
-function ItemResumo({ title, ordem, machineId, openStop, fallback = "Sem programação" }) {
+function ItemResumo({
+  title,
+  ordem,
+  machineId,
+  openStop,
+  fallback = "Sem programação",
+}) {
   if (!ordem) {
     return (
       <div className="tv-item-wrap">
@@ -41,6 +48,16 @@ function ItemResumo({ title, ordem, machineId, openStop, fallback = "Sem program
           paradaReason={openStop?.reason}
           paradaNotes={openStop?.notes}
         />
+
+        {ordem?.status === "PARADA" && openStop?.reason && (
+          <div className="stop-reason-below">{openStop.reason}</div>
+        )}
+
+        {ordem?.status === "BAIXA_EFICIENCIA" && ordem?.loweff_notes && (
+          <div className="loweff-info-below">
+            <div className="loweff-reason-below">{ordem.loweff_notes}</div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -53,6 +70,32 @@ export default function PainelTV({
   lastFinalizadoPorMaquina,
 }) {
   const source = ativosPorMaquina || {};
+  const [lowEffStartedAt, setLowEffStartedAt] = useState({});
+
+  useEffect(() => {
+    async function fetchLowEffLogs() {
+      const result = {};
+      for (const m of MAQUINAS) {
+        const lista = (source && source[m]) || [];
+        const ativa = lista[0] || null;
+        if (ativa && ativa.status === "BAIXA_EFICIENCIA") {
+          let query = supabase
+            .from("low_efficiency_logs")
+            .select("started_at")
+            .is("ended_at", null)
+            .eq("machine_id", m);
+          if (ativa.id) query = query.eq("order_id", ativa.id);
+          const { data, error } = await query;
+          if (!error && data && data.length > 0) {
+            result[m] = data[0].started_at;
+          }
+        }
+      }
+      setLowEffStartedAt(result);
+    }
+
+    fetchLowEffLogs();
+  }, [ativosPorMaquina]);
 
   return (
     <div className="tv-wrapper">
@@ -94,20 +137,41 @@ export default function PainelTV({
               })()
             : null;
 
+          const lowEffText =
+            atual?.status === "BAIXA_EFICIENCIA" && lowEffStartedAt[machineId]
+              ? (() => {
+                  const _ = tick;
+                  const secs =
+                    (Date.now() - new Date(lowEffStartedAt[machineId]).getTime()) / 1000;
+                  return formatHHMMSS(secs);
+                })()
+              : null;
+
           return (
             <section key={machineId} className="column tv-column">
               <div className="column-header tv-column-header">
                 <div className="tv-machine-name">{machineId}</div>
                 <div className="tv-header-timers">
                   {stopText && <span className="parada-timer">{stopText}</span>}
+                  {lowEffText && <span className="loweff-timer">{lowEffText}</span>}
                   {semProgText && <span className="semprog-timer">{semProgText}</span>}
                 </div>
               </div>
 
               <div className="column-body tv-column-body">
                 <div className="tv-items-grid">
-                  <ItemResumo title="Atual" ordem={atual} machineId={machineId} openStop={openStop} />
-                  <ItemResumo title="Próximo" ordem={proximo} machineId={machineId} openStop={null} />
+                  <ItemResumo
+                    title="Atual"
+                    ordem={atual}
+                    machineId={machineId}
+                    openStop={openStop}
+                  />
+                  <ItemResumo
+                    title="Próximo"
+                    ordem={proximo}
+                    machineId={machineId}
+                    openStop={null}
+                  />
                 </div>
               </div>
             </section>

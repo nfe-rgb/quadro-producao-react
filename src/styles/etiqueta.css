@@ -95,28 +95,38 @@
 
 /* Variante compacta para painel TV: mantém cards dentro da etiqueta */
 .small.compact-pills-layout {
-  padding-right: 118px;
-  padding-bottom: 54px;
+  padding-right: 92px;
+  padding-bottom: 18px;
 }
 
 .pill-row.compact-inside {
-  top: 60px !important;
-  right: 0px !important;
-  bottom: 6px !important;
+  top: auto !important;
+  right: 4px !important;
+  bottom: 4px !important;
   margin: 0 !important;  /* remove o empurrão */
   gap: 4px !important;
 }
 
 .pill.compact-pill {
-  font-size: 0.8rem !important;
-  padding: 4px 8px !important;
-  min-width: 78px;
-  border-radius: 10px;
+  font-size: 11px !important;
+  padding: 2px 6px !important;
+  min-width: 68px;
+  border-radius: 8px;
   line-height: 1.1;
   gap: 4px !important;
 }
 
 .pill.compact-pill b {
-  font-size: 1.02em;
+  font-size: 1em;
+}
+
+/* Escala fixa da etiqueta no modo TV para evitar corte em 100% */
+.tv-item-wrap .small.compact-pills-layout {
+  font-size: 11px !important;
+  line-height: 1.14 !important;
+}
+
+.tv-item-wrap .small.compact-pills-layout > div {
+  margin: 3px 0;
 }
 
