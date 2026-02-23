@@ -141,29 +141,58 @@ const emptyReturnForm = {
 function ProductCellWithHoverImage({
   itemCode,
   product,
+  imageUrl = '',
   enablePreview = false,
 }) {
   const label = normalize(product) || '-'
   const candidates = useMemo(() => (
-    enablePreview ? getProductImageCandidates(itemCode) : []
-  ), [enablePreview, itemCode])
-  const [candidateIndex, setCandidateIndex] = useState(0)
+    enablePreview ? getProductImageCandidates(itemCode, imageUrl) : []
+  ), [enablePreview, itemCode, imageUrl])
+  const [resolvedImageUrl, setResolvedImageUrl] = useState('')
   const [openUpward, setOpenUpward] = useState(false)
 
   useEffect(() => {
-    setCandidateIndex(0)
-  }, [itemCode])
+    let active = true
 
-  const hasAnyCandidate = candidates.length > 0
-  const imageUrl = hasAnyCandidate ? candidates[candidateIndex] : ''
-  const hasPreview = !!imageUrl
+    if (!enablePreview || candidates.length === 0) {
+      setResolvedImageUrl('')
+      return () => {
+        active = false
+      }
+    }
 
-  const handleImageError = () => {
-    setCandidateIndex((prev) => {
-      const next = prev + 1
-      return next < candidates.length ? next : candidates.length
-    })
-  }
+    const checkCandidate = (index) => {
+      if (!active) return
+      if (index >= candidates.length) {
+        setResolvedImageUrl('')
+        return
+      }
+
+      const candidate = candidates[index]
+      if (!candidate) {
+        checkCandidate(index + 1)
+        return
+      }
+
+      const img = new Image()
+      img.onload = () => {
+        if (active) setResolvedImageUrl(candidate)
+      }
+      img.onerror = () => {
+        if (active) checkCandidate(index + 1)
+      }
+      img.src = candidate
+    }
+
+    setResolvedImageUrl('')
+    checkCandidate(0)
+
+    return () => {
+      active = false
+    }
+  }, [enablePreview, candidates])
+
+  const hasPreview = !!resolvedImageUrl
 
   const handleMouseEnter = (event) => {
     const triggerRect = event.currentTarget.getBoundingClientRect()
@@ -182,10 +211,9 @@ function ProductCellWithHoverImage({
       <span className="estoque-product-label">{label}</span>
       <span className={`estoque-product-preview ${openUpward ? 'estoque-product-preview--up' : ''}`} role="tooltip">
         <img
-          src={imageUrl}
+          src={resolvedImageUrl}
           alt={label}
           loading="lazy"
-          onError={handleImageError}
         />
       </span>
     </span>
@@ -527,6 +555,7 @@ export default function Estoque({ readOnly = false, allowedClient = '', enablePr
         id: item.id,
         itemCode: code,
         product: item.description,
+        imageUrl: normalize(item?.image_url),
         client: item.cliente || item.client || '-',
         stock: hasStock ? stockNum : '-',
         min: hasMin ? minNum : '-',
@@ -1101,8 +1130,10 @@ export default function Estoque({ readOnly = false, allowedClient = '', enablePr
     }
   }
 
-  function openUsageModal(purchaseRow) {
+  async function openUsageModal(purchaseRow) {
     if (!purchaseRow) return
+    const requisitionById = new Map((requisitions || []).map((req) => [normalize(req?.id), req]))
+    const itemByCodeAll = new Map((items || []).map((item) => [normalize(item?.code), item]))
     const rows = []
     ;(requisitions || []).forEach((req) => {
       const reqDate = req?.createdAt || null
@@ -1110,11 +1141,15 @@ export default function Estoque({ readOnly = false, allowedClient = '', enablePr
       const reqClient = normalize(req?.client)
       ;(req?.allocations || []).forEach((allocation) => {
         if (allocation?.purchaseId !== purchaseRow.id) return
+        const finishedItemCode = normalize(allocation?.finishedItemCode)
         rows.push({
           id: `${req.id}-${allocation.purchaseId}-${allocation.invoiceNumber}-${allocation.usedQty}`,
           requisitionDate: reqDate,
           op: reqOp,
           client: reqClient,
+          finishedItemCode,
+          productDescription: '-',
+          productColor: '-',
           qty: Number(allocation?.usedQty) || 0,
           movementType: 'utilizacao',
         })
@@ -1126,24 +1161,73 @@ export default function Estoque({ readOnly = false, allowedClient = '', enablePr
       const retOp = normalize(ret?.op)
       ;(ret?.allocations || []).forEach((allocation) => {
         if (allocation?.purchaseId !== purchaseRow.id) return
+        const linkedReq = requisitionById.get(normalize(allocation?.requisitionId))
+        const linkedReqAllocation = (linkedReq?.allocations || []).find(
+          (reqAllocation) => normalize(reqAllocation?.purchaseId) === normalize(allocation?.purchaseId)
+        )
+        const finishedItemCode = normalize(linkedReqAllocation?.finishedItemCode)
         rows.push({
           id: `${ret.id}-${allocation.purchaseId}-${allocation.invoiceNumber}-${allocation.returnedQty}`,
           requisitionDate: retDate,
           op: retOp,
           client: 'RETORNO',
+          finishedItemCode,
+          productDescription: '-',
+          productColor: '-',
           qty: Number(allocation?.returnedQty) || 0,
           movementType: 'retorno',
         })
       })
     })
 
-    rows.sort((a, b) => {
+    const missingOpCodes = Array.from(new Set(
+      rows
+        .filter((row) => !normalize(row?.finishedItemCode) && normalize(row?.op))
+        .map((row) => normalize(row?.op))
+    ))
+
+    const finishedCodeByOp = new Map()
+    if (missingOpCodes.length > 0) {
+      try {
+        const { data, error: ordersError } = await supabase
+          .from('orders')
+          .select('code, product, created_at')
+          .in('code', missingOpCodes)
+          .order('created_at', { ascending: false })
+
+        if (!ordersError) {
+          ;(data || []).forEach((order) => {
+            const opCode = normalize(order?.code)
+            if (!opCode || finishedCodeByOp.has(opCode)) return
+            const finishedCode = extractFinishedCodeFromOrderProduct(order?.product)
+            if (finishedCode) finishedCodeByOp.set(opCode, finishedCode)
+          })
+        }
+      } catch {
+      }
+    }
+
+    const rowsWithProduct = rows.map((row) => {
+      const directCode = normalize(row?.finishedItemCode)
+      const opCode = normalize(row?.op)
+      const resolvedCode = directCode || finishedCodeByOp.get(opCode) || ''
+      const finishedItem = itemByCodeAll.get(resolvedCode)
+
+      return {
+        ...row,
+        finishedItemCode: resolvedCode,
+        productDescription: normalize(finishedItem?.description) || '-',
+        productColor: normalize(finishedItem?.color) || '-',
+      }
+    })
+
+    rowsWithProduct.sort((a, b) => {
       const aDate = new Date(a?.requisitionDate || 0).getTime()
       const bDate = new Date(b?.requisitionDate || 0).getTime()
       return bDate - aDate
     })
 
-    setUsageModal({ open: true, purchase: purchaseRow, rows })
+    setUsageModal({ open: true, purchase: purchaseRow, rows: rowsWithProduct })
   }
 
   return (
@@ -1217,6 +1301,7 @@ export default function Estoque({ readOnly = false, allowedClient = '', enablePr
                       <ProductCellWithHoverImage
                         itemCode={row.itemCode}
                         product={row.product}
+                        imageUrl={row.imageUrl}
                         enablePreview={enableProductImagePreview}
                       />
                     </td>
@@ -1652,6 +1737,7 @@ export default function Estoque({ readOnly = false, allowedClient = '', enablePr
                     : null
                   const hasUsage = Number(usedQty) > 0
                   const hasHistory = purchaseHistoryIds.has(normalize(row?.id))
+                  const itemImageUrl = normalize(itemByCode[normalize(row?.itemCode)]?.image_url)
 
                   return (
                     <tr key={row.id}>
@@ -1662,6 +1748,7 @@ export default function Estoque({ readOnly = false, allowedClient = '', enablePr
                         <ProductCellWithHoverImage
                           itemCode={row.itemCode}
                           product={row.product}
+                          imageUrl={itemImageUrl}
                           enablePreview={enableProductImagePreview}
                         />
                       </td>
@@ -1786,6 +1873,8 @@ export default function Estoque({ readOnly = false, allowedClient = '', enablePr
                 <th>Data Requisição</th>
                 <th>O.P</th>
                 <th>Cliente</th>
+                <th>Descrição</th>
+                <th>Cor</th>
                 <th>Movimento</th>
                 <th>Quantidade</th>
               </tr>
@@ -1793,7 +1882,7 @@ export default function Estoque({ readOnly = false, allowedClient = '', enablePr
             <tbody>
               {usageModal.rows.length === 0 && (
                 <tr>
-                  <td colSpan="5" className="estoque-empty">Nenhum consumo/retorno registrado para esta nota.</td>
+                  <td colSpan="7" className="estoque-empty">Nenhum consumo/retorno registrado para esta nota.</td>
                 </tr>
               )}
               {usageModal.rows.map((row) => (
@@ -1801,6 +1890,8 @@ export default function Estoque({ readOnly = false, allowedClient = '', enablePr
                   <td>{row.requisitionDate ? fmtDateTime(row.requisitionDate) : '-'}</td>
                   <td>{row.op || '-'}</td>
                   <td>{row.client || '-'}</td>
+                  <td>{row.productDescription || '-'}</td>
+                  <td>{row.productColor || '-'}</td>
                   <td>{row.movementType === 'retorno' ? 'Retorno' : 'Utilização'}</td>
                   <td>{formatQty(row.qty)}</td>
                 </tr>

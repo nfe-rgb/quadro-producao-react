@@ -2,7 +2,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '../lib/supabaseClient.js'
 import { ADMIN_EMAILS } from '../lib/constants.js'
-import { setProductImageOverride } from '../lib/productImageMap.js'
 import Modal from '../components/Modal.jsx'
 import Papa from 'papaparse'
 
@@ -409,8 +408,19 @@ export default function CadastroItens() {
     setFormErr(null)
     const err = validate()
     if (err) { setFormErr(err); return }
+    const code = cleanText(form.code)
+    let uploadedImageUrl = null
+    if (form.itemType === 'insumo' && imageFile) {
+      try {
+        uploadedImageUrl = await uploadProductImage(code, imageFile)
+      } catch (imgErr) {
+        setFormErr(`Não foi possível anexar a imagem: ${imgErr?.message || 'erro desconhecido'}`)
+        return
+      }
+    }
+
     const payloadBase = {
-      code: cleanText(form.code),
+      code,
       description: cleanText(form.description),
       item_type: cleanText(form.itemType) || 'produto_acabado',
     }
@@ -426,6 +436,8 @@ export default function CadastroItens() {
           part_weight_g: toPosFloat(form.part_weight_g) ?? INSUMO_TECH_DEFAULTS.part_weight_g,
           unit_value: toNonNegFloat(form.unit_value) ?? INSUMO_TECH_DEFAULTS.unit_value,
           resin: cleanText(form.resin) || INSUMO_TECH_DEFAULTS.resin,
+          ...(removeProductImage ? { image_url: null } : {}),
+          ...(uploadedImageUrl ? { image_url: uploadedImageUrl } : {}),
         }
       : {
           ...payloadBase,
@@ -450,25 +462,6 @@ export default function CadastroItens() {
     if (error) {
       setSaving(false)
       setFormErr(error.message ?? 'Erro ao salvar.')
-      return
-    }
-
-    try {
-      if (form.itemType === 'insumo') {
-        const code = cleanText(form.code)
-        if (removeProductImage) {
-          setProductImageOverride(code, '')
-        }
-
-        if (imageFile) {
-          const imageUrl = await uploadProductImage(code, imageFile)
-          setProductImageOverride(code, imageUrl)
-        }
-      }
-    } catch (imgErr) {
-      setSaving(false)
-      setFormErr(`Item salvo, mas não foi possível anexar a imagem: ${imgErr?.message || 'erro desconhecido'}`)
-      await fetchItems()
       return
     }
 
@@ -840,6 +833,18 @@ export default function CadastroItens() {
                   {imageFile && (
                     <div style={{ fontSize: 12, opacity: 0.85 }}>
                       {`Imagem selecionada: ${imageFile.name}`}
+                    </div>
+                  )}
+
+                  {!imageFile && !removeProductImage && editing?.image_url && (
+                    <div style={{ fontSize: 12, opacity: 0.85 }}>
+                      Imagem atual vinculada para este insumo.
+                    </div>
+                  )}
+
+                  {removeProductImage && (
+                    <div style={{ fontSize: 12, opacity: 0.85 }}>
+                      A imagem atual será removida ao salvar.
                     </div>
                   )}
 
