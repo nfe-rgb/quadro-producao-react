@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import { fmtDateTime } from '../lib/utils'
+import { getProductImageCandidates } from '../lib/productImageMap'
 import Modal from '../components/Modal'
 import '../styles/estoque.css'
 
@@ -137,7 +138,61 @@ const emptyReturnForm = {
   quantity: '',
 }
 
-export default function Estoque({ readOnly = false, allowedClient = '' }) {
+function ProductCellWithHoverImage({
+  itemCode,
+  product,
+  enablePreview = false,
+}) {
+  const label = normalize(product) || '-'
+  const candidates = useMemo(() => (
+    enablePreview ? getProductImageCandidates(itemCode) : []
+  ), [enablePreview, itemCode])
+  const [candidateIndex, setCandidateIndex] = useState(0)
+  const [openUpward, setOpenUpward] = useState(false)
+
+  useEffect(() => {
+    setCandidateIndex(0)
+  }, [itemCode])
+
+  const hasAnyCandidate = candidates.length > 0
+  const imageUrl = hasAnyCandidate ? candidates[candidateIndex] : ''
+  const hasPreview = !!imageUrl
+
+  const handleImageError = () => {
+    setCandidateIndex((prev) => {
+      const next = prev + 1
+      return next < candidates.length ? next : candidates.length
+    })
+  }
+
+  const handleMouseEnter = (event) => {
+    const triggerRect = event.currentTarget.getBoundingClientRect()
+    const previewHeight = 220
+    const margin = 16
+    const spaceBelow = window.innerHeight - triggerRect.bottom
+    setOpenUpward(spaceBelow < (previewHeight + margin))
+  }
+
+  if (!enablePreview || !hasPreview) {
+    return <span>{label}</span>
+  }
+
+  return (
+    <span className="estoque-product-hover" tabIndex={0} onMouseEnter={handleMouseEnter}>
+      <span className="estoque-product-label">{label}</span>
+      <span className={`estoque-product-preview ${openUpward ? 'estoque-product-preview--up' : ''}`} role="tooltip">
+        <img
+          src={imageUrl}
+          alt={label}
+          loading="lazy"
+          onError={handleImageError}
+        />
+      </span>
+    </span>
+  )
+}
+
+export default function Estoque({ readOnly = false, allowedClient = '', enableProductImagePreview = false }) {
   const [tab, setTab] = useState('inventario')
   const [inventoryClientFilter, setInventoryClientFilter] = useState('')
   const [items, setItems] = useState([])
@@ -1158,7 +1213,13 @@ export default function Estoque({ readOnly = false, allowedClient = '' }) {
                 {inventoryRows.map((row) => (
                   <tr key={row.id || row.itemCode}>
                     <td>{row.itemCode || '-'}</td>
-                    <td>{row.product || '-'}</td>
+                    <td>
+                      <ProductCellWithHoverImage
+                        itemCode={row.itemCode}
+                        product={row.product}
+                        enablePreview={enableProductImagePreview}
+                      />
+                    </td>
                     <td>{row.client || '-'}</td>
                     <td>{row.stock ?? '-'}</td>
                     <td>{row.min ?? '-'}</td>
@@ -1597,7 +1658,13 @@ export default function Estoque({ readOnly = false, allowedClient = '' }) {
                       <td>{row.date ? new Date(row.date).toLocaleDateString('pt-BR') : '-'}</td>
                       <td>{row.invoiceNumber || '-'}</td>
                       <td>{row.itemCode || '-'}</td>
-                      <td>{row.product || '-'}</td>
+                      <td>
+                        <ProductCellWithHoverImage
+                          itemCode={row.itemCode}
+                          product={row.product}
+                          enablePreview={enableProductImagePreview}
+                        />
+                      </td>
                       <td>{row.client || '-'}</td>
                       <td>{formatQty(row.quantity)}</td>
                       <td>R$ {formatMoney(row.unitValue)}</td>

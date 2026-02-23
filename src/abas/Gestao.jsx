@@ -134,6 +134,12 @@ export default function Gestao() {
 
   const grupoPET = useMemo(() => MAQUINAS.filter(m => String(m).toUpperCase().startsWith('P')), []);
   const grupoINJ = useMemo(() => MAQUINAS.filter(m => String(m).toUpperCase().startsWith('I')), []);
+  const maquinasFiltradas = useMemo(() => {
+    if (valorViewType === 'maquina') {
+      return valorMachineFiltro ? [valorMachineFiltro] : [];
+    }
+    return valorSetorFiltro === 'inj' ? grupoINJ : grupoPET;
+  }, [valorViewType, valorMachineFiltro, valorSetorFiltro, grupoINJ, grupoPET]);
 
   const duracaoTurnoHoras = useMemo(() => {
     if (!filtroStart || !filtroEnd) return { '1': 0, '2': 0, '3': 0 };
@@ -355,9 +361,7 @@ export default function Gestao() {
   };
 
   const valorizacaoPorTurno = useMemo(() => {
-    const machineList = valorViewType === 'maquina'
-      ? (valorMachineFiltro ? [valorMachineFiltro] : [])
-      : (valorSetorFiltro === 'inj' ? grupoINJ : grupoPET);
+    const machineList = maquinasFiltradas;
 
     const machineSet = new Set(machineList.map(m => String(m)));
     const byShiftMachine = {
@@ -445,94 +449,87 @@ export default function Gestao() {
     });
 
     return { machineList, rows };
-  }, [valorViewType, valorMachineFiltro, valorSetorFiltro, grupoINJ, grupoPET, bipagens, apontamentos, ordersMap, duracaoTurnoHoras, itemsMap]);
+  }, [maquinasFiltradas, bipagens, apontamentos, ordersMap, duracaoTurnoHoras, itemsMap]);
 
-  const resumoSetores = useMemo(() => {
-    const buildSummary = (maquinas) => {
-      const machineSet = new Set(maquinas.map(m => String(m)));
-      const summary = {
-        goodPieces: 0,
-        scrapPieces: 0,
-        scrapByReason: {},
-        scrapKgByReason: {},
-        scrapTotalKg: 0,
-        producedKg: 0,
-        valorizacao: 0,
-        stopsByReasonMs: {},
-        stopsTotalMs: 0,
-        oeePct: null,
-      };
-
-      (bipagens || []).forEach(b => {
-        if (!machineSet.has(String(b.machine_id))) return;
-        const order = b.order_id != null ? ordersMap[String(b.order_id)] : null;
-        const std = parsePiecesPerBox(order?.standard);
-        if (std <= 0) return;
-        const product = order?.product || '';
-        const { unitValue, weightKg } = getItemMetaFromProduct(product);
-        summary.goodPieces += std;
-        summary.producedKg += std * weightKg;
-        summary.valorizacao += std * unitValue;
-      });
-
-      (apontamentos || []).forEach(a => {
-        if (!machineSet.has(String(a.machine_id))) return;
-        const qty = Number(a.good_qty) || 0;
-        if (qty <= 0) return;
-        const order = a.order_id != null ? ordersMap[String(a.order_id)] : null;
-        const product = a.product || order?.product || '';
-        const { unitValue, weightKg } = getItemMetaFromProduct(product);
-        summary.goodPieces += qty;
-        summary.producedKg += qty * weightKg;
-        summary.valorizacao += qty * unitValue;
-      });
-
-      (refugos || []).forEach(r => {
-        if (!machineSet.has(String(r.machine_id))) return;
-        const qty = Number(r.qty) || 0;
-        if (qty <= 0) return;
-        const reason = (String(r.reason || '').trim()) || 'Sem motivo';
-        const order = r.order_id != null ? ordersMap[String(r.order_id)] : null;
-        const product = order?.product || '';
-        const { weightKg } = getItemMetaFromProduct(product);
-        summary.scrapPieces += qty;
-        summary.scrapTotalKg += qty * weightKg;
-        summary.scrapByReason[reason] = (summary.scrapByReason[reason] || 0) + qty;
-        summary.scrapKgByReason[reason] = (summary.scrapKgByReason[reason] || 0) + (qty * weightKg);
-      });
-
-      const nowMs = Date.now();
-      const filtroStartMs = filtroStart ? filtroStart.getTime() : null;
-      const filtroEndMs = filtroEnd ? filtroEnd.getTime() : null;
-
-      (paradas || []).forEach(p => {
-        if (!machineSet.has(String(p.machine_id))) return;
-        if (!p.started_at) return;
-        const iniMs = new Date(p.started_at).getTime();
-        const fimMs = p.resumed_at ? new Date(p.resumed_at).getTime() : Math.min(filtroEndMs || nowMs, nowMs);
-        if (!Number.isFinite(iniMs) || !Number.isFinite(fimMs) || fimMs <= iniMs) return;
-        if (filtroStartMs == null || filtroEndMs == null) return;
-        const clipIni = Math.max(iniMs, filtroStartMs);
-        const clipFim = Math.min(fimMs, filtroEndMs);
-        if (clipFim <= clipIni) return;
-        const reason = (String(p.reason || '').trim()) || 'Sem motivo';
-        const dur = clipFim - clipIni;
-        summary.stopsTotalMs += dur;
-        summary.stopsByReasonMs[reason] = (summary.stopsByReasonMs[reason] || 0) + dur;
-      });
-
-      return summary;
+  const resumoFiltrado = useMemo(() => {
+    const machineSet = new Set(maquinasFiltradas.map(m => String(m)));
+    const summary = {
+      goodPieces: 0,
+      scrapPieces: 0,
+      scrapByReason: {},
+      scrapKgByReason: {},
+      scrapTotalKg: 0,
+      producedKg: 0,
+      valorizacao: 0,
+      stopsByReasonMs: {},
+      stopsTotalMs: 0,
+      oeePct: null,
     };
 
-    return {
-      pet: buildSummary(grupoPET),
-      inj: buildSummary(grupoINJ),
-    };
-  }, [bipagens, refugos, paradas, apontamentos, ordersMap, itemsMap, grupoPET, grupoINJ, filtroStart, filtroEnd]);
+    (bipagens || []).forEach(b => {
+      if (!machineSet.has(String(b.machine_id))) return;
+      const order = b.order_id != null ? ordersMap[String(b.order_id)] : null;
+      const std = parsePiecesPerBox(order?.standard);
+      if (std <= 0) return;
+      const product = order?.product || '';
+      const { unitValue, weightKg } = getItemMetaFromProduct(product);
+      summary.goodPieces += std;
+      summary.producedKg += std * weightKg;
+      summary.valorizacao += std * unitValue;
+    });
+
+    (apontamentos || []).forEach(a => {
+      if (!machineSet.has(String(a.machine_id))) return;
+      const qty = Number(a.good_qty) || 0;
+      if (qty <= 0) return;
+      const order = a.order_id != null ? ordersMap[String(a.order_id)] : null;
+      const product = a.product || order?.product || '';
+      const { unitValue, weightKg } = getItemMetaFromProduct(product);
+      summary.goodPieces += qty;
+      summary.producedKg += qty * weightKg;
+      summary.valorizacao += qty * unitValue;
+    });
+
+    (refugos || []).forEach(r => {
+      if (!machineSet.has(String(r.machine_id))) return;
+      const qty = Number(r.qty) || 0;
+      if (qty <= 0) return;
+      const reason = (String(r.reason || '').trim()) || 'Sem motivo';
+      const order = r.order_id != null ? ordersMap[String(r.order_id)] : null;
+      const product = order?.product || '';
+      const { weightKg } = getItemMetaFromProduct(product);
+      summary.scrapPieces += qty;
+      summary.scrapTotalKg += qty * weightKg;
+      summary.scrapByReason[reason] = (summary.scrapByReason[reason] || 0) + qty;
+      summary.scrapKgByReason[reason] = (summary.scrapKgByReason[reason] || 0) + (qty * weightKg);
+    });
+
+    const nowMs = Date.now();
+    const filtroStartMs = filtroStart ? filtroStart.getTime() : null;
+    const filtroEndMs = filtroEnd ? filtroEnd.getTime() : null;
+
+    (paradas || []).forEach(p => {
+      if (!machineSet.has(String(p.machine_id))) return;
+      if (!p.started_at) return;
+      const iniMs = new Date(p.started_at).getTime();
+      const fimMs = p.resumed_at ? new Date(p.resumed_at).getTime() : Math.min(filtroEndMs || nowMs, nowMs);
+      if (!Number.isFinite(iniMs) || !Number.isFinite(fimMs) || fimMs <= iniMs) return;
+      if (filtroStartMs == null || filtroEndMs == null) return;
+      const clipIni = Math.max(iniMs, filtroStartMs);
+      const clipFim = Math.min(fimMs, filtroEndMs);
+      if (clipFim <= clipIni) return;
+      const reason = (String(p.reason || '').trim()) || 'Sem motivo';
+      const dur = clipFim - clipIni;
+      summary.stopsTotalMs += dur;
+      summary.stopsByReasonMs[reason] = (summary.stopsByReasonMs[reason] || 0) + dur;
+    });
+
+    return summary;
+  }, [maquinasFiltradas, bipagens, refugos, paradas, apontamentos, ordersMap, itemsMap, filtroStart, filtroEnd]);
 
   const timelineByMachine = useMemo(() => {
     const now = DateTime.now().setZone('America/Sao_Paulo');
-    const grouped = Object.fromEntries(MAQUINAS.map(m => [m, []]));
+    const grouped = Object.fromEntries(maquinasFiltradas.map(m => [m, []]));
 
     (openOrders || []).forEach(order => {
       const machine = String(order?.machine_id || '');
@@ -540,7 +537,7 @@ export default function Gestao() {
       grouped[machine].push(order);
     });
 
-    return MAQUINAS.map(machine => {
+    return maquinasFiltradas.map(machine => {
       const queue = [...(grouped[machine] || [])].sort((a, b) => (a.pos ?? 999) - (b.pos ?? 999));
       let cursor = now;
       let canAdvance = true;
@@ -592,7 +589,7 @@ export default function Gestao() {
 
       return { machine, rows };
     });
-  }, [openOrders, itemsMap]);
+  }, [openOrders, itemsMap, maquinasFiltradas]);
 
   const renderScrapRows = (summary) => {
     const rows = Object.keys(summary.scrapByReason || {}).map(reason => {
@@ -816,8 +813,12 @@ export default function Gestao() {
 
         {viewMode === 'resumo' ? (
           <div className="gestao-sectors">
-            {renderSetor('PET', resumoSetores.pet)}
-            {renderSetor('Injecao', resumoSetores.inj)}
+            {renderSetor(
+              valorViewType === 'setor'
+                ? (valorSetorFiltro === 'inj' ? 'Injeção' : 'PET')
+                : `Máquina ${valorMachineFiltro}`,
+              resumoFiltrado
+            )}
           </div>
         ) : (
           <div className="gestao-timeline-wrap">

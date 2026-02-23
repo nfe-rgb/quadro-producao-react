@@ -615,6 +615,7 @@ export default function App(){
         <Estoque
           readOnly={isMendes}
           allowedClient={isMendes ? 'Mendes' : ''}
+          enableProductImagePreview={isMendes}
         />
       )}
 
