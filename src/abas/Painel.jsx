@@ -25,7 +25,7 @@ export default function Painel({
   setStartModal,
   setFinalizando,
   lastFinalizadoPorMaquina,
-  metaPercent = 13.81,
+  metaPercent = 46.22,
   onScanned, // opcional: callback do pai para re-fetch geral
   authUser,
   machinePriorities = {},
