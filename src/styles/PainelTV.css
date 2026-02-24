@@ -102,8 +102,24 @@
 }
 
 .tv-item-wrap .small {
-  font-size: 11px;
-  line-height: 1.14;
+  font-size: 10px;
+  line-height: 1.08;
+}
+
+.tv-item-wrap .small > div {
+  overflow-wrap: anywhere;
+}
+
+.tv-item-wrap .tv-stop-reason-inside {
+  margin-top: 2px;
+  font-size: clamp(10px, 0.95vh, 12px);
+  line-height: 1.08;
+  font-weight: 800;
+  font-style: italic;
+  color: #3d5d78;
+  text-transform: uppercase;
+  text-align: center;
+  width: 100%;
 }
 
 .tv-item-empty {

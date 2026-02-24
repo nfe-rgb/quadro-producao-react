@@ -85,7 +85,7 @@
 
   /* Lista mais compacta no mobile mas ainda com 3 colunas via scroll */
   .tablehead, .tableline{
-    grid-template-columns: 90px minmax(320px,1fr) minmax(320px,1fr);
+    grid-template-columns: 110px minmax(320px,1fr) minmax(320px,1fr);
     min-width: 820px;
   }
   .cell-fila{ overflow-x: auto; }

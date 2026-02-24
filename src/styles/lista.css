@@ -4,7 +4,7 @@
 .tablehead,
 .tableline{
   display: grid;
-  grid-template-columns: 70px minmax(340px,1fr) minmax(340px,1fr);
+  grid-template-columns: 110px minmax(340px,1fr) minmax(340px,1fr);
   gap: 12px;
   align-items: start;
   min-width: 900px; /* ativa scroll horizontal em telas estreitas */
