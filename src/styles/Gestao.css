@@ -171,12 +171,136 @@
   font-size: 13px;
 }
 
+.gestao-pcp {
+  padding: 10px;
+  border: 1px solid var(--border);
+  background: var(--card);
+}
+
+.gestao-pcp-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.gestao-pcp-toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.gestao-pcp-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.gestao-pcp-legenda {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  font-size: 13px;
+  margin-bottom: 10px;
+}
+
+.gestao-pcp-legenda span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.legenda-box {
+  width: 14px;
+  height: 14px;
+  border: 1px solid var(--border);
+  display: inline-block;
+}
+
+.legenda-plan {
+  background: var(--primary);
+}
+
+.legenda-real {
+  background: var(--green);
+}
+
+.legenda-delay {
+  background: var(--red);
+}
+
+.gestao-pcp-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+}
+
+.gestao-pcp-table {
+  width: max-content;
+  min-width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  background: var(--card);
+}
+
+.gestao-pcp-table th,
+.gestao-pcp-table td {
+  border: 1px solid var(--border);
+  padding: 4px 6px;
+  white-space: nowrap;
+  text-align: center;
+}
+
+.gestao-pcp-table thead th {
+  background: var(--card-2);
+  font-weight: 700;
+}
+
+.pcp-machine-row td {
+  text-align: left;
+  font-weight: 800;
+  background: color-mix(in srgb, var(--secondary) 12%, var(--card));
+}
+
+.pcp-day-head,
+.pcp-day-week {
+  min-width: 22px;
+  width: 22px;
+  padding: 2px 0;
+}
+
+.pcp-day-cell {
+  min-width: 22px;
+  width: 22px;
+  height: 18px;
+  padding: 0;
+  background: var(--card);
+}
+
+.pcp-day-cell.is-plan {
+  background: color-mix(in srgb, var(--primary) 72%, var(--card));
+}
+
+.pcp-day-cell.is-real {
+  background: color-mix(in srgb, var(--green) 70%, var(--card));
+}
+
+.pcp-day-cell.is-delay {
+  background: color-mix(in srgb, var(--red) 75%, var(--card));
+}
+
 @media (max-width: 900px) {
   .gestao-kpis {
     grid-template-columns: 1fr;
   }
 
   .gestao-timeline-head {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .gestao-pcp-toolbar {
     flex-direction: column;
     align-items: flex-start;
   }

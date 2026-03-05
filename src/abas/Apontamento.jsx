@@ -423,7 +423,7 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false }) {
       try {
         const { data, error } = await supabase
           .from('orders')
-          .select('id, code, product, standard, created_at, boxes')
+          .select('id, code, product, standard, created_at, boxes, machine_id')
           .order('created_at', { ascending: false });
         if (error) {
           console.warn('Erro ao buscar todas as orders:', error);
@@ -515,6 +515,30 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false }) {
     return map;
   }, [shiftResponsibles]);
 
+  const osOptionsByMachine = useMemo(() => {
+    const selectedMachine = String(manualForm.machine || '').trim();
+    if (!selectedMachine) return [];
+    const map = new Map();
+    (ordersAll || []).forEach((order) => {
+      if (!order) return;
+      if (String(order.machine_id || '') !== selectedMachine) return;
+      const code = String(order.code || '').trim();
+      if (!code) return;
+      if (!map.has(code)) {
+        map.set(code, order.created_at ? new Date(order.created_at).getTime() : 0);
+        return;
+      }
+      const existingTs = map.get(code) || 0;
+      const currentTs = order.created_at ? new Date(order.created_at).getTime() : 0;
+      if (currentTs > existingTs) {
+        map.set(code, currentTs);
+      }
+    });
+    return Array.from(map.entries())
+      .sort((a, b) => (b[1] || 0) - (a[1] || 0))
+      .map(([code]) => code);
+  }, [ordersAll, manualForm.machine]);
+
   // Agrupa por turno e máquina e calcula refugo %
   const agrupadoPorTurno = useMemo(() => {
     const porTurno = {};
@@ -577,7 +601,9 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false }) {
       const goodQty = Number(a.good_qty) || 0;
       porTurno[turno][maq].producaoManual += goodQty;
       porTurno[turno][maq].manualEntries.push({
+        created_at: a.created_at,
         good_qty: goodQty,
+        order_code: a.order_code || order?.code || '',
         product: a.product || order?.product || '',
         order,
       });
@@ -883,6 +909,26 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false }) {
                                 <div style={{ marginTop: 8, fontSize: 13, color: '#444' }}>
                                   <b>Produção Realizada (peças):</b> {dados.producaoPecas} {dados.padraoPorCaixa != null ? `(padrão ${dados.padraoPorCaixa}/caixa)` : `(padrões variados)`}
                                 </div>
+
+                                <div className="sub-title" style={{ marginTop: 8 }}><b>Apontamentos manuais:</b></div>
+                                {!dados.manualEntries || dados.manualEntries.length === 0 ? (
+                                  <div className="empty">—</div>
+                                ) : (
+                                  <ul className="caixas-list">
+                                    {[...dados.manualEntries].sort((a, b) => {
+                                      const ta = DateTime.fromISO(String(a.created_at || ''));
+                                      const tb = DateTime.fromISO(String(b.created_at || ''));
+                                      return ta.toMillis() - tb.toMillis();
+                                    }).map((m, i) => {
+                                      const os = m.order?.code || m.order_code || '-';
+                                      return (
+                                        <li key={i}>
+                                          {m.created_at ? fmtDateTime(m.created_at) : '-'} — {m.good_qty} peças — O.S: {os}
+                                        </li>
+                                      );
+                                    })}
+                                  </ul>
+                                )}
                               </div>
 
                               {dados.refugos && dados.refugos.length > 0 && (
@@ -1001,7 +1047,7 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false }) {
               <select
                 className="select"
                 value={manualForm.machine}
-                onChange={(e) => setManualForm((f) => ({ ...f, machine: e.target.value }))}
+                onChange={(e) => setManualForm((f) => ({ ...f, machine: e.target.value, osCode: '' }))}
               >
                 <option value="">Selecione...</option>
                 {MAQUINAS.filter((m) => /^(P[1-4]|I[1-6])$/.test(m)).map((m) => (
@@ -1031,8 +1077,8 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false }) {
                 value={manualForm.osCode}
                 onChange={(e) => setManualForm((f) => ({ ...f, osCode: e.target.value }))}
               >
-                <option value="">Selecione...</option>
-                {Array.from(new Set((ordersAll || []).map((o) => o?.code))).filter(Boolean).map((code) => (
+                <option value="">{manualForm.machine ? 'Selecione...' : 'Selecione a máquina primeiro...'}</option>
+                {osOptionsByMachine.map((code) => (
                   <option key={code} value={code}>{code}</option>
                 ))}
               </select>
@@ -1138,11 +1184,12 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false }) {
                       .from('orders')
                       .select('id, code, product, machine_id, created_at')
                       .eq('code', payload.osCode)
+                      .eq('machine_id', payload.machine)
                       .order('created_at', { ascending: false })
                       .limit(1);
                     const { data: ordData, error: ordErr } = await q;
                     if (ordErr || !ordData || !ordData[0]) {
-                      showToast('O.S não encontrada.', 'err');
+                      showToast('O.S não encontrada para a máquina selecionada.', 'err');
                       return;
                     }
                     ordSel = ordData[0];

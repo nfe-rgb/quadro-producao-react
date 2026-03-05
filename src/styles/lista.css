@@ -49,14 +49,36 @@
 }
 
 /* FILA: cartões em linha rolável */
+.fila-shell{
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.fila-nav{
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.fila-nav-btn{
+  min-width: 34px;
+  height: 30px;
+  padding: 0;
+  font-weight: 700;
+}
+.fila-nav-page{
+  min-width: 52px;
+  text-align: center;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted);
+}
 .fila{
   display: flex;
   gap: 10px;
   flex-wrap: nowrap;         /* nunca quebra pra baixo */
-  overflow-x: auto;
+  overflow: hidden;
   padding: 6px 2px 8px;
-  scroll-snap-type: x proximity;
-  -webkit-overflow-scrolling: touch;
 }
 .fila .card{ min-width: 260px; scroll-snap-align: start; }
 .drag-handle{
@@ -72,10 +94,5 @@
 .fila-item{ display:flex; align-items:flex-start; gap:8px; }
 .fila-content{ flex:1; min-width:0; }
 
-/* Scrollbar discreta para fila */
-.fila::-webkit-scrollbar{ height: 6px; }
-.fila::-webkit-scrollbar-thumb{
-  background: rgba(0,0,0,.15);
-  border-radius: 999px;
-}
+/* Scrollbar removida: navegação da fila agora é feita por paginação com setas */
 

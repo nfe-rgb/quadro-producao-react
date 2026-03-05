@@ -21,7 +21,9 @@ export default function Lista({
   refreshOrdens,      // opcional
   isAdmin = false,
 }) {
+  const PAGE_SIZE = 4
   const [itemTechByCode, setItemTechByCode] = useState({})
+  const [filaStartByMachine, setFilaStartByMachine] = useState({})
 
   // 🔶 Modal de confirmação "Enviar para fila / interromper"
   const [confirmInt, setConfirmInt] = useState(null)
@@ -99,6 +101,41 @@ export default function Lista({
     }
   }, [activeItemCodes])
 
+  useEffect(() => {
+    setFilaStartByMachine((prev) => {
+      let changed = false
+      const next = { ...prev }
+
+      MAQUINAS.forEach((machineCode) => {
+        const totalFila = Math.max(0, (ativosPorMaquina[machineCode] || []).length - 1)
+        const maxStart = Math.max(0, Math.floor(Math.max(totalFila - 1, 0) / PAGE_SIZE) * PAGE_SIZE)
+        const currentStart = Number(next[machineCode] || 0)
+        const clamped = Math.min(Math.max(0, currentStart), maxStart)
+
+        if (currentStart !== clamped) {
+          next[machineCode] = clamped
+          changed = true
+        }
+      })
+
+      return changed ? next : prev
+    })
+  }, [ativosPorMaquina])
+
+  const mudarPaginaFila = (machineCode, direction, totalFila) => {
+    setFilaStartByMachine((prev) => {
+      const currentStart = Number(prev[machineCode] || 0)
+      const maxStart = Math.max(0, Math.floor(Math.max(totalFila - 1, 0) / PAGE_SIZE) * PAGE_SIZE)
+      const nextStart = Math.min(
+        maxStart,
+        Math.max(0, currentStart + (direction * PAGE_SIZE)),
+      )
+
+      if (nextStart === currentStart) return prev
+      return { ...prev, [machineCode]: nextStart }
+    })
+  }
+
   const abrirModalInterromper = (ordem) => {
     const nowBr = DateTime.now().setZone("America/Sao_Paulo");
     setConfirmInt({
@@ -142,11 +179,7 @@ export default function Lista({
       const [moved] = nova.splice(curIndex, 1)
       nova.splice(overIndex, 0, moved)
 
-      const ids = nova.map(i => String(i.id));
-await supabase.rpc('reorder_machine_queue', {
-  p_machine: machineCode,
-  p_ids: ids,
-});
+      const ids = nova.map(i => String(i.id))
 
       const { error } = await supabase.rpc('reorder_machine_queue', {
         p_machine: machineCode,
@@ -172,6 +205,13 @@ await supabase.rpc('reorder_machine_queue', {
           const lista = ativosPorMaquina[m] || []
           const ativa = lista[0] || null
           const fila  = lista.slice(1)
+          const totalPaginas = Math.max(1, Math.ceil(fila.length / PAGE_SIZE))
+          const maxStart = Math.max(0, Math.floor(Math.max(fila.length - 1, 0) / PAGE_SIZE) * PAGE_SIZE)
+          const filaStart = Math.min(Number(filaStartByMachine[m] || 0), maxStart)
+          const filaVisivel = fila.slice(filaStart, filaStart + PAGE_SIZE)
+          const paginaAtual = Math.floor(filaStart / PAGE_SIZE) + 1
+          const canGoPrev = filaStart > 0
+          const canGoNext = (filaStart + PAGE_SIZE) < fila.length
           const opCode = ativa?.code || ativa?.o?.code || ativa?.op_code || ""
           // lidas / saldo: usar mesma lógica do Painel
           const lidas = Number(ativa?.scanned_count || 0)
@@ -286,40 +326,92 @@ await supabase.rpc('reorder_machine_queue', {
                 {fila.length === 0 ? (
                   <div className="fila"><div className="muted">Sem itens na fila</div></div>
                 ) : isAdmin ? (
-                  <DndContext
-                    sensors={sensors}
-                    onDragEnd={(e) => moverNaFila(m, e)}
-                    collisionDetection={closestCenter}
-                  >
-                    <SortableContext items={fila.map(f => f.id)} strategy={horizontalListSortingStrategy}>
-                      <div className="fila">
-                        {fila.map(f => (
-                          <FilaSortableItem
-                            key={f.id}
-                            ordem={f}
-                            onEdit={() => setEditando(f)}
-                            etiquetaVariant="fila"
-                            highlightInterrompida={f.status === 'AGUARDANDO' && !!f.interrupted_at}
-                            canReorder={true}
-                            canEdit={isAdmin}
-                          />
-                        ))}
+                  <div className="fila-shell">
+                    {fila.length > PAGE_SIZE && (
+                      <div className="fila-nav">
+                        <button
+                          className="btn ghost fila-nav-btn"
+                          onClick={() => mudarPaginaFila(m, -1, fila.length)}
+                          disabled={!canGoPrev}
+                          title="Mostrar 4 ordens anteriores"
+                          type="button"
+                        >
+                          ←
+                        </button>
+                        <div className="fila-nav-page">{paginaAtual}/{totalPaginas}</div>
+                        <button
+                          className="btn ghost fila-nav-btn"
+                          onClick={() => mudarPaginaFila(m, 1, fila.length)}
+                          disabled={!canGoNext}
+                          title="Mostrar 4 ordens seguintes"
+                          type="button"
+                        >
+                          →
+                        </button>
                       </div>
-                    </SortableContext>
-                  </DndContext>
+                    )}
+
+                    <DndContext
+                      sensors={sensors}
+                      onDragEnd={(e) => moverNaFila(m, e)}
+                      collisionDetection={closestCenter}
+                    >
+                      <SortableContext items={filaVisivel.map(f => f.id)} strategy={horizontalListSortingStrategy}>
+                        <div className="fila">
+                          {filaVisivel.map(f => (
+                            <FilaSortableItem
+                              key={f.id}
+                              ordem={f}
+                              onEdit={() => setEditando(f)}
+                              etiquetaVariant="fila"
+                              highlightInterrompida={f.status === 'AGUARDANDO' && !!f.interrupted_at}
+                              canReorder={true}
+                              canEdit={isAdmin}
+                            />
+                          ))}
+                        </div>
+                      </SortableContext>
+                    </DndContext>
+                  </div>
                 ) : (
-                  <div className="fila">
-                    {fila.map(f => (
-                      <FilaSortableItem
-                        key={f.id}
-                        ordem={f}
-                        onEdit={() => setEditando(f)}
-                        etiquetaVariant="fila"
-                        highlightInterrompida={f.status === 'AGUARDANDO' && !!f.interrupted_at}
-                        canReorder={false}
-                        canEdit={false}
-                      />
-                    ))}
+                  <div className="fila-shell">
+                    {fila.length > PAGE_SIZE && (
+                      <div className="fila-nav">
+                        <button
+                          className="btn ghost fila-nav-btn"
+                          onClick={() => mudarPaginaFila(m, -1, fila.length)}
+                          disabled={!canGoPrev}
+                          title="Mostrar 4 ordens anteriores"
+                          type="button"
+                        >
+                          ←
+                        </button>
+                        <div className="fila-nav-page">{paginaAtual}/{totalPaginas}</div>
+                        <button
+                          className="btn ghost fila-nav-btn"
+                          onClick={() => mudarPaginaFila(m, 1, fila.length)}
+                          disabled={!canGoNext}
+                          title="Mostrar 4 ordens seguintes"
+                          type="button"
+                        >
+                          →
+                        </button>
+                      </div>
+                    )}
+
+                    <div className="fila">
+                      {filaVisivel.map(f => (
+                        <FilaSortableItem
+                          key={f.id}
+                          ordem={f}
+                          onEdit={() => setEditando(f)}
+                          etiquetaVariant="fila"
+                          highlightInterrompida={f.status === 'AGUARDANDO' && !!f.interrupted_at}
+                          canReorder={false}
+                          canEdit={false}
+                        />
+                      ))}
+                    </div>
                   </div>
                 )}
               </div>
