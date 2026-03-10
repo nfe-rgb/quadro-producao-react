@@ -6,7 +6,7 @@
   display: grid;
   grid-template-columns: 110px minmax(340px,1fr) minmax(340px,1fr);
   gap: 12px;
-  align-items: start;
+  align-items: stretch;
   min-width: 900px; /* ativa scroll horizontal em telas estreitas */
 }
 .tablehead{
@@ -29,8 +29,13 @@
 /* Áreas nomeadas (mantém semântica JSX) */
 .tableline{ grid-template-areas: "machine painel fila"; }
 .cell-machine{ grid-area: machine; }
-.cell-painel { grid-area: painel; }
-.cell-fila   { grid-area: fila;   overflow: hidden; }
+.cell-painel { grid-area: painel; display: flex; }
+.cell-fila   { grid-area: fila; display: flex; overflow: hidden; }
+
+.cell-painel > *,
+.cell-fila > * {
+  width: 100%;
+}
 
 /* Badge da máquina */
 .badge{
@@ -53,12 +58,15 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
+  flex: 1;
+  min-height: 100%;
 }
 .fila-nav{
   display: flex;
   align-items: center;
   justify-content: flex-end;
   gap: 6px;
+  flex: 0 0 auto;
 }
 .fila-nav-btn{
   min-width: 34px;
@@ -79,8 +87,19 @@
   flex-wrap: nowrap;         /* nunca quebra pra baixo */
   overflow: hidden;
   padding: 6px 2px 8px;
+  align-items: stretch;
+  flex: 1;
 }
-.fila .card{ min-width: 260px; scroll-snap-align: start; }
+.fila.fila-dragging-expanded{
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-gutter: stable;
+}
+.fila .card{
+  min-width: 260px;
+  scroll-snap-align: start;
+  align-self: stretch;
+}
 .drag-handle{
   touch-action: pan-y;        /* arrastar não bloqueia scroll vertical */
   cursor: grab;
@@ -90,8 +109,9 @@
   line-height:1;
   padding:4px 6px;
   margin-right:8px;
+  align-self: flex-start;
 }
-.fila-item{ display:flex; align-items:flex-start; gap:8px; }
+.fila-item{ display:flex; align-items:stretch; gap:8px; }
 .fila-content{ flex:1; min-width:0; }
 
 /* Scrollbar removida: navegação da fila agora é feita por paginação com setas */

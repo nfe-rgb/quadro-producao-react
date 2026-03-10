@@ -1,6 +1,6 @@
 // src/abas/Lista.jsx
 import { useEffect, useMemo, useState } from 'react'
-import { DndContext, closestCenter } from '@dnd-kit/core'
+import { DndContext, DragOverlay, closestCenter } from '@dnd-kit/core'
 import { SortableContext, horizontalListSortingStrategy } from '@dnd-kit/sortable'
 import FilaSortableItem from '../components/FilaSortableItem'
 import Etiqueta from '../components/Etiqueta'
@@ -24,6 +24,8 @@ export default function Lista({
   const PAGE_SIZE = 4
   const [itemTechByCode, setItemTechByCode] = useState({})
   const [filaStartByMachine, setFilaStartByMachine] = useState({})
+  const [draggingMachine, setDraggingMachine] = useState(null)
+  const [draggingOrder, setDraggingOrder] = useState(null)
 
   // 🔶 Modal de confirmação "Enviar para fila / interromper"
   const [confirmInt, setConfirmInt] = useState(null)
@@ -205,10 +207,12 @@ export default function Lista({
           const lista = ativosPorMaquina[m] || []
           const ativa = lista[0] || null
           const fila  = lista.slice(1)
+          const isDraggingThisMachine = draggingMachine === m
           const totalPaginas = Math.max(1, Math.ceil(fila.length / PAGE_SIZE))
           const maxStart = Math.max(0, Math.floor(Math.max(fila.length - 1, 0) / PAGE_SIZE) * PAGE_SIZE)
           const filaStart = Math.min(Number(filaStartByMachine[m] || 0), maxStart)
           const filaVisivel = fila.slice(filaStart, filaStart + PAGE_SIZE)
+          const filaRender = isDraggingThisMachine ? fila : filaVisivel
           const paginaAtual = Math.floor(filaStart / PAGE_SIZE) + 1
           const canGoPrev = filaStart > 0
           const canGoNext = (filaStart + PAGE_SIZE) < fila.length
@@ -327,7 +331,7 @@ export default function Lista({
                   <div className="fila"><div className="muted">Sem itens na fila</div></div>
                 ) : isAdmin ? (
                   <div className="fila-shell">
-                    {fila.length > PAGE_SIZE && (
+                    {fila.length > PAGE_SIZE && !isDraggingThisMachine && (
                       <div className="fila-nav">
                         <button
                           className="btn ghost fila-nav-btn"
@@ -353,12 +357,29 @@ export default function Lista({
 
                     <DndContext
                       sensors={sensors}
-                      onDragEnd={(e) => moverNaFila(m, e)}
+                      onDragStart={(e) => {
+                        setDraggingMachine(m)
+                        const activeId = e?.active?.id
+                        const dragged = fila.find((item) => item.id === activeId) || null
+                        setDraggingOrder(dragged)
+                      }}
+                      onDragCancel={() => {
+                        setDraggingMachine(null)
+                        setDraggingOrder(null)
+                      }}
+                      onDragEnd={async (e) => {
+                        try {
+                          await moverNaFila(m, e)
+                        } finally {
+                          setDraggingMachine(null)
+                          setDraggingOrder(null)
+                        }
+                      }}
                       collisionDetection={closestCenter}
                     >
-                      <SortableContext items={filaVisivel.map(f => f.id)} strategy={horizontalListSortingStrategy}>
-                        <div className="fila">
-                          {filaVisivel.map(f => (
+                      <SortableContext items={filaRender.map(f => f.id)} strategy={horizontalListSortingStrategy}>
+                        <div className={`fila ${isDraggingThisMachine ? 'fila-dragging-expanded' : ''}`}>
+                          {filaRender.map(f => (
                             <FilaSortableItem
                               key={f.id}
                               ordem={f}
@@ -371,6 +392,16 @@ export default function Lista({
                           ))}
                         </div>
                       </SortableContext>
+                      <DragOverlay>
+                        {draggingOrder ? (
+                          <div className="card fila-item" style={{ minWidth: 260, opacity: 0.95 }}>
+                            <div className="drag-handle" style={{ visibility: 'hidden' }}>⠿</div>
+                            <div className="fila-content">
+                              <Etiqueta o={draggingOrder} variant="fila" />
+                            </div>
+                          </div>
+                        ) : null}
+                      </DragOverlay>
                     </DndContext>
                   </div>
                 ) : (
