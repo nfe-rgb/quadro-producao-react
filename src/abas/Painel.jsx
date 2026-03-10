@@ -8,6 +8,21 @@ import "../styles/Barrademeta.css";
 import { DateTime } from "luxon";
 import { supabase } from "../lib/supabaseClient";
 
+function parsePiecesPerBox(val) {
+  if (val == null) return 0;
+  const s = String(val).trim();
+  if (!s) return 0;
+  const digitsOnly = s.replace(/[^0-9]/g, "");
+  if (!digitsOnly) return 0;
+  return parseInt(digitsOnly, 10);
+}
+
+function extractItemCodeFromOrderProduct(product) {
+  if (!product) return null;
+  const t = String(product);
+  return t.split("-")[0]?.trim() || null;
+}
+
 // Helper para formatar HH:MM:SS
 function formatHHMMSS(totalSeconds) {
   const s = Math.max(0, Math.floor(totalSeconds || 0));
@@ -31,15 +46,134 @@ export default function Painel({
   machinePriorities = {},
 }) {
   const META_MENSAL = 770000;
-  const PRODUCAO_MES_ATUAL = 245963.87;
+  const [producaoMesAtual, setProducaoMesAtual] = useState(0);
 
   const metaMensalPercent =
-    META_MENSAL > 0 ? (PRODUCAO_MES_ATUAL / META_MENSAL) * 100 : 0;
+    META_MENSAL > 0 ? (producaoMesAtual / META_MENSAL) * 100 : 0;
   const pct = Math.max(0, Math.min(100, Number(metaPercent ?? metaMensalPercent)));
   const pctText = `${pct.toLocaleString("pt-BR", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })}%`;
+
+  useEffect(() => {
+    let active = true;
+
+    async function fetchValorizacaoMes() {
+      try {
+        const nowSP = DateTime.now().setZone("America/Sao_Paulo");
+        const startIso = nowSP.startOf("month").toUTC().toISO();
+        const endIso = nowSP.toUTC().toISO();
+
+        const [scansRes, apontRes] = await Promise.all([
+          supabase
+            .from("production_scans")
+            .select("order_id,machine_id")
+            .gte("created_at", startIso)
+            .lte("created_at", endIso),
+          supabase
+            .from("injection_production_entries")
+            .select("order_id,machine_id,good_qty,product")
+            .gte("created_at", startIso)
+            .lte("created_at", endIso),
+        ]);
+
+        if (scansRes.error) throw scansRes.error;
+        if (apontRes.error) throw apontRes.error;
+
+        const setorValido = (machineId) => {
+          const m = String(machineId || "").toUpperCase();
+          return m.startsWith("P") || m.startsWith("I");
+        };
+
+        const scans = (scansRes.data || []).filter((s) => setorValido(s.machine_id));
+        const aponts = (apontRes.data || []).filter((a) => setorValido(a.machine_id));
+
+        const orderIds = Array.from(
+          new Set(
+            [...scans, ...aponts]
+              .map((r) => (r?.order_id != null ? String(r.order_id) : null))
+              .filter(Boolean)
+          )
+        );
+
+        let ordersMap = {};
+        if (orderIds.length > 0) {
+          const { data: ordersData, error: ordersErr } = await supabase
+            .from("orders")
+            .select("id,product,standard")
+            .in("id", orderIds);
+          if (ordersErr) throw ordersErr;
+          ordersMap = (ordersData || []).reduce((acc, o) => {
+            if (o?.id != null) acc[String(o.id)] = o;
+            return acc;
+          }, {});
+        }
+
+        const productCodesSet = new Set();
+        scans.forEach((s) => {
+          const order = s?.order_id != null ? ordersMap[String(s.order_id)] : null;
+          const code = extractItemCodeFromOrderProduct(order?.product);
+          if (code) productCodesSet.add(code);
+        });
+        aponts.forEach((a) => {
+          const order = a?.order_id != null ? ordersMap[String(a.order_id)] : null;
+          const product = a?.product || order?.product;
+          const code = extractItemCodeFromOrderProduct(product);
+          if (code) productCodesSet.add(code);
+        });
+
+        let itemValueMap = {};
+        const productCodes = Array.from(productCodesSet);
+        if (productCodes.length > 0) {
+          const { data: itemsData, error: itemsErr } = await supabase
+            .from("items")
+            .select("code,unit_value")
+            .in("code", productCodes);
+          if (itemsErr) throw itemsErr;
+          itemValueMap = (itemsData || []).reduce((acc, it) => {
+            const code = String(it?.code || "").trim();
+            if (code) acc[code] = Number(it?.unit_value) || 0;
+            return acc;
+          }, {});
+        }
+
+        let valorTotal = 0;
+
+        scans.forEach((s) => {
+          const order = s?.order_id != null ? ordersMap[String(s.order_id)] : null;
+          const std = parsePiecesPerBox(order?.standard);
+          if (std <= 0) return;
+          const code = extractItemCodeFromOrderProduct(order?.product);
+          const unitValue = code ? Number(itemValueMap[code] || 0) : 0;
+          if (unitValue > 0) valorTotal += std * unitValue;
+        });
+
+        aponts.forEach((a) => {
+          const qty = Number(a?.good_qty) || 0;
+          if (qty <= 0) return;
+          const order = a?.order_id != null ? ordersMap[String(a.order_id)] : null;
+          const product = a?.product || order?.product;
+          const code = extractItemCodeFromOrderProduct(product);
+          const unitValue = code ? Number(itemValueMap[code] || 0) : 0;
+          if (unitValue > 0) valorTotal += qty * unitValue;
+        });
+
+        if (active) setProducaoMesAtual(valorTotal);
+      } catch (err) {
+        console.warn("Painel: erro ao calcular valorizacao mensal:", err);
+        if (active) setProducaoMesAtual(0);
+      }
+    }
+
+    fetchValorizacaoMes();
+    const intervalId = setInterval(fetchValorizacaoMes, 60000);
+
+    return () => {
+      active = false;
+      clearInterval(intervalId);
+    };
+  }, []);
 
   // localAtivos é o estado usado para render e será atualizado via realtime
   const [localAtivos, setLocalAtivos] = useState(ativosPorMaquina || {});

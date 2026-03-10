@@ -17,6 +17,11 @@ const formatMs = (ms) => {
   return `${h}h ${String(m).padStart(2, '0')}min`
 }
 
+const extractItemCodeFromOrderProduct = (product) => {
+  if (!product) return ''
+  return String(product).split('-')[0]?.trim() || ''
+}
+
 export default function Rastreio() {
   const [osCode, setOsCode] = useState('')
   const [order, setOrder] = useState(null)
@@ -26,41 +31,33 @@ export default function Rastreio() {
   const [manualEntries, setManualEntries] = useState([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [isFinderOpen, setIsFinderOpen] = useState(false)
+  const [finderType, setFinderType] = useState('cliente')
+  const [finderQuery, setFinderQuery] = useState('')
+  const [finderResults, setFinderResults] = useState([])
+  const [finderLoading, setFinderLoading] = useState(false)
+  const [finderError, setFinderError] = useState('')
 
-  async function handleSearch(e) {
-    e?.preventDefault?.()
-    const code = osCode.trim()
-    if (!code) {
-      setError('Informe a O.S. para rastrear.')
-      return
-    }
-
-    setLoading(true)
-    setError('')
+  function resetTraceData() {
     setOrder(null)
     setScans([])
     setScraps([])
     setStops([])
     setManualEntries([])
+  }
+
+  async function loadTraceByOrder(ord) {
+    if (!ord?.id) {
+      setError('O.S inválida para rastreio.')
+      return
+    }
+
+    setLoading(true)
+    setError('')
+    resetTraceData()
+    setOrder(ord)
 
     try {
-      const { data: ord, error: ordErr } = await supabase
-        .from('orders')
-        .select('*')
-        .eq('code', code)
-        .maybeSingle()
-
-      if (ordErr) {
-        throw ordErr
-      }
-
-      if (!ord) {
-        setError('Nenhuma O.S. encontrada com esse código.')
-        return
-      }
-
-      setOrder(ord)
-
       const [scanRes, scrapRes, stopRes, manualRes] = await Promise.all([
         supabase
           .from('production_scans')
@@ -91,8 +88,150 @@ export default function Rastreio() {
     } catch (err) {
       console.warn('Falha ao rastrear O.S.', err)
       setError('Não foi possível carregar os dados agora. Tente novamente em instantes.')
+      resetTraceData()
     } finally {
       setLoading(false)
+    }
+  }
+
+  async function loadTraceByCode(code) {
+    const codeTrim = String(code || '').trim()
+    if (!codeTrim) {
+      setError('Informe a O.S. para rastrear.')
+      return
+    }
+
+    setLoading(true)
+    setError('')
+    resetTraceData()
+
+    try {
+      const { data: ord, error: ordErr } = await supabase
+        .from('orders')
+        .select('*')
+        .eq('code', codeTrim)
+        .maybeSingle()
+
+      if (ordErr) throw ordErr
+
+      if (!ord) {
+        setError('Nenhuma O.S. encontrada com esse código.')
+        return
+      }
+
+      await loadTraceByOrder(ord)
+    } catch (err) {
+      console.warn('Falha ao rastrear O.S.', err)
+      setError('Não foi possível carregar os dados agora. Tente novamente em instantes.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function handleSearch(e) {
+    e?.preventDefault?.()
+    await loadTraceByCode(osCode)
+  }
+
+  async function handleFinderSearch(e) {
+    e?.preventDefault?.()
+    const query = finderQuery.trim()
+    if (!query) {
+      setFinderError('Digite um termo para pesquisar.')
+      setFinderResults([])
+      return
+    }
+
+    setFinderLoading(true)
+    setFinderError('')
+    setFinderResults([])
+
+    try {
+      if (finderType === 'cliente') {
+        const { data, error: searchErr } = await supabase
+          .from('orders')
+          .select('*')
+          .ilike('customer', `%${query}%`)
+          .order('created_at', { ascending: false })
+          .limit(200)
+
+        if (searchErr) throw searchErr
+        setFinderResults(data || [])
+        return
+      }
+
+      if (finderType === 'codigo_item') {
+        const { data, error: searchErr } = await supabase
+          .from('orders')
+          .select('*')
+          .ilike('product', `%${query}%`)
+          .order('created_at', { ascending: false })
+          .limit(200)
+
+        if (searchErr) throw searchErr
+        setFinderResults(data || [])
+        return
+      }
+
+      const { data: items, error: itemsErr } = await supabase
+        .from('items')
+        .select('code, description')
+        .ilike('description', `%${query}%`)
+        .limit(500)
+
+      if (itemsErr) throw itemsErr
+
+      const codes = new Set((items || []).map((it) => String(it.code || '').trim()).filter(Boolean))
+      if (codes.size === 0) {
+        setFinderResults([])
+        return
+      }
+
+      const { data: ordersData, error: ordersErr } = await supabase
+        .from('orders')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(1000)
+
+      if (ordersErr) throw ordersErr
+
+      const filtered = (ordersData || []).filter((o) => {
+        const code = extractItemCodeFromOrderProduct(o?.product)
+        return codes.has(code)
+      })
+      setFinderResults(filtered)
+    } catch (err) {
+      console.warn('Falha na busca avançada de O.S.', err)
+      setFinderError('Não foi possível pesquisar agora. Tente novamente em instantes.')
+      setFinderResults([])
+    } finally {
+      setFinderLoading(false)
+    }
+  }
+
+  async function handleSelectOrderFromFinder(ord) {
+    setIsFinderOpen(false)
+    setFinderError('')
+    setOsCode(String(ord?.code || ''))
+    await loadTraceByOrder(ord)
+  }
+
+  function handleOpenFinder() {
+    setIsFinderOpen(true)
+    setFinderError('')
+    setFinderResults([])
+  }
+
+  function handleCloseFinder() {
+    setIsFinderOpen(false)
+    setFinderError('')
+    setFinderResults([])
+  }
+
+  function handleInputKeyDown(e) {
+    if (e.key === 'F2') {
+      e.preventDefault()
+      handleOpenFinder()
     }
   }
 
@@ -162,12 +301,62 @@ export default function Rastreio() {
           type="text"
           value={osCode}
           onChange={(e) => setOsCode(e.target.value)}
+          onKeyDown={handleInputKeyDown}
           placeholder="Digite o código da O.S (ex: 753)"
           aria-label="Código da O.S"
         />
         <button type="submit" disabled={loading}>{loading ? 'Buscando…' : 'Pesquisar'}</button>
+        <button type="button" onClick={handleOpenFinder} disabled={loading}>Buscar (F2)</button>
         {order && <div className="rastreio-status">O.S selecionada: <strong>{order.code}</strong></div>}
       </form>
+
+      {isFinderOpen && (
+        <div className="rastreio-modal-overlay" onClick={handleCloseFinder}>
+          <div className="rastreio-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="rastreio-modal-head">
+              <h3>Busca avançada de O.S</h3>
+              <button type="button" className="rastreio-modal-close" onClick={handleCloseFinder}>Fechar</button>
+            </div>
+
+            <form className="rastreio-modal-form" onSubmit={handleFinderSearch}>
+              <select value={finderType} onChange={(e) => setFinderType(e.target.value)}>
+                <option value="cliente">Cliente</option>
+                <option value="codigo_item">Código do item</option>
+                <option value="descricao_item">Descrição do item</option>
+              </select>
+              <input
+                type="text"
+                value={finderQuery}
+                onChange={(e) => setFinderQuery(e.target.value)}
+                placeholder="Digite para pesquisar e pressione Enter"
+                autoFocus
+              />
+              <button type="submit" disabled={finderLoading}>{finderLoading ? 'Buscando…' : 'Buscar'}</button>
+            </form>
+
+            {finderError && <div className="error-box">{finderError}</div>}
+
+            <div className="rastreio-modal-results">
+              {finderResults.length === 0 ? (
+                <div className="empty-state">Nenhum resultado ainda. Pesquise por cliente, código ou descrição.</div>
+              ) : (
+                finderResults.map((ord) => (
+                  <button
+                    key={String(ord.id)}
+                    type="button"
+                    className="rastreio-order-option"
+                    onClick={() => handleSelectOrderFromFinder(ord)}
+                  >
+                    <span className="order-option-code">O.S {ord.code || 'N/A'}</span>
+                    <span>{ord.customer || 'Sem cliente'}</span>
+                    <span>{ord.product || 'Sem produto'}</span>
+                  </button>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {error && <div className="error-box">{error}</div>}
 

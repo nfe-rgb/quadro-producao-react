@@ -209,6 +209,117 @@
 .loading-dots span:nth-child(2) { animation-delay: 0.15s; }
 .loading-dots span:nth-child(3) { animation-delay: 0.3s; }
 
+.rastreio-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(2, 6, 23, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 16px;
+}
+
+.rastreio-modal {
+  width: min(920px, 100%);
+  max-height: 85vh;
+  overflow: auto;
+  background: #fff;
+  border-radius: 14px;
+  border: 1px solid #e5e7eb;
+  box-shadow: 0 18px 48px rgba(2, 6, 23, 0.22);
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.rastreio-modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.rastreio-modal-head h3 {
+  margin: 0;
+  font-size: 18px;
+  color: #0f172a;
+}
+
+.rastreio-modal-close {
+  border: 1px solid #cbd5e1;
+  background: #f8fafc;
+  color: #0f172a;
+  border-radius: 8px;
+  padding: 8px 10px;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.rastreio-modal-form {
+  display: grid;
+  grid-template-columns: 180px 1fr 120px;
+  gap: 8px;
+}
+
+.rastreio-modal-form select,
+.rastreio-modal-form input {
+  border: 1px solid #d0d5dd;
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 14px;
+}
+
+.rastreio-modal-form button {
+  border: none;
+  background: #0d6efd;
+  color: #fff;
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.rastreio-modal-results {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.rastreio-order-option {
+  display: grid;
+  grid-template-columns: 130px 1fr 1fr;
+  gap: 10px;
+  text-align: left;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  background: #fff;
+  color: #0f172a;
+  padding: 10px 12px;
+  cursor: pointer;
+}
+
+.rastreio-order-option:hover {
+  border-color: #bfdbfe;
+  background: #f8fbff;
+}
+
+.order-option-code {
+  font-weight: 700;
+}
+
+@media (max-width: 760px) {
+  .rastreio-modal-form {
+    grid-template-columns: 1fr;
+  }
+
+  .rastreio-order-option {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+}
+
 @keyframes pulse {
   0%, 100% { opacity: 0.2; transform: scale(0.9); }
   50% { opacity: 1; transform: scale(1.05); }
