@@ -25,13 +25,21 @@ export default function Painel({
   setStartModal,
   setFinalizando,
   lastFinalizadoPorMaquina,
-  metaPercent = 46.22,
+  metaPercent,
   onScanned, // opcional: callback do pai para re-fetch geral
   authUser,
   machinePriorities = {},
 }) {
-  const pct = Math.max(0, Math.min(100, Math.round(metaPercent)));
-  const pctText = `${pct}%`;
+  const META_MENSAL = 770000;
+  const PRODUCAO_MES_ATUAL = 245963.87;
+
+  const metaMensalPercent =
+    META_MENSAL > 0 ? (PRODUCAO_MES_ATUAL / META_MENSAL) * 100 : 0;
+  const pct = Math.max(0, Math.min(100, Number(metaPercent ?? metaMensalPercent)));
+  const pctText = `${pct.toLocaleString("pt-BR", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}%`;
 
   // localAtivos é o estado usado para render e será atualizado via realtime
   const [localAtivos, setLocalAtivos] = useState(ativosPorMaquina || {});
@@ -289,7 +297,7 @@ export default function Painel({
         <div className="meta-banner-inner">
           <span className="meta-msg">🚀 Alcançamos&nbsp;</span>
           <span className="meta-percent">{pctText}</span>
-          <span className="meta-msg">&nbsp;da meta! 🚀</span>
+          <span className="meta-msg">&nbsp;da meta mensal! 🚀</span>
         </div>
       </div>
 
