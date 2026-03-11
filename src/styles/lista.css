@@ -61,38 +61,15 @@
   flex: 1;
   min-height: 100%;
 }
-.fila-nav{
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 6px;
-  flex: 0 0 auto;
-}
-.fila-nav-btn{
-  min-width: 34px;
-  height: 30px;
-  padding: 0;
-  font-weight: 700;
-}
-.fila-nav-page{
-  min-width: 52px;
-  text-align: center;
-  font-size: 12px;
-  font-weight: 700;
-  color: var(--muted);
-}
 .fila{
   display: flex;
   gap: 10px;
   flex-wrap: nowrap;         /* nunca quebra pra baixo */
-  overflow: hidden;
+  overflow-x: auto;
+  overflow-y: hidden;
   padding: 6px 2px 8px;
   align-items: stretch;
   flex: 1;
-}
-.fila.fila-dragging-expanded{
-  overflow-x: auto;
-  overflow-y: hidden;
   scrollbar-gutter: stable;
 }
 .fila .card{
@@ -113,6 +90,4 @@
 }
 .fila-item{ display:flex; align-items:stretch; gap:8px; }
 .fila-content{ flex:1; min-width:0; }
-
-/* Scrollbar removida: navegação da fila agora é feita por paginação com setas */
 

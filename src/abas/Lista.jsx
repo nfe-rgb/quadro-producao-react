@@ -21,10 +21,7 @@ export default function Lista({
   refreshOrdens,      // opcional
   isAdmin = false,
 }) {
-  const PAGE_SIZE = 4
   const [itemTechByCode, setItemTechByCode] = useState({})
-  const [filaStartByMachine, setFilaStartByMachine] = useState({})
-  const [draggingMachine, setDraggingMachine] = useState(null)
   const [draggingOrder, setDraggingOrder] = useState(null)
 
   // 🔶 Modal de confirmação "Enviar para fila / interromper"
@@ -103,41 +100,6 @@ export default function Lista({
     }
   }, [activeItemCodes])
 
-  useEffect(() => {
-    setFilaStartByMachine((prev) => {
-      let changed = false
-      const next = { ...prev }
-
-      MAQUINAS.forEach((machineCode) => {
-        const totalFila = Math.max(0, (ativosPorMaquina[machineCode] || []).length - 1)
-        const maxStart = Math.max(0, Math.floor(Math.max(totalFila - 1, 0) / PAGE_SIZE) * PAGE_SIZE)
-        const currentStart = Number(next[machineCode] || 0)
-        const clamped = Math.min(Math.max(0, currentStart), maxStart)
-
-        if (currentStart !== clamped) {
-          next[machineCode] = clamped
-          changed = true
-        }
-      })
-
-      return changed ? next : prev
-    })
-  }, [ativosPorMaquina])
-
-  const mudarPaginaFila = (machineCode, direction, totalFila) => {
-    setFilaStartByMachine((prev) => {
-      const currentStart = Number(prev[machineCode] || 0)
-      const maxStart = Math.max(0, Math.floor(Math.max(totalFila - 1, 0) / PAGE_SIZE) * PAGE_SIZE)
-      const nextStart = Math.min(
-        maxStart,
-        Math.max(0, currentStart + (direction * PAGE_SIZE)),
-      )
-
-      if (nextStart === currentStart) return prev
-      return { ...prev, [machineCode]: nextStart }
-    })
-  }
-
   const abrirModalInterromper = (ordem) => {
     const nowBr = DateTime.now().setZone("America/Sao_Paulo");
     setConfirmInt({
@@ -207,15 +169,6 @@ export default function Lista({
           const lista = ativosPorMaquina[m] || []
           const ativa = lista[0] || null
           const fila  = lista.slice(1)
-          const isDraggingThisMachine = draggingMachine === m
-          const totalPaginas = Math.max(1, Math.ceil(fila.length / PAGE_SIZE))
-          const maxStart = Math.max(0, Math.floor(Math.max(fila.length - 1, 0) / PAGE_SIZE) * PAGE_SIZE)
-          const filaStart = Math.min(Number(filaStartByMachine[m] || 0), maxStart)
-          const filaVisivel = fila.slice(filaStart, filaStart + PAGE_SIZE)
-          const filaRender = isDraggingThisMachine ? fila : filaVisivel
-          const paginaAtual = Math.floor(filaStart / PAGE_SIZE) + 1
-          const canGoPrev = filaStart > 0
-          const canGoNext = (filaStart + PAGE_SIZE) < fila.length
           const opCode = ativa?.code || ativa?.o?.code || ativa?.op_code || ""
           // lidas / saldo: usar mesma lógica do Painel
           const lidas = Number(ativa?.scanned_count || 0)
@@ -331,55 +284,28 @@ export default function Lista({
                   <div className="fila"><div className="muted">Sem itens na fila</div></div>
                 ) : isAdmin ? (
                   <div className="fila-shell">
-                    {fila.length > PAGE_SIZE && !isDraggingThisMachine && (
-                      <div className="fila-nav">
-                        <button
-                          className="btn ghost fila-nav-btn"
-                          onClick={() => mudarPaginaFila(m, -1, fila.length)}
-                          disabled={!canGoPrev}
-                          title="Mostrar 4 ordens anteriores"
-                          type="button"
-                        >
-                          ←
-                        </button>
-                        <div className="fila-nav-page">{paginaAtual}/{totalPaginas}</div>
-                        <button
-                          className="btn ghost fila-nav-btn"
-                          onClick={() => mudarPaginaFila(m, 1, fila.length)}
-                          disabled={!canGoNext}
-                          title="Mostrar 4 ordens seguintes"
-                          type="button"
-                        >
-                          →
-                        </button>
-                      </div>
-                    )}
-
                     <DndContext
                       sensors={sensors}
                       onDragStart={(e) => {
-                        setDraggingMachine(m)
                         const activeId = e?.active?.id
                         const dragged = fila.find((item) => item.id === activeId) || null
                         setDraggingOrder(dragged)
                       }}
                       onDragCancel={() => {
-                        setDraggingMachine(null)
                         setDraggingOrder(null)
                       }}
                       onDragEnd={async (e) => {
                         try {
                           await moverNaFila(m, e)
                         } finally {
-                          setDraggingMachine(null)
                           setDraggingOrder(null)
                         }
                       }}
                       collisionDetection={closestCenter}
                     >
-                      <SortableContext items={filaRender.map(f => f.id)} strategy={horizontalListSortingStrategy}>
-                        <div className={`fila ${isDraggingThisMachine ? 'fila-dragging-expanded' : ''}`}>
-                          {filaRender.map(f => (
+                      <SortableContext items={fila.map(f => f.id)} strategy={horizontalListSortingStrategy}>
+                        <div className="fila">
+                          {fila.map(f => (
                             <FilaSortableItem
                               key={f.id}
                               ordem={f}
@@ -406,32 +332,8 @@ export default function Lista({
                   </div>
                 ) : (
                   <div className="fila-shell">
-                    {fila.length > PAGE_SIZE && (
-                      <div className="fila-nav">
-                        <button
-                          className="btn ghost fila-nav-btn"
-                          onClick={() => mudarPaginaFila(m, -1, fila.length)}
-                          disabled={!canGoPrev}
-                          title="Mostrar 4 ordens anteriores"
-                          type="button"
-                        >
-                          ←
-                        </button>
-                        <div className="fila-nav-page">{paginaAtual}/{totalPaginas}</div>
-                        <button
-                          className="btn ghost fila-nav-btn"
-                          onClick={() => mudarPaginaFila(m, 1, fila.length)}
-                          disabled={!canGoNext}
-                          title="Mostrar 4 ordens seguintes"
-                          type="button"
-                        >
-                          →
-                        </button>
-                      </div>
-                    )}
-
                     <div className="fila">
-                      {filaVisivel.map(f => (
+                      {fila.map(f => (
                         <FilaSortableItem
                           key={f.id}
                           ordem={f}
