@@ -13,12 +13,16 @@ import Registro from './abas/Registro'
 import Estoque from './abas/Estoque'
 import Rastreio from './abas/Rastreio'
 import Gestao from './abas/Gestao'
+import GerenciamentoAvancado from './abas/GerenciamentoAvancado'
 import PainelTV from './abas/PainelTV'
 import Pet01 from './pages/Pet01'
 import Pet02 from './pages/Pet02'
 import Pet03 from './pages/Pet03'
+import Pet04 from './pages/Pet04'
 import Ficha from './pages/Ficha'
 import Prioridade from './pages/Prioridade'
+import Site from './pages/Site'
+import MetaScreen from './components/MetaScreen'
 import useOrders from './hooks/useOrders'
 import useAuthAdmin from './hooks/useAuthAdmin'
 import GlobalModals from './components/GlobalModals'
@@ -246,7 +250,11 @@ export default function App(){
     if (tab === 'gestao' && isStockOnlyAccess) {
       setTab('painel')
     }
-  }, [authChecked, authUser, tab, isMendes, accessLevel, isStockOnlyAccess])
+
+    if (tab === 'gerencial' && !isAdmin) {
+      setTab('painel')
+    }
+  }, [authChecked, authUser, tab, isMendes, accessLevel, isStockOnlyAccess, isAdmin])
 
   async function handleSignOut() {
     try {
@@ -297,6 +305,10 @@ export default function App(){
     )
   }
 
+  if (location && String(location.pathname || '').toLowerCase().startsWith('/site')) {
+    return <Site />
+  }
+
   if (location && location.pathname === '/indicadores') {
     return (
       <div className="app">
@@ -308,7 +320,7 @@ export default function App(){
             <div className="brand-sub">Savanti Plásticos • Indicadores por Setor</div>
           </div>
         </div>
-        <Indicadores />
+        <MetaScreen />
       </div>
     )
   }
@@ -531,6 +543,9 @@ export default function App(){
               {hasGestaoAccess && (
                 <button className={`tabbtn ${tab==='gestao'?'active':''}`} onClick={()=>setTab('gestao')}>Gestão</button>
               )}
+              {isAdmin && (
+                <button className={`tabbtn ${tab==='gerencial'?'active':''}`} onClick={()=>setTab('gerencial')}>Administração</button>
+              )}
               <button className="tabbtn" onClick={handleSignOut}>Sair</button>
             </>
           )}
@@ -626,6 +641,17 @@ export default function App(){
       {tab === 'gestao' && !isMendes && (
         hasGestaoAccess ? (
           <Gestao />
+        ) : (
+          <div style={{ padding: 24 }}>
+            <h2>Acesso Negado</h2>
+            <p>Esta página não está disponível.</p>
+          </div>
+        )
+      )}
+
+      {tab === 'gerencial' && !isMendes && (
+        isAdmin ? (
+          <GerenciamentoAvancado />
         ) : (
           <div style={{ padding: 24 }}>
             <h2>Acesso Negado</h2>
