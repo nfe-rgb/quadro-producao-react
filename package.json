@@ -15,13 +15,15 @@
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
     "@supabase/supabase-js": "^2.78.0",
+    "@tensorflow-models/coco-ssd": "^2.2.3",
+    "@tensorflow/tfjs": "^4.22.0",
+    "jspdf": "^2.5.2",
     "luxon": "^3.7.2",
     "papaparse": "^5.5.3",
-    "jspdf": "^2.5.2",
-    "svg2pdf.js": "^2.2.4",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
-    "react-router-dom": "^7.9.6"
+    "react-router-dom": "^7.9.6",
+    "svg2pdf.js": "^2.2.4"
   },
   "devDependencies": {
     "@eslint/js": "^9.36.0",

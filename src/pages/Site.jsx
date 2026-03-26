@@ -8,16 +8,23 @@ import QuemSomos from '../site/pages/QuemSomos'
 import Produtos from '../site/pages/Produtos'
 import Servicos from '../site/pages/Servicos'
 import Contato from '../site/pages/Contato'
+import CameraTeste from '../site/pages/CameraTeste'
 
 export default function Site() {
   const location = useLocation()
   const pathname = String(location?.pathname || '').replace(/\/+$/, '')
+  const searchParams = new URLSearchParams(location?.search || '')
+  const isCameraMode = pathname === '/site/camera' || searchParams.get('camera') === '1'
 
   useEffect(() => {
+    if (isCameraMode) return undefined
     window.scrollTo(0, 0)
-  }, [pathname])
+    return undefined
+  }, [isCameraMode, pathname])
 
   useEffect(() => {
+    if (isCameraMode) return undefined
+
     const observer = new IntersectionObserver(
       (entries) => {
         entries.forEach((entry) => {
@@ -38,7 +45,11 @@ export default function Site() {
       window.cancelAnimationFrame(raf)
       observer.disconnect()
     }
-  }, [pathname])
+  }, [isCameraMode, pathname])
+
+  if (isCameraMode) {
+    return <CameraTeste />
+  }
 
   let page = <Home />
   if (pathname === '/site/quem-somos') page = <QuemSomos />

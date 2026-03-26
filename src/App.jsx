@@ -22,6 +22,7 @@ import Pet04 from './pages/Pet04'
 import Ficha from './pages/Ficha'
 import Prioridade from './pages/Prioridade'
 import Site from './pages/Site'
+import Teste from './pages/Teste'
 import MetaScreen from './components/MetaScreen'
 import useOrders from './hooks/useOrders'
 import useAuthAdmin from './hooks/useAuthAdmin'
@@ -303,6 +304,10 @@ export default function App(){
         <Ficha />
       </div>
     )
+  }
+
+  if (location && String(location.pathname || '').toLowerCase() === '/teste') {
+    return <Teste />
   }
 
   if (location && String(location.pathname || '').toLowerCase().startsWith('/site')) {
