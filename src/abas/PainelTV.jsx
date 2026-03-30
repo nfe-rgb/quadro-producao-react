@@ -51,12 +51,6 @@ function ItemResumo({
         {ordem?.status === "PARADA" && openStop?.reason && (
           <div className="stop-reason-below">{openStop.reason}</div>
         )}
-
-        {ordem?.status === "BAIXA_EFICIENCIA" && ordem?.loweff_notes && (
-          <div className="loweff-info-below">
-            <div className="loweff-reason-below">{ordem.loweff_notes}</div>
-          </div>
-        )}
       </div>
     </div>
   );

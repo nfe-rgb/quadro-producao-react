@@ -115,6 +115,22 @@ begin
 
   insert into public.production_migration_review_queue (issue_type, severity, order_id, machine_id, source_table, source_record_id, details)
   select
+    'OPEN_SESSION_MACHINE_DUPLICATE',
+    'err',
+    s.order_id::text,
+    s.machine_id::text,
+    'order_machine_sessions',
+    s.id::text,
+    jsonb_build_object('started_at', s.started_at, 'end_reason', s.end_reason)
+  from (
+    select s.*, row_number() over (partition by s.machine_id order by s.started_at desc, s.id desc) as rn
+    from public.order_machine_sessions s
+    where s.ended_at is null
+  ) s
+  where s.rn > 1;
+
+  insert into public.production_migration_review_queue (issue_type, severity, order_id, machine_id, source_table, source_record_id, details)
+  select
     'ORDER_MACHINE_DIVERGENCE',
     'warn',
     o.id::text,
@@ -183,6 +199,7 @@ declare
   v_inserted integer := 0;
   v_linked_stops integer := 0;
   v_linked_low integer := 0;
+  v_row_count integer := 0;
 begin
   insert into public.order_machine_sessions (
     order_id,
@@ -198,9 +215,18 @@ begin
     o.machine_id,
     o.started_at,
     case
-      when o.restarted_at is not null then coalesce(o.interrupted_at, o.restarted_at, o.finalized_at)
-      when o.interrupted_at is not null then o.interrupted_at
-      when o.finalized_at is not null then o.finalized_at
+      when o.restarted_at is not null then case
+        when coalesce(o.interrupted_at, o.restarted_at, o.finalized_at) >= o.started_at then coalesce(o.interrupted_at, o.restarted_at, o.finalized_at)
+        else o.started_at
+      end
+      when o.interrupted_at is not null then case
+        when o.interrupted_at >= o.started_at then o.interrupted_at
+        else o.started_at
+      end
+      when o.finalized_at is not null then case
+        when o.finalized_at >= o.started_at then o.finalized_at
+        else o.started_at
+      end
       else null
     end as ended_at,
     coalesce(o.started_by, p_actor),
@@ -238,7 +264,11 @@ begin
     o.id,
     o.machine_id,
     o.restarted_at,
-    o.finalized_at,
+    case
+      when o.finalized_at is not null and o.finalized_at >= o.restarted_at then o.finalized_at
+      when o.finalized_at is not null then o.restarted_at
+      else null
+    end,
     coalesce(o.restarted_by, p_actor),
     coalesce(o.finalized_by, p_actor),
     case when o.finalized_at is not null then 'FINALIZED' else null end
@@ -256,7 +286,8 @@ begin
       where s.order_id = o.id
         and s.started_at = o.restarted_at
     );
-  get diagnostics v_inserted = v_inserted + row_count;
+  get diagnostics v_row_count = row_count;
+  v_inserted := v_inserted + v_row_count;
 
   insert into public.order_machine_sessions (
     order_id,
@@ -271,7 +302,11 @@ begin
     base.order_id,
     base.machine_id,
     base.started_at,
-    base.ended_at,
+    case
+      when base.ended_at is not null and base.ended_at >= base.started_at then base.ended_at
+      when base.ended_at is not null then base.started_at
+      else null
+    end,
     p_actor,
     p_actor,
     case when base.ended_at is not null then 'INFERRED' else null end
@@ -291,7 +326,8 @@ begin
     where s.order_id = base.order_id
       and s.machine_id = base.machine_id
   );
-  get diagnostics v_inserted = v_inserted + row_count;
+  get diagnostics v_row_count = row_count;
+  v_inserted := v_inserted + v_row_count;
 
   update public.machine_stops st
      set session_id = match.session_id
@@ -348,6 +384,7 @@ declare
   v_closed_sessions integer := 0;
   v_closed_stops integer := 0;
   v_closed_low integer := 0;
+  v_row_count integer := 0;
 begin
   with duplicates as (
     select id
@@ -366,6 +403,25 @@ begin
     from duplicates d
    where s.id = d.id;
   get diagnostics v_closed_sessions = row_count;
+
+  with duplicates as (
+    select id
+    from (
+      select s.id, row_number() over (partition by s.machine_id order by s.started_at desc, s.id desc) as rn
+      from public.order_machine_sessions s
+      where s.ended_at is null
+    ) x
+    where x.rn > 1
+  )
+  update public.order_machine_sessions s
+     set ended_at = coalesce(s.ended_at, p_effective_at),
+         ended_by = coalesce(s.ended_by, p_actor),
+         end_reason = coalesce(s.end_reason, 'SANITIZED_DUPLICATE'),
+         updated_at = timezone('utc', now())
+    from duplicates d
+   where s.id = d.id;
+  get diagnostics v_row_count = row_count;
+  v_closed_sessions := v_closed_sessions + v_row_count;
 
   with duplicates as (
     select id

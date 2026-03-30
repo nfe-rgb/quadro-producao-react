@@ -49,6 +49,7 @@ export default function App(){
   const [resumeModal, setResumeModal] = useState(null)
   const [lowEffModal, setLowEffModal] = useState(null)
   const [lowEffEndModal, setLowEffEndModal] = useState(null)
+  const [manualProductionModalOpen, setManualProductionModalOpen] = useState(false)
 
   const [tick, setTick] = useState(0)
   useEffect(()=>{ const id=setInterval(()=>setTick(t=>t+1),1000); return ()=>clearInterval(id) },[])
@@ -177,15 +178,20 @@ export default function App(){
     }
   }
 
-  // Atalhos de teclado: Ctrl+L (Login) e Ctrl+I (Cadastro Itens)
+  // Atalhos de teclado: Ctrl+L (Apontamento manual) e Ctrl+I (Cadastro Itens)
   useEffect(() => {
     const onKey = (e) => {
+      const target = e.target
+      const isEditableTarget = target instanceof HTMLElement
+        && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))
+
       const ctrl = e.ctrlKey || e.metaKey; // permitir Cmd no Mac
-      if (!ctrl) return;
+      if (!ctrl || isEditableTarget) return;
       const key = String(e.key).toLowerCase();
       if (key === 'l') {
+        if (!authUser || isMendes) return
         e.preventDefault();
-        setTab('login');
+        setManualProductionModalOpen(true)
       } else if (key === 'i') {
         e.preventDefault();
         setTab('admin-itens');
@@ -193,7 +199,7 @@ export default function App(){
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, []);
+  }, [authUser, isMendes]);
 
   // central handler: recebe instrução do hook onStatusChange e abre modais localmente
   async function handleStatusChange(ordem, targetStatus){
@@ -354,6 +360,7 @@ export default function App(){
           resumeModal={resumeModal} setResumeModal={setResumeModal}
           lowEffModal={lowEffModal} setLowEffModal={setLowEffModal}
           lowEffEndModal={lowEffEndModal} setLowEffEndModal={setLowEffEndModal}
+          manualProductionModalOpen={manualProductionModalOpen} setManualProductionModalOpen={setManualProductionModalOpen}
           onUpdateOrder={atualizar}
           onFinalize={finalizar}
           onConfirmStart={confirmarInicio}
@@ -418,6 +425,7 @@ export default function App(){
           resumeModal={resumeModal} setResumeModal={setResumeModal}
           lowEffModal={lowEffModal} setLowEffModal={setLowEffModal}
           lowEffEndModal={lowEffEndModal} setLowEffEndModal={setLowEffEndModal}
+          manualProductionModalOpen={manualProductionModalOpen} setManualProductionModalOpen={setManualProductionModalOpen}
           onUpdateOrder={atualizar}
           onFinalize={finalizar}
           onConfirmStart={confirmarInicio}
@@ -456,6 +464,7 @@ export default function App(){
           resumeModal={resumeModal} setResumeModal={setResumeModal}
           lowEffModal={lowEffModal} setLowEffModal={setLowEffModal}
           lowEffEndModal={lowEffEndModal} setLowEffEndModal={setLowEffEndModal}
+          manualProductionModalOpen={manualProductionModalOpen} setManualProductionModalOpen={setManualProductionModalOpen}
           onUpdateOrder={atualizar}
           onFinalize={finalizar}
           onConfirmStart={confirmarInicio}
@@ -494,6 +503,7 @@ export default function App(){
           resumeModal={resumeModal} setResumeModal={setResumeModal}
           lowEffModal={lowEffModal} setLowEffModal={setLowEffModal}
           lowEffEndModal={lowEffEndModal} setLowEffEndModal={setLowEffEndModal}
+          manualProductionModalOpen={manualProductionModalOpen} setManualProductionModalOpen={setManualProductionModalOpen}
           onUpdateOrder={atualizar}
           onFinalize={finalizar}
           onConfirmStart={confirmarInicio}
@@ -658,6 +668,7 @@ export default function App(){
         resumeModal={resumeModal} setResumeModal={setResumeModal}
         lowEffModal={lowEffModal} setLowEffModal={setLowEffModal}
         lowEffEndModal={lowEffEndModal} setLowEffEndModal={setLowEffEndModal}
+        manualProductionModalOpen={manualProductionModalOpen} setManualProductionModalOpen={setManualProductionModalOpen}
         onUpdateOrder={atualizar}
         onFinalize={finalizar}
         onConfirmStart={confirmarInicio}

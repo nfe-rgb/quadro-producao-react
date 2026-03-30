@@ -89,7 +89,18 @@ alter table public.machine_stops
   add column if not exists updated_at timestamptz not null default timezone('utc', now());
 
 update public.machine_stops
-set ended_at = coalesce(ended_at, resumed_at),
+set ended_at = case
+      when ended_at is not null and ended_at >= started_at then ended_at
+      when resumed_at is not null and resumed_at >= started_at then resumed_at
+      when ended_at is not null or resumed_at is not null then started_at
+      else null
+    end,
+    resumed_at = case
+      when resumed_at is not null and resumed_at >= started_at then resumed_at
+      when ended_at is not null and ended_at >= started_at then ended_at
+      when ended_at is not null or resumed_at is not null then started_at
+      else null
+    end,
     created_by = coalesce(created_by, started_by),
     closed_by = coalesce(closed_by, resumed_by),
     updated_at = coalesce(updated_at, timezone('utc', now()));
@@ -114,11 +125,17 @@ alter table public.low_efficiency_logs
   add column if not exists reason text,
   add column if not exists created_by text,
   add column if not exists closed_by text,
+  add column if not exists started_by text,
+  add column if not exists ended_by text,
   add column if not exists created_at timestamptz not null default timezone('utc', now()),
   add column if not exists updated_at timestamptz not null default timezone('utc', now());
 
 update public.low_efficiency_logs
-set created_by = coalesce(created_by, started_by),
+set ended_at = case
+      when ended_at is not null and ended_at < started_at then started_at
+      else ended_at
+    end,
+    created_by = coalesce(created_by, started_by),
     closed_by = coalesce(closed_by, ended_by),
     updated_at = coalesce(updated_at, timezone('utc', now()));
 

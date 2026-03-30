@@ -1,8 +1,20 @@
 // src/components/GlobalModals.jsx
-import React, { useEffect } from 'react'
+import React, { useEffect, useState } from 'react'
 import Modal from '../components/Modal'
-import { MAQUINAS, MOTIVOS_PARADA } from '../lib/constants'
+import { MAQUINAS, MOTIVOS_PARADA, REFUGO_MOTIVOS, TURNOS } from '../lib/constants'
 import { DateTime } from 'luxon'
+import { supabase } from '../lib/supabaseClient'
+
+function createManualProductionInitialState() {
+  return {
+    date: DateTime.now().setZone('America/Sao_Paulo').toISODate(),
+    machine: '',
+    turno: '',
+    osCode: '',
+    goodQty: '',
+    scrapEntries: [{ qty: '', reason: '' }],
+  }
+}
 
 function safeDate(val){
   if (val && /^\d{4}-\d{2}-\d{2}$/.test(String(val))) return String(val)
@@ -17,8 +29,14 @@ export default function GlobalModals({
   editando, setEditando, finalizando, setFinalizando, confirmData, setConfirmData,
   startModal, setStartModal, stopModal, setStopModal, resumeModal, setResumeModal,
   lowEffModal, setLowEffModal, lowEffEndModal, setLowEffEndModal,
+  manualProductionModalOpen, setManualProductionModalOpen,
   onUpdateOrder, onFinalize, onConfirmStart, onConfirmStop, onConfirmResume, onConfirmLowEffStart, onConfirmLowEffEnd
 }){
+  const [manualForm, setManualForm] = useState(() => createManualProductionInitialState())
+  const [manualOrderOptions, setManualOrderOptions] = useState([])
+  const [manualOrderOptionsLoading, setManualOrderOptionsLoading] = useState(false)
+  const [manualSaving, setManualSaving] = useState(false)
+
   // Normaliza data/hora ao abrir cada modal, apenas na primeira renderização
   useEffect(() => {
     if (stopModal && !stopModal.__initApplied) {
@@ -79,6 +97,161 @@ export default function GlobalModals({
       }));
     }
   }, [lowEffEndModal, setLowEffEndModal]);
+
+  useEffect(() => {
+    if (!manualProductionModalOpen) return
+    setManualForm(createManualProductionInitialState())
+    setManualOrderOptions([])
+    setManualOrderOptionsLoading(false)
+    setManualSaving(false)
+  }, [manualProductionModalOpen])
+
+  useEffect(() => {
+    let active = true
+
+    async function loadOrderOptions() {
+      if (!manualProductionModalOpen || !manualForm.machine) {
+        if (active) {
+          setManualOrderOptions([])
+          setManualOrderOptionsLoading(false)
+        }
+        return
+      }
+
+      setManualOrderOptionsLoading(true)
+      try {
+        const { data, error } = await supabase
+          .from('orders')
+          .select('code, created_at')
+          .eq('machine_id', manualForm.machine)
+          .order('created_at', { ascending: false })
+
+        if (error) throw error
+        if (!active) return
+
+        const seen = new Set()
+        const codes = []
+        for (const row of data || []) {
+          const code = String(row?.code || '').trim()
+          if (!code || seen.has(code)) continue
+          seen.add(code)
+          codes.push(code)
+        }
+        setManualOrderOptions(codes)
+      } catch (error) {
+        console.warn('Falha ao carregar O.S para apontamento manual:', error)
+        if (active) setManualOrderOptions([])
+      } finally {
+        if (active) setManualOrderOptionsLoading(false)
+      }
+    }
+
+    loadOrderOptions()
+    return () => {
+      active = false
+    }
+  }, [manualProductionModalOpen, manualForm.machine])
+
+  async function handleManualProductionSubmit() {
+    const payload = {
+      date: manualForm.date,
+      machine: manualForm.machine,
+      turno: manualForm.turno,
+      osCode: manualForm.osCode,
+      goodQty: Number(manualForm.goodQty || 0),
+      scrapEntries: (manualForm.scrapEntries || [])
+        .map((entry) => ({ qty: Number(entry.qty || 0), reason: String(entry.reason || '').trim() }))
+        .filter((entry) => entry.qty > 0 && entry.reason),
+    }
+
+    if (!payload.date || !payload.machine || !payload.turno || !payload.osCode) {
+      alert('Preencha Data, Máquina, Turno e O.S.')
+      return
+    }
+
+    if (payload.goodQty < 0) {
+      alert('Peças Boas deve ser maior ou igual a zero.')
+      return
+    }
+
+    setManualSaving(true)
+    try {
+      const { data: orderRows, error: orderError } = await supabase
+        .from('orders')
+        .select('id, code, product, machine_id, created_at')
+        .eq('code', payload.osCode)
+        .eq('machine_id', payload.machine)
+        .order('created_at', { ascending: false })
+        .limit(1)
+
+      if (orderError || !orderRows?.[0]) {
+        alert('O.S não encontrada para a máquina selecionada.')
+        return
+      }
+
+      const selectedOrder = orderRows[0]
+      const referenceDate = DateTime.fromISO(String(payload.date), { zone: 'America/Sao_Paulo' }).set({
+        hour: 12,
+        minute: 0,
+        second: 0,
+        millisecond: 0,
+      })
+
+      const createdAtUtcIso = referenceDate.toUTC().toISO()
+      const productionRow = {
+        entry_date: referenceDate.toISODate(),
+        created_at: createdAtUtcIso,
+        machine_id: payload.machine,
+        shift: String(payload.turno),
+        order_id: selectedOrder.id,
+        order_code: selectedOrder.code,
+        product: selectedOrder.product || '',
+        good_qty: Number(payload.goodQty || 0),
+      }
+
+      const { error: productionError } = await supabase
+        .from('injection_production_entries')
+        .insert([productionRow])
+
+      if (productionError) {
+        console.warn('Erro ao inserir produção manual:', productionError)
+        alert('Falha ao registrar produção manual.')
+        return
+      }
+
+      if (payload.scrapEntries.length) {
+        const scrapRows = payload.scrapEntries.map((entry) => ({
+          created_at: createdAtUtcIso,
+          machine_id: payload.machine,
+          shift: String(payload.turno),
+          operator: 'apontamento-manual',
+          order_id: selectedOrder.id,
+          op_code: String(selectedOrder.code),
+          qty: Number(entry.qty),
+          reason: entry.reason,
+        }))
+
+        const { error: scrapError } = await supabase
+          .from('scrap_logs')
+          .insert(scrapRows)
+
+        if (scrapError) {
+          console.warn('Erro ao inserir scrap_logs:', scrapError)
+          alert('Falha ao registrar refugo.')
+          return
+        }
+      }
+
+      setManualProductionModalOpen(false)
+      setManualForm(createManualProductionInitialState())
+    } catch (error) {
+      console.warn('Falha ao registrar apontamento manual:', error)
+      alert('Falha ao registrar apontamento manual.')
+    } finally {
+      setManualSaving(false)
+    }
+  }
+
   return (
     <>
       {/* Editar */}
@@ -256,6 +429,138 @@ export default function GlobalModals({
             </div>
           </div>
         )}
+      </Modal>
+
+      <Modal open={!!manualProductionModalOpen} onClose={() => setManualProductionModalOpen(false)} title="Apontar Produção Manual">
+        <div className="grid2" style={{ gap: 12 }}>
+          <label className="label">
+            Data
+            <input
+              type="date"
+              className="input"
+              value={manualForm.date}
+              onChange={(e) => setManualForm((current) => ({ ...current, date: e.target.value }))}
+            />
+          </label>
+
+          <label className="label">
+            Máquina
+            <select
+              className="select"
+              value={manualForm.machine}
+              onChange={(e) => setManualForm((current) => ({ ...current, machine: e.target.value, osCode: '' }))}
+            >
+              <option value="">Selecione...</option>
+              {MAQUINAS.filter((machineId) => /^(P[1-4]|I[1-6])$/.test(machineId)).map((machineId) => (
+                <option key={machineId} value={machineId}>{machineId}</option>
+              ))}
+            </select>
+          </label>
+
+          <label className="label">
+            Turno
+            <select
+              className="select"
+              value={manualForm.turno}
+              onChange={(e) => setManualForm((current) => ({ ...current, turno: e.target.value }))}
+            >
+              <option value="">Selecione...</option>
+              {TURNOS.map((turno) => (
+                <option key={turno.key} value={turno.key}>{turno.label}</option>
+              ))}
+            </select>
+          </label>
+
+          <label className="label" style={{ gridColumn: '1 / -1' }}>
+            O.S
+            <select
+              className="select"
+              value={manualForm.osCode}
+              onChange={(e) => setManualForm((current) => ({ ...current, osCode: e.target.value }))}
+              disabled={!manualForm.machine || manualOrderOptionsLoading}
+            >
+              <option value="">
+                {!manualForm.machine
+                  ? 'Selecione a máquina primeiro...'
+                  : manualOrderOptionsLoading
+                    ? 'Carregando...'
+                    : 'Selecione...'}
+              </option>
+              {manualOrderOptions.map((code) => (
+                <option key={code} value={code}>{code}</option>
+              ))}
+            </select>
+          </label>
+
+          <label className="label">
+            Peças Boas
+            <input
+              type="number"
+              min="0"
+              className="input"
+              value={manualForm.goodQty}
+              onChange={(e) => setManualForm((current) => ({ ...current, goodQty: e.target.value }))}
+            />
+          </label>
+
+          <div className="label" style={{ gridColumn: '1 / -1' }}>
+            Refugo
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: 8, marginTop: 6 }}>
+              {manualForm.scrapEntries.map((entry, index) => (
+                <React.Fragment key={`scrap-${index}`}>
+                  <input
+                    type="number"
+                    min="0"
+                    className="input"
+                    placeholder="Refugo Peças"
+                    value={entry.qty}
+                    onChange={(e) => {
+                      const value = e.target.value
+                      setManualForm((current) => {
+                        const nextEntries = [...current.scrapEntries]
+                        nextEntries[index] = { ...nextEntries[index], qty: value }
+                        return { ...current, scrapEntries: nextEntries }
+                      })
+                    }}
+                  />
+                  <select
+                    className="select"
+                    value={entry.reason}
+                    onChange={(e) => {
+                      const value = e.target.value
+                      setManualForm((current) => {
+                        const nextEntries = [...current.scrapEntries]
+                        nextEntries[index] = { ...nextEntries[index], reason: value }
+                        return { ...current, scrapEntries: nextEntries }
+                      })
+                    }}
+                  >
+                    <option value="">Motivo Refugo</option>
+                    {REFUGO_MOTIVOS.map((reason) => <option key={reason} value={reason}>{reason}</option>)}
+                  </select>
+                  <button
+                    type="button"
+                    className="btn"
+                    onClick={() => setManualForm((current) => ({
+                      ...current,
+                      scrapEntries: [...current.scrapEntries, { qty: '', reason: '' }],
+                    }))}
+                    title="Adicionar outro apontamento de refugo"
+                  >
+                    +
+                  </button>
+                </React.Fragment>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div className="flex" style={{ justifyContent: 'flex-end', gap: 8, marginTop: 12 }}>
+          <button className="btn ghost" onClick={() => setManualProductionModalOpen(false)} disabled={manualSaving}>Cancelar</button>
+          <button className="btn primary" onClick={handleManualProductionSubmit} disabled={manualSaving}>
+            {manualSaving ? 'Registrando...' : 'Registrar'}
+          </button>
+        </div>
       </Modal>
     </>
   )

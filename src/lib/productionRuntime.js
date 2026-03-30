@@ -21,9 +21,18 @@ function sortByTimeAsc(items, key = 'started_at') {
 export function mapRuntimeOrder(row) {
   if (!row) return null;
 
+  const machineId = row.machine_id == null
+    ? null
+    : String(row.machine_id).trim().toUpperCase();
+
+  const activeMachineId = row.active_machine_id == null
+    ? null
+    : String(row.active_machine_id).trim().toUpperCase();
+
   return {
     ...row,
     source_order_id: row.id,
+    machine_id: machineId,
     status: row.status || row.persisted_status || 'AGUARDANDO',
     started_at: row.started_at || null,
     started_by: row.started_by || row.active_session_started_by || null,
@@ -38,6 +47,7 @@ export function mapRuntimeOrder(row) {
     loweff_notes: row.loweff_notes || null,
     loweff_reason: row.loweff_reason || null,
     active_session_id: row.active_session_id || null,
+    active_machine_id: activeMachineId,
     active_session_started_at: row.active_session_started_at || null,
     active_stop_started_at: row.active_stop_started_at || null,
     active_stop_reason: row.active_stop_reason || null,

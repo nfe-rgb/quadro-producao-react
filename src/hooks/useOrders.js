@@ -55,6 +55,7 @@ export default function useOrders() {
   const [sessions, setSessions] = useState([])
   const [lowEffLogs, setLowEffLogs] = useState([])
   const runtimeFallbackWarnedRef = useRef(false)
+  const runtimeErrorFallbackWarnedRef = useRef(false)
   const sessionsFallbackWarnedRef = useRef(false)
 
   const fetchScanCounts = useCallback(async (orderIds) => {
@@ -96,6 +97,7 @@ export default function useOrders() {
     let openRes
     let finalizedRes
     let runtimeViewMissing = runtimeViewAvailability === 'missing'
+    let runtimeViewErrored = false
 
     if (runtimeViewAvailability === 'unknown') {
       const runtimeProbeRes = await supabase
@@ -137,11 +139,16 @@ export default function useOrders() {
       finalizedRes = runtimeFinalizedRes
       runtimeViewMissing = isMissingRelationError(runtimeOpenRes.error, 'production_orders_runtime_v')
         || isMissingRelationError(runtimeFinalizedRes.error, 'production_orders_runtime_v')
+      runtimeViewErrored = !!runtimeOpenRes.error || !!runtimeFinalizedRes.error
 
       if (runtimeViewMissing) {
         runtimeViewAvailability = 'missing'
         writeCachedAvailability(RUNTIME_VIEW_STORAGE_KEY, 'missing')
 
+        const legacySnapshot = await fetchOrdersLegacySnapshot()
+        openRes = legacySnapshot.openRes
+        finalizedRes = legacySnapshot.finalizedRes
+      } else if (runtimeViewErrored) {
         const legacySnapshot = await fetchOrdersLegacySnapshot()
         openRes = legacySnapshot.openRes
         finalizedRes = legacySnapshot.finalizedRes
@@ -156,12 +163,15 @@ export default function useOrders() {
         console.warn('View production_orders_runtime_v não encontrada no Supabase. Usando fallback na tabela orders até aplicar as migrations.')
         runtimeFallbackWarnedRef.current = true
       }
+    } else if (runtimeViewErrored && !runtimeErrorFallbackWarnedRef.current) {
+      console.warn('Falha ao consultar production_orders_runtime_v. Usando fallback na tabela orders até o runtime normalizado ficar íntegro.')
+      runtimeErrorFallbackWarnedRef.current = true
     }
 
-    if (!runtimeViewMissing && openRes.error) {
+    if (!runtimeViewMissing && runtimeViewErrored && openRes?.error) {
       console.warn('Falha ao carregar ordens abertas do runtime:', openRes.error)
     }
-    if (!runtimeViewMissing && finalizedRes.error) {
+    if (!runtimeViewMissing && runtimeViewErrored && finalizedRes?.error) {
       console.warn('Falha ao carregar ordens finalizadas do runtime:', finalizedRes.error)
     }
 
