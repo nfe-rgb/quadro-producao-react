@@ -49,6 +49,7 @@ const MONTHLY_VALUE_TARGETS = {
   '2026-03': 770000,
   '2026-04': 819000,
 }
+const DATA_PAGE_SIZE = 1000
 
 function getTodayDate() {
   return DateTime.now().setZone('America/Sao_Paulo').toISODate()
@@ -206,9 +207,54 @@ function buildBarPercent(value, max) {
   return Math.max(6, Math.round((toNumber(value) / max) * 100))
 }
 
+function extractIsoDatePrefix(value) {
+  const raw = text(value)
+  const match = raw.match(/^(\d{4}-\d{2}-\d{2})/)
+  return match ? match[1] : null
+}
+
 function getRecordDayKey(timestamp) {
+  const rawDate = extractIsoDatePrefix(timestamp)
+  if (rawDate) return rawDate
+
   const date = DateTime.fromISO(String(timestamp || ''), { setZone: true }).setZone('America/Sao_Paulo')
   return date.isValid ? date.toISODate() : null
+}
+
+async function fetchAllRowsInDateRange({
+  table,
+  columns,
+  startIso,
+  endIso,
+  pageSize = DATA_PAGE_SIZE,
+}) {
+  const rows = []
+  let pageIndex = 0
+
+  while (true) {
+    const from = pageIndex * pageSize
+    const to = from + pageSize - 1
+
+    const response = await supabase
+      .from(table)
+      .select(columns)
+      .gte('created_at', startIso)
+      .lte('created_at', endIso)
+      .order('created_at', { ascending: false })
+      .order('id', { ascending: false })
+      .range(from, to)
+
+    if (response.error) return response
+
+    const chunk = response.data || []
+    rows.push(...chunk)
+
+    if (chunk.length < pageSize) {
+      return { data: rows, error: null }
+    }
+
+    pageIndex += 1
+  }
 }
 
 function DashboardBarChart({ title, rows, selectedValue, onSelect, valueFormatter, subtitle }) {
@@ -463,27 +509,24 @@ export default function Gestao({ registroGrupos = [], openSet, toggleOpen, isAdm
       setError('')
 
       const [scansRes, scrapsRes, entriesRes] = await Promise.all([
-        supabase
-          .from('production_scans')
-          .select('id, created_at, order_id, op_code, machine_id, shift, scanned_box, qty_pieces, code')
-          .gte('created_at', range.startIso)
-          .lte('created_at', range.endIso)
-          .order('created_at', { ascending: false })
-          .limit(5000),
-        supabase
-          .from('scrap_logs')
-          .select('id, created_at, order_id, op_code, machine_id, shift, operator, qty, reason')
-          .gte('created_at', range.startIso)
-          .lte('created_at', range.endIso)
-          .order('created_at', { ascending: false })
-          .limit(5000),
-        supabase
-          .from('injection_production_entries')
-          .select('id, created_at, entry_date, order_id, order_code, machine_id, shift, product, good_qty')
-          .gte('created_at', range.startIso)
-          .lte('created_at', range.endIso)
-          .order('created_at', { ascending: false })
-          .limit(5000),
+        fetchAllRowsInDateRange({
+          table: 'production_scans',
+          columns: 'id, created_at, order_id, op_code, machine_id, shift, scanned_box, qty_pieces, code',
+          startIso: range.startIso,
+          endIso: range.endIso,
+        }),
+        fetchAllRowsInDateRange({
+          table: 'scrap_logs',
+          columns: 'id, created_at, order_id, op_code, machine_id, shift, operator, qty, reason',
+          startIso: range.startIso,
+          endIso: range.endIso,
+        }),
+        fetchAllRowsInDateRange({
+          table: 'injection_production_entries',
+          columns: 'id, created_at, entry_date, order_id, order_code, machine_id, shift, product, good_qty',
+          startIso: range.startIso,
+          endIso: range.endIso,
+        }),
       ])
 
       if (!active) return
@@ -544,21 +587,20 @@ export default function Gestao({ registroGrupos = [], openSet, toggleOpen, isAdm
     let active = true
 
     async function loadMonthlyProducedValue() {
-      const scansQuery = supabase
-        .from('production_scans')
-        .select('order_id, machine_id, shift, qty_pieces, code')
-        .gte('created_at', monthlyReference.startIso)
-        .lte('created_at', monthlyReference.endIso)
-        .limit(10000)
-
-      const entriesQuery = supabase
-        .from('injection_production_entries')
-        .select('order_id, machine_id, shift, product, good_qty')
-        .gte('created_at', monthlyReference.startIso)
-        .lte('created_at', monthlyReference.endIso)
-        .limit(10000)
-
-      const [monthScansRes, monthEntriesRes] = await Promise.all([scansQuery, entriesQuery])
+      const [monthScansRes, monthEntriesRes] = await Promise.all([
+        fetchAllRowsInDateRange({
+          table: 'production_scans',
+          columns: 'id, created_at, order_id, machine_id, shift, qty_pieces, code',
+          startIso: monthlyReference.startIso,
+          endIso: monthlyReference.endIso,
+        }),
+        fetchAllRowsInDateRange({
+          table: 'injection_production_entries',
+          columns: 'id, created_at, order_id, machine_id, shift, product, good_qty',
+          startIso: monthlyReference.startIso,
+          endIso: monthlyReference.endIso,
+        }),
+      ])
 
       if (!active) return
 
@@ -581,7 +623,7 @@ export default function Gestao({ registroGrupos = [], openSet, toggleOpen, isAdm
       if (orderIds.length) {
         const { data: monthOrdersData, error: monthOrdersError } = await supabase
           .from('orders')
-          .select('id, product')
+          .select('id, product, standard')
           .in('id', orderIds)
 
         if (!active) return
@@ -599,7 +641,7 @@ export default function Gestao({ registroGrupos = [], openSet, toggleOpen, isAdm
         const sourceOrderId = text(row?.order_id)
         const productCode = extractItemCodeFromOrderProduct(monthOrdersMap[sourceOrderId]?.product)
         const code = text(productCode || row?.code)
-        const pieces = toNumber(row?.qty_pieces)
+        const pieces = toNumber(row?.qty_pieces) || parsePiecesPerBox(monthOrdersMap[sourceOrderId]?.standard)
         const unitValue = toNumber(itemsMap[code]?.unitValue)
         nextMonthlyProducedValue += pieces * unitValue
       }
@@ -739,6 +781,7 @@ export default function Gestao({ registroGrupos = [], openSet, toggleOpen, isAdm
         type: 'production',
         source: 'scan',
         timestamp: row?.created_at || null,
+        dayKey: getRecordDayKey(row?.created_at),
         orderId: sourceOrderId,
         code: text(order?.code || row?.op_code),
         product: text(order?.product || code),
@@ -773,6 +816,7 @@ export default function Gestao({ registroGrupos = [], openSet, toggleOpen, isAdm
         type: 'production',
         source: 'entry',
         timestamp: row?.created_at || row?.entry_date || null,
+        dayKey: text(row?.entry_date) || getRecordDayKey(row?.created_at),
         orderId: sourceOrderId,
         code: text(row?.order_code || order?.code),
         product: text(row?.product || order?.product),
@@ -921,7 +965,7 @@ export default function Gestao({ registroGrupos = [], openSet, toggleOpen, isAdm
 
   const displayedRecords = useMemo(() => {
     if (selectedDay === 'all') return centralRecords
-    return centralRecords.filter((record) => getRecordDayKey(record.timestamp) === selectedDay)
+    return centralRecords.filter((record) => (record.dayKey || getRecordDayKey(record.timestamp)) === selectedDay)
   }, [centralRecords, selectedDay])
 
   const valueRecords = useMemo(() => {
@@ -955,9 +999,10 @@ export default function Gestao({ registroGrupos = [], openSet, toggleOpen, isAdm
     }
 
     for (const record of valueRecords) {
-      const recordDate = DateTime.fromISO(String(record.timestamp || ''), { setZone: true }).setZone('America/Sao_Paulo')
-      if (!recordDate.isValid) continue
-      const key = recordDate.toISODate()
+      const key = text(record.dayKey || getRecordDayKey(record.timestamp))
+      if (!key) continue
+
+      const recordDate = DateTime.fromISO(key, { zone: 'America/Sao_Paulo' })
       if (!totals[key]) {
         totals[key] = {
           key,
