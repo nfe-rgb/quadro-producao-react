@@ -20,7 +20,6 @@ export const REFUGO_MOTIVOS = ['Troca de Cor','Regulagem','Rebarba','Bolha','Con
   'Peças falhadas','Peças Furadas','Fiapo','Queimadas','Manchadas','Marcadas',
 ];
 export const TURNOS = [
-  { key: '3', label: 'Turno 3' },
   { key: '1', label: 'Turno 1' },
   { key: '2', label: 'Turno 2' },
 ];

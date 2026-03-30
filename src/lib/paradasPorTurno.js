@@ -1,4 +1,9 @@
 // Função utilitária para somar horas de paradas por turno e máquina
+import { getShiftWindowsForDay } from './shifts';
+import { toBrazilTime } from './timezone';
+import { MAQUINAS } from './constants';
+import { mergeIntervals } from './productionIntervals';
+
 // Utilitário para checar se um valor está em um intervalo [ini, fim) considerando virada de dia
 function inRange(minIni, minFim, minutos) {
   if (minIni <= minFim) return minutos >= minIni && minutos < minFim;
@@ -8,34 +13,11 @@ function inRange(minIni, minFim, minutos) {
 
 // Retorna array de intervalos [{ini, fim, turnoKey}] para um dia específico, horários EXATOS para horas paradas
 function getTurnoIntervalsDia(date) {
-  const dia = date.getDay();
-  // Horários exatos (sem tolerância) para cálculo de horas paradas:
-  // Turno 1: 05:00 às 13:30
-  // Turno 2: 13:30 às 22:00
-  // Turno 3: 22:00 às 05:00
-  if (dia === 0) { // Domingo
-    return [
-      { ini: 23 * 60, fim: 24 * 60, turnoKey: '3' }, // 23:00 até 00:00
-      // resto é hora extra (não considerar 00:00–05:00 no domingo)
-    ];
-  }
-  if (dia >= 1 && dia <= 5) { // Segunda a Sexta
-    return [
-      { ini: 5 * 60, fim: 13 * 60 + 30, turnoKey: '1' },   // 05:00 até 13:30
-      { ini: 13 * 60 + 30, fim: 22 * 60, turnoKey: '2' },  // 13:30 até 22:00
-      { ini: 22 * 60, fim: 24 * 60, turnoKey: '3' },       // 22:00 até 00:00
-      { ini: 0, fim: 5 * 60, turnoKey: '3' },              // 00:00 até 05:00
-    ];
-  }
-  if (dia === 6) { // Sábado
-    return [
-      { ini: 0, fim: 5 * 60, turnoKey: '3' },        // 00:00 até 05:00
-      { ini: 5 * 60, fim: 9 * 60, turnoKey: '1' },   // 05:00 até 09:00
-      { ini: 9 * 60, fim: 13 * 60, turnoKey: '2' },  // 09:00 até 13:00
-      // resto é hora extra (não considerar 23:00–00:00 no sábado)
-    ];
-  }
-  return [];
+  return getShiftWindowsForDay(date).map((window) => ({
+    ini: window.start.hour * 60 + window.start.minute,
+    fim: window.end.hour * 60 + window.end.minute,
+    turnoKey: window.shiftKey,
+  }));
 }
 
 // Divide um intervalo [ini, fim) (em ms) em fatias por turno, retornando [{turnoKey, ini, fim}]
@@ -45,7 +27,6 @@ function splitIntervalPorTurno(iniMs, fimMs) {
   while (cursor < fimMs) {
     // Normaliza cursor para horário do Brasil
     const dBr = toBrazilTime(new Date(cursor).toISOString());
-    const dia = dBr.getDay();
     const minutos = dBr.getHours() * 60 + dBr.getMinutes();
     const turnosDia = getTurnoIntervalsDia(dBr);
     // Acha o turno atual
@@ -81,9 +62,6 @@ function splitIntervalPorTurno(iniMs, fimMs) {
   return res;
 }
 
-import { toBrazilTime } from './timezone';
-import { MAQUINAS } from './constants';
-
 export function calcularHorasParadasPorTurno(paradas, turnos, filtroStart, filtroEnd) {
   // paradas: array de registros de parada (machine_stops)
   // turnos: array de objetos { key, label }
@@ -94,6 +72,14 @@ export function calcularHorasParadasPorTurno(paradas, turnos, filtroStart, filtr
     (MAQUINAS || []).forEach(maq => { porTurno[t.key][maq] = 0; });
   });
   if (!Array.isArray(paradas)) return porTurno;
+  const intervalosPorTurno = {};
+  turnos.forEach((turno) => {
+    intervalosPorTurno[turno.key] = {};
+    (MAQUINAS || []).forEach((maq) => {
+      intervalosPorTurno[turno.key][maq] = [];
+    });
+  });
+
   paradas.forEach(p => {
     const maq = p.machine_id;
     if (!MAQUINAS.includes(maq)) return;
@@ -102,22 +88,33 @@ export function calcularHorasParadasPorTurno(paradas, turnos, filtroStart, filtr
       filtroEnd ? filtroEnd.getTime() : Date.now(),
       Date.now()
     );
-    const fim = p.resumed_at
-      ? toBrazilTime(p.resumed_at).getTime()
-      : fimAberta;
+    const fim = p.ended_at
+      ? toBrazilTime(p.ended_at).getTime()
+      : p.resumed_at
+        ? toBrazilTime(p.resumed_at).getTime()
+        : fimAberta;
     if (!ini || !fim || fim <= ini) return;
-    // Clipping ao filtro
     const iniClip = Math.max(ini, filtroStart ? filtroStart.getTime() : ini);
     const fimClip = Math.min(fim, filtroEnd ? filtroEnd.getTime() : fim);
     if (fimClip <= iniClip) return;
-    // Fatia por turnos reais
+
     const fatias = splitIntervalPorTurno(iniClip, fimClip);
     for (const f of fatias) {
-      if (porTurno[f.turnoKey] && porTurno[f.turnoKey][maq] !== undefined) {
-        porTurno[f.turnoKey][maq] += (f.fim - f.ini);
+      if (f.turnoKey && intervalosPorTurno[f.turnoKey]?.[maq]) {
+        intervalosPorTurno[f.turnoKey][maq].push([f.ini, f.fim]);
       }
     }
   });
+
+  turnos.forEach((turno) => {
+    (MAQUINAS || []).forEach((maq) => {
+      porTurno[turno.key][maq] = mergeIntervals(intervalosPorTurno[turno.key][maq]).reduce(
+        (total, [ini, fim]) => total + Math.max(0, fim - ini),
+        0
+      );
+    });
+  });
+
   return porTurno;
 }
 

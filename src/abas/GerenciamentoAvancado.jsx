@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import Modal from '../components/Modal'
 import { supabase } from '../lib/supabaseClient'
+import { isMissingRelationError } from '../lib/productionRuntime'
 import { fmtDateTime } from '../lib/utils'
 import '../styles/gerenciamento-avancado.css'
 
@@ -118,11 +119,21 @@ export default function GerenciamentoAvancado() {
   async function loadOrders() {
     setOrdersLoading(true)
     setOrdersError('')
-    const { data, error } = await supabase
-      .from('orders')
+    let { data, error } = await supabase
+      .from('production_orders_runtime_v')
       .select('id, code, product, customer, machine_id, status, finalized, created_at, started_at, interrupted_at, restarted_at, finalized_at')
       .order('created_at', { ascending: false })
       .limit(1000)
+
+    if (isMissingRelationError(error, 'production_orders_runtime_v')) {
+      const legacyRes = await supabase
+        .from('orders')
+        .select('id, code, product, customer, machine_id, status, finalized, created_at, started_at, interrupted_at, restarted_at, finalized_at')
+        .order('created_at', { ascending: false })
+        .limit(1000)
+      data = legacyRes.data
+      error = legacyRes.error
+    }
 
     if (error) {
       setOrdersError(formatError(error, 'Falha ao carregar ordens.'))

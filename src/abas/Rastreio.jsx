@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import { fmtDateTime, fmtDuracao } from '../lib/utils'
 import '../styles/rastreio.css'
@@ -22,7 +22,7 @@ const extractItemCodeFromOrderProduct = (product) => {
   return String(product).split('-')[0]?.trim() || ''
 }
 
-export default function Rastreio() {
+export default function Rastreio({ externalSearchRequest = null }) {
   const [osCode, setOsCode] = useState('')
   const [order, setOrder] = useState(null)
   const [scans, setScans] = useState([])
@@ -46,7 +46,7 @@ export default function Rastreio() {
     setManualEntries([])
   }
 
-  async function loadTraceByOrder(ord) {
+  const loadTraceByOrder = useCallback(async (ord) => {
     if (!ord?.id) {
       setError('O.S inválida para rastreio.')
       return
@@ -92,9 +92,9 @@ export default function Rastreio() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [])
 
-  async function loadTraceByCode(code) {
+  const loadTraceByCode = useCallback(async (code) => {
     const codeTrim = String(code || '').trim()
     if (!codeTrim) {
       setError('Informe a O.S. para rastrear.')
@@ -126,7 +126,7 @@ export default function Rastreio() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [loadTraceByOrder])
 
   async function handleSearch(e) {
     e?.preventDefault?.()
@@ -234,6 +234,13 @@ export default function Rastreio() {
       handleOpenFinder()
     }
   }
+
+  useEffect(() => {
+    const nextCode = String(externalSearchRequest?.code || '').trim()
+    if (!nextCode) return
+    setOsCode(nextCode)
+    loadTraceByCode(nextCode)
+  }, [externalSearchRequest, loadTraceByCode])
 
   const totals = useMemo(() => {
     const totalScanPcs = scans.reduce((acc, s) => acc + Number(s.qty_pieces || 0), 0)

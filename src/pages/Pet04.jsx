@@ -4,7 +4,7 @@ import { supabase } from "../lib/supabaseClient";
 import Etiqueta from "../components/Etiqueta";
 import FichaTecnicaModal from "../components/FichaTecnicaModal";
 import { getTurnoAtual, statusClass } from "../lib/utils";
-import { toBrazilTime } from "../lib/timezone";
+import { getShiftWindowAt } from "../lib/shifts";
 import { DateTime } from "luxon";
 import "../styles/Pet01.css";
 import { REFUGO_MOTIVOS } from "../lib/constants";
@@ -48,13 +48,6 @@ export default function Pet04({
   // listener de scanner: buffer e timestamps
   const scanBufferRef = useRef("");
   const lastKeyTimeRef = useRef(0);
-
-  // turno atual (usado para gravar)
-const [currentShift, setCurrentShift] = useState(() => {
-  // pega o instante atual e converte para horário de São Paulo antes de decidir o turno
-  const nowBr = toBrazilTime(new Date().toISOString());
-  return getTurnoAtual(nowBr) ?? "Hora Extra";
-});
 
   // Atualiza ativa/proximo sempre que ativos mudam (somente P4)
   useEffect(() => {
@@ -140,39 +133,12 @@ const [currentShift, setCurrentShift] = useState(() => {
     return parseInt(digitsOnly, 10);
   }, []);
 
-  // Resolve janelas de turno considerando o dia e cruzamento de meia-noite
-  const buildShiftIntervals = useCallback((nowBr, dayOffset = 0) => {
-    const jsDay = (nowBr.weekday % 7 + dayOffset + 7) % 7; // 0 = domingo
-    const base = nowBr.plus({ days: dayOffset }).startOf("day");
-    const intervals = [];
-    const pushInterval = (hIni, mIni, hFim, mFim, shiftKey) => {
-      let start = base.set({ hour: hIni, minute: mIni, second: 0, millisecond: 0 });
-      let end = base.set({ hour: hFim, minute: mFim, second: 0, millisecond: 0 });
-      if (end <= start) end = end.plus({ days: 1 });
-      intervals.push({ shiftKey, start, end });
-    };
-
-    if (jsDay >= 1 && jsDay <= 5) { // segunda a sexta
-      pushInterval(5, 15, 13, 45, "1");
-      pushInterval(13, 45, 22, 15, "2");
-      pushInterval(22, 15, 5, 15, "3");
-    } else if (jsDay === 6) { // sábado
-      pushInterval(5, 15, 9, 15, "1");
-      pushInterval(9, 15, 13, 15, "2");
-    } else if (jsDay === 0) { // domingo
-      pushInterval(23, 15, 5, 15, "3");
-    }
-
-    return intervals;
-  }, []);
-
   const resolveCurrentShiftWindow = useCallback(() => {
     const nowBr = DateTime.now().setZone("America/Sao_Paulo");
-    const intervals = [...buildShiftIntervals(nowBr, -1), ...buildShiftIntervals(nowBr, 0)];
-    const match = intervals.find((it) => nowBr >= it.start && nowBr < it.end);
+    const match = getShiftWindowAt(nowBr, { preserveLegacy: false });
     if (!match) return null;
     return { shiftKey: match.shiftKey, start: match.start, end: match.end };
-  }, [buildShiftIntervals]);
+  }, []);
 
   const fetchRefugoTurno = useCallback(async () => {
     const windowInfo = resolveCurrentShiftWindow();
@@ -401,9 +367,13 @@ async function biparWithCode(code) {
 
   // --- FORÇA horário BR e calcula turno com BR ---
   const nowBr = DateTime.now().setZone("America/Sao_Paulo");
+  const turnoAtual = getTurnoAtual(nowBr);
+  if (!turnoAtual) {
+    showToast("Fora dos turnos ativos. Apenas Turno 1 e 2 podem apontar.", "err");
+    return;
+  }
   const createdAtUtcIso = nowBr.toUTC().toISO(); // será gravado no supabase
-  // sempre calcular com base no nowBr (não usar currentShift)
-  const turnoCalc = String(getTurnoAtual(nowBr) || "Hora Extra");
+  const turnoCalc = String(turnoAtual);
 
   // logs detalhados antes do insert
   console.info("[biparWithCode] nowBr (BR):", nowBr.toISO());
@@ -505,7 +475,7 @@ if (typeof window !== "undefined") {
 
     window.addEventListener("keydown", onGlobalKey, true);
     return () => window.removeEventListener("keydown", onGlobalKey, true);
-  }, [ativa, scans, currentShift, saldo]); // deps: ativa so buffer relevant
+  }, [ativa, scans, saldo]); // deps: ativa so buffer relevant
 
   // ---------- status change handler (keeps behavior) ----------
   function handleStatusChange(targetStatus) {
@@ -734,10 +704,14 @@ if (typeof window !== "undefined") {
 
           // calcula aqui o instante em São Paulo e converte para UTC para gravar
           const nowBr = DateTime.now().setZone('America/Sao_Paulo');
+          const turnoAtual = getTurnoAtual(nowBr);
+          if (!turnoAtual) {
+            showToast("Fora dos turnos ativos. Apenas Turno 1 e 2 podem apontar.", "err");
+            return;
+          }
           const createdAtUtcIso = nowBr.toUTC().toISO();
 
-          // calcula o turno com base em nowBr (sempre recalculado no submit)
-          const turnoCalc = String(getTurnoAtual(nowBr) || "Hora Extra");
+          const turnoCalc = String(turnoAtual);
 
           // payload final compatível com scrap_logs
         const payload = {

@@ -2,7 +2,9 @@ import { useEffect, useState, useMemo, useCallback } from 'react';
 import { DateTime } from 'luxon';
 import { supabase } from '../lib/supabaseClient';
 import { MAQUINAS, REFUGO_MOTIVOS, TURNOS } from '../lib/constants';
+import { isMissingRelationError } from '../lib/productionRuntime';
 import { fmtDateTime, getTurnoAtual } from '../lib/utils';
+import { getShiftWindowsForDay } from '../lib/shifts';
 import useAuthAdmin from '../hooks/useAuthAdmin';
 import { toBrazilTime } from '../lib/timezone';
 import { calcularHorasParadasPorTurno, formatMsToHHmm } from '../lib/paradasPorTurno';
@@ -41,28 +43,11 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false }) {
 
   // Helpers locais para fatiar paradas por turno (clipping por turno)
   function getTurnoIntervalsDiaLocal(date) {
-    const dia = date.getDay();
-    if (dia === 0) {
-      return [
-        { ini: 23 * 60, fim: 24 * 60, turnoKey: '3' },
-      ];
-    }
-    if (dia >= 1 && dia <= 5) {
-      return [
-        { ini: 5 * 60, fim: 13 * 60 + 30, turnoKey: '1' },
-        { ini: 13 * 60 + 30, fim: 22 * 60, turnoKey: '2' },
-        { ini: 22 * 60, fim: 24 * 60, turnoKey: '3' },
-        { ini: 0, fim: 5 * 60, turnoKey: '3' },
-      ];
-    }
-    if (dia === 6) {
-      return [
-        { ini: 0, fim: 5 * 60, turnoKey: '3' },
-        { ini: 5 * 60, fim: 9 * 60, turnoKey: '1' },
-        { ini: 9 * 60, fim: 13 * 60, turnoKey: '2' },
-      ];
-    }
-    return [];
+    return getShiftWindowsForDay(date).map((window) => ({
+      ini: window.start.hour * 60 + window.start.minute,
+      fim: window.end.hour * 60 + window.end.minute,
+      turnoKey: window.shiftKey,
+    }));
   }
 
   function inRangeMinutes(minIni, minFim, minutos) {
@@ -119,6 +104,46 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false }) {
     if (!product) return null;
     const t = String(product);
     return t.split('-')[0]?.trim() || null;
+  }
+
+  async function fetchOrdersCompatByIds(orderIds) {
+    if (!Array.isArray(orderIds) || orderIds.length === 0) return [];
+
+    const runtimeRes = await supabase
+      .from('production_orders_runtime_v')
+      .select('id,code,product,standard,created_at,boxes,machine_id')
+      .in('id', orderIds);
+
+    if (isMissingRelationError(runtimeRes.error, 'production_orders_runtime_v')) {
+      const { data, error } = await supabase
+        .from('orders')
+        .select('id,code,product,standard,created_at,boxes,machine_id')
+        .in('id', orderIds);
+      if (error) throw error;
+      return data || [];
+    }
+
+    if (runtimeRes.error) throw runtimeRes.error;
+    return runtimeRes.data || [];
+  }
+
+  async function fetchAllOrdersCompat() {
+    const runtimeRes = await supabase
+      .from('production_orders_runtime_v')
+      .select('id, code, product, standard, created_at, boxes, machine_id')
+      .order('created_at', { ascending: false });
+
+    if (isMissingRelationError(runtimeRes.error, 'production_orders_runtime_v')) {
+      const { data, error } = await supabase
+        .from('orders')
+        .select('id, code, product, standard, created_at, boxes, machine_id')
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      return data || [];
+    }
+
+    if (runtimeRes.error) throw runtimeRes.error;
+    return runtimeRes.data || [];
   }
 
   // A duração do turno por período é calculada após `filtroStart/filtroEnd`.
@@ -227,7 +252,7 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false }) {
   // Calcula a duração total do turno dentro do período filtrado (em ms)
   const duracaoTurnoPorPeriodo = useMemo(() => {
     if (!filtroStart || !filtroEnd) return {};
-    const res = { '1': 0, '2': 0, '3': 0 };
+    const res = { '1': 0, '2': 0 };
 
     // iterar dia a dia em America/Sao_Paulo
     let cursor = DateTime.fromJSDate(filtroStart).setZone('America/Sao_Paulo').startOf('day');
@@ -302,10 +327,7 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false }) {
       (aps || []).forEach(a => { if (a.order_id != null) orderIdsSet.add(String(a.order_id)); });
       const orderIds = Array.from(orderIdsSet);
       if (orderIds.length > 0) {
-        const { data: ords } = await supabase
-          .from('orders')
-          .select('id,code,product,standard,created_at,boxes')
-          .in('id', orderIds);
+        const ords = await fetchOrdersCompatByIds(orderIds);
         setOrders(ords || []);
       } else {
         setOrders([]);
@@ -387,17 +409,7 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false }) {
         const orderIds = Array.from(orderIdsSet);
         let ordersData = [];
         if (orderIds.length > 0) {
-          // consultar apenas orders relevantes
-          const { data: ords, error } = await supabase
-            .from('orders')
-            .select('id,code,product,standard,created_at,boxes') // traga campos úteis
-            .in('id', orderIds);
-          if (error) {
-            console.warn('Erro ao buscar orders por ids:', error);
-            ordersData = [];
-          } else {
-            ordersData = ords || [];
-          }
+          ordersData = await fetchOrdersCompatByIds(orderIds);
         } else {
           ordersData = [];
         }
@@ -421,16 +433,8 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false }) {
     // Busca todas as O.S registradas (independente de bipagens/refugos no período)
     async function fetchAllOrders() {
       try {
-        const { data, error } = await supabase
-          .from('orders')
-          .select('id, code, product, standard, created_at, boxes, machine_id')
-          .order('created_at', { ascending: false });
-        if (error) {
-          console.warn('Erro ao buscar todas as orders:', error);
-          if (mounted) setOrdersAll([]);
-        } else if (mounted) {
-          setOrdersAll(data || []);
-        }
+        const data = await fetchAllOrdersCompat();
+        if (mounted) setOrdersAll(data || []);
       } catch (err) {
         console.error('Exception ao buscar todas as orders:', err);
         if (mounted) setOrdersAll([]);

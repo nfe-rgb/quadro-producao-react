@@ -42,7 +42,6 @@ export default function Painel({
   lastFinalizadoPorMaquina,
   metaPercent,
   onScanned, // opcional: callback do pai para re-fetch geral
-  authUser,
   machinePriorities = {},
 }) {
   const META_MENSAL = 770000;
@@ -332,9 +331,6 @@ export default function Painel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Estado para armazenar o started_at do log aberto de baixa eficiência por máquina
-  const [lowEffStartedAt, setLowEffStartedAt] = useState({});
-
   function priorityTone(value) {
     if (value == null || Number.isNaN(Number(value))) return "priority-chip-gray";
     const n = Number(value);
@@ -342,85 +338,6 @@ export default function Painel({
     if (n >= 3) return "priority-chip-yellow";
     if (n >= 1) return "priority-chip-red";
     return "priority-chip-gray";
-  }
-
-  // Efeito para buscar o log aberto de baixa eficiência para cada máquina ativa
-  useEffect(() => {
-    async function fetchLowEffLogs() {
-      const result = {};
-      for (const m of MAQUINAS) {
-        const lista = (localAtivos && localAtivos[m]) || [];
-        const ativa = lista[0] || null;
-        if (ativa && ativa.status === "BAIXA_EFICIENCIA") {
-          // Busca log aberto para essa ordem/máquina
-          let query = supabase
-            .from("low_efficiency_logs")
-            .select("started_at")
-            .is("ended_at", null)
-            .eq("machine_id", m);
-          if (ativa.id) query = query.eq("order_id", ativa.id);
-          const { data, error } = await query;
-          if (!error && data && data.length > 0) {
-            result[m] = data[0].started_at;
-          }
-        }
-      }
-      setLowEffStartedAt(result);
-    }
-    fetchLowEffLogs();
-    // Executa sempre que localAtivos ou status mudam
-  }, [localAtivos, tick]);
-  
-  async function insertLowEfficiencyLog({ order_id = null, machine_id, started_by = null, notes = null }) {
-    try {
-      const payload = {
-        order_id: order_id || null,
-        machine_id,
-        started_at: new Date().toISOString(),
-        started_by,
-        notes,
-      };
-      const { data, error } = await supabase.from("low_efficiency_logs").insert(payload).select();
-      if (error) {
-        console.error("Erro inserindo low_efficiency_logs:", error);
-        return { error };
-      }
-      return { data };
-    } catch (err) {
-      console.error("Exception insertLowEfficiencyLog:", err);
-      return { error: err };
-    }
-  }
-
-  async function endLowEfficiencyLog({ order_id = null, machine_id, ended_by = null, notes = null }) {
-    try {
-      const updates = {
-        ended_at: new Date().toISOString(),
-        ended_by,
-        notes,
-      };
-
-      // Se order_id estiver disponível, preferimos usá-lo para encontrar o log aberto.
-      // Caso contrário, usamos machine_id e ended_at IS NULL.
-      let query = supabase.from("low_efficiency_logs").update(updates).is("ended_at", null);
-
-      if (order_id) {
-        query = query.eq("order_id", order_id);
-      } else {
-        query = query.eq("machine_id", machine_id);
-      }
-
-      // Executa update
-      const { data, error } = await query.select();
-      if (error) {
-        console.error("Erro ao encerrar low_efficiency_logs:", error);
-        return { error };
-      }
-      return { data };
-    } catch (err) {
-      console.error("Exception endLowEfficiencyLog:", err);
-      return { error: err };
-    }
   }
 
   const source = localAtivos || {};
@@ -456,11 +373,11 @@ export default function Painel({
 
           // Timer de baixa eficiência usando started_at do log aberto
           const lowEffText =
-            ativa?.status === "BAIXA_EFICIENCIA" && lowEffStartedAt[m]
+            ativa?.status === "BAIXA_EFICIENCIA" && ativa?.loweff_started_at
               ? (() => {
                   const _ = tick;
                   const secs =
-                    (Date.now() - new Date(lowEffStartedAt[m]).getTime()) / 1000;
+                    (Date.now() - new Date(ativa.loweff_started_at).getTime()) / 1000;
                   return formatHHMMSS(secs);
                 })()
               : null;
@@ -557,7 +474,6 @@ export default function Painel({
                           value={ativa.status}
                           onChange={async (e) => {
                             const novoStatus = e.target.value;
-                            const prevStatus = ativa?.status;
                             // chama callback pai para atualizar status (mantém comportamento atual)
                             try {
                               onStatusChange(ativa, novoStatus);

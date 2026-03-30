@@ -9,11 +9,9 @@ import Login from './abas/Login'
 import Painel from './abas/Painel'
 import Lista from './abas/Lista'
 import NovaOrdem from './abas/NovaOrdem'
-import Registro from './abas/Registro'
 import Estoque from './abas/Estoque'
-import Rastreio from './abas/Rastreio'
 import Gestao from './abas/Gestao'
-import GerenciamentoAvancado from './abas/GerenciamentoAvancado'
+import Rastreio from './abas/Rastreio'
 import PainelTV from './abas/PainelTV'
 import Pet01 from './pages/Pet01'
 import Pet02 from './pages/Pet02'
@@ -27,7 +25,6 @@ import MetaScreen from './components/MetaScreen'
 import useOrders from './hooks/useOrders'
 import useAuthAdmin from './hooks/useAuthAdmin'
 import GlobalModals from './components/GlobalModals'
-import Apontamento from './abas/Apontamento'
 import { DateTime } from 'luxon';
 import { supabase } from './lib/supabaseClient'
 
@@ -65,7 +62,8 @@ export default function App(){
 
   const { authUser, authChecked, isAdmin, accessLevel, isMendes, isStockOnlyAccess } = useAuthAdmin()
   const hasEstoqueAccess = !!authUser && (accessLevel === 2 || accessLevel === 3 || isMendes)
-  const hasGestaoAccess = !!authUser && !isMendes && !isStockOnlyAccess && (accessLevel === 1 || accessLevel === 2)
+  const hasGestaoAccess = !!authUser && !isMendes
+  const gestaoTabActive = ['gestao', 'registro', 'apontamento', 'gerencial'].includes(tab)
 
   const {
     ordens, paradas,
@@ -248,14 +246,15 @@ export default function App(){
       return
     }
 
-    if (tab === 'gestao' && isStockOnlyAccess) {
-      setTab('painel')
+    if (['registro', 'apontamento', 'gerencial'].includes(tab) && hasGestaoAccess) {
+      setTab('gestao')
+      return
     }
 
-    if (tab === 'gerencial' && !isAdmin) {
+    if (tab === 'gestao' && !hasGestaoAccess) {
       setTab('painel')
     }
-  }, [authChecked, authUser, tab, isMendes, accessLevel, isStockOnlyAccess, isAdmin])
+  }, [authChecked, authUser, tab, isMendes, accessLevel, isStockOnlyAccess, isAdmin, hasGestaoAccess])
 
   async function handleSignOut() {
     try {
@@ -539,17 +538,14 @@ export default function App(){
               {isAdmin && (
                 <button className={`tabbtn ${tab==='nova'?'active':''}`} onClick={()=>setTab('nova')}>Nova Ordem</button>
               )}
-              <button className={`tabbtn ${tab==='registro'?'active':''}`} onClick={()=>setTab('registro')}>Paradas</button>
-              <button className={`tabbtn ${tab==='rastreio'?'active':''}`} onClick={()=>setTab('rastreio')}>Rastreio</button>
               {authUser && (accessLevel === 2 || accessLevel === 3) && (
                 <button className={`tabbtn ${tab==='estoque'?'active':''}`} onClick={()=>setTab('estoque')}>Estoque</button>
               )}
-              <button className={`tabbtn ${tab==='apontamento'?'active':''}`} onClick={()=>setTab('apontamento')}>Apontamento</button>
               {hasGestaoAccess && (
-                <button className={`tabbtn ${tab==='gestao'?'active':''}`} onClick={()=>setTab('gestao')}>Gestão</button>
+                <button className={`tabbtn ${tab==='rastreio'?'active':''}`} onClick={()=>setTab('rastreio')}>Rastreio</button>
               )}
-              {isAdmin && (
-                <button className={`tabbtn ${tab==='gerencial'?'active':''}`} onClick={()=>setTab('gerencial')}>Administração</button>
+              {hasGestaoAccess && (
+                <button className={`tabbtn ${gestaoTabActive?'active':''}`} onClick={()=>setTab('gestao')}>Gestão</button>
               )}
               <button className="tabbtn" onClick={handleSignOut}>Sair</button>
             </>
@@ -623,14 +619,6 @@ export default function App(){
         )
       )}
 
-      {tab === 'registro' && !isMendes && (
-        <Registro registroGrupos={registroGrupos} openSet={openSet} toggleOpen={toggleOpen} isAdmin={isAdmin} />
-      )}
-
-      {tab === 'rastreio' && !isMendes && (
-        <Rastreio />
-      )}
-
       {tab === 'estoque' && hasEstoqueAccess && (
         <Estoque
           readOnly={isMendes}
@@ -639,13 +627,9 @@ export default function App(){
         />
       )}
 
-      {tab === 'apontamento' && !isMendes && (
-        <Apontamento isAdmin={isAdmin} />
-      )}
-
-      {tab === 'gestao' && !isMendes && (
+      {tab === 'rastreio' && !isMendes && (
         hasGestaoAccess ? (
-          <Gestao />
+          <Rastreio />
         ) : (
           <div style={{ padding: 24 }}>
             <h2>Acesso Negado</h2>
@@ -654,9 +638,9 @@ export default function App(){
         )
       )}
 
-      {tab === 'gerencial' && !isMendes && (
-        isAdmin ? (
-          <GerenciamentoAvancado />
+      {gestaoTabActive && !isMendes && (
+        hasGestaoAccess ? (
+          <Gestao registroGrupos={registroGrupos} openSet={openSet} toggleOpen={toggleOpen} isAdmin={isAdmin} />
         ) : (
           <div style={{ padding: 24 }}>
             <h2>Acesso Negado</h2>

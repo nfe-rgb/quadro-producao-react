@@ -5,6 +5,7 @@ import PieChartIndicadores from '../components/PieChartIndicadores'
 import { fmtDateTime, fmtDuracao } from '../lib/utils'
 import { MAQUINAS, MOTIVOS_PARADA } from '../lib/constants'
 import Modal from '../components/Modal'
+import { calculateMachinePeriodMetrics } from '../lib/productionIntervals'
 
 const safe = v => {
   if (v === null || v === undefined) return null
@@ -55,263 +56,22 @@ function getPeriodoRange(p, customStart, _unusedCustomEnd, now = new Date()) {
   return { start, end }
 }
 
-function unirArrays(intervalos) {
-  if (!intervalos.length) return []
-  intervalos.sort((a, b) => a[0] - b[0])
-  const unidos = [intervalos[0].slice()]
-  for (let i = 1; i < intervalos.length; i++) {
-    const ultimo = unidos[unidos.length - 1]
-    const atual = intervalos[i]
-    if (atual[0] <= ultimo[1]) {
-      ultimo[1] = Math.max(ultimo[1], atual[1])
-    } else {
-      unidos.push([atual[0], atual[1]])
-    }
-  }
-  return unidos
-}
-
-function nextStartForMachine(machineGroups = [], refTime) {
-  if (!Array.isArray(machineGroups) || machineGroups.length === 0) return null
-  const sorted = machineGroups
-    .map(g => ({ g, t: toTime(g?.ordem?.started_at) || 0 }))
-    .filter(x => x.t > refTime)
-    .sort((a, b) => a.t - b.t)
-  return sorted.length ? sorted[0].g : null
-}
-
 /**
  * calculateAggregates - versão corrigida e centralizada
  * Retorna:
- *  { totalProdH, totalParadaH, totalLowEffH, totalSemProgH, totalH, totalDisponivelH, pct, totalMaquinasParadas, machineParadaMs }
+ *  { totalProdH, totalParadaH, totalLowEffH, totalSemProgH, totalH, totalDisponivelH, totalMaquinasParadas, machineParadaMs }
  */
-function calculateAggregates({ gruposPorMaquina, filtroStart, filtroEnd, maquinasConsideradas }) {
-  let totalProdMs = 0, totalParadaMs = 0, totalLowEffMs = 0, totalSemProgMs = 0
-  const machineParadaMs = {}
-
-  if (!filtroStart || !filtroEnd) {
-    return {
-      totalProdH: 0,
-      totalParadaH: 0,
-      totalLowEffH: 0,
-      totalSemProgH: 0,
-      totalH: 0,
-      totalDisponivelH: 0,
-      pct: () => '0.0',
-      totalMaquinasParadas: 0,
-      machineParadaMs: {}
-    }
-  }
-
-  const filtroStartMs = filtroStart.getTime()
-  const filtroEndMs = filtroEnd.getTime()
-  const nowClamp = Math.min(Date.now(), filtroEndMs)
-
-  for (const m of maquinasConsideradas) {
-    const gruposOrdenados = (gruposPorMaquina[m] || []).slice().sort((a, b) => {
-      const ta = toTime(a?.ordem?.started_at) || 0
-      const tb = toTime(b?.ordem?.started_at) || 0
-      return ta - tb
-    })
-
-    // Se nenhuma OP no período -> sem programação total
-    if (gruposOrdenados.length === 0) {
-      const horasPeriodoMs = Math.max(0, filtroEndMs - filtroStartMs)
-      totalSemProgMs += horasPeriodoMs
-      machineParadaMs[m] = 0
-      continue
-    }
-
-    // --- 1) calcular paradas (stops) da máquina para o período, com clipping e unificação ---
-    const allStops = []
-    for (const g of gruposOrdenados) {
-      const stops = g.stops || []
-      for (const st of stops) {
-        const stIni = toTime(st.started_at)
-        if (!stIni) continue
-        const stFim = safe(st.resumed_at) ? toTime(st.resumed_at) : nowClamp
-        const ini = Math.max(stIni, filtroStartMs)
-        const fim = Math.min(stFim, filtroEndMs)
-        if (ini < fim) allStops.push([ini, fim])
-      }
-    }
-    const stopsUnidos = unirArrays(allStops)
-    let paradaMsMaquina = 0
-    stopsUnidos.forEach(([ini, fim]) => { paradaMsMaquina += Math.max(0, fim - ini) })
-    machineParadaMs[m] = paradaMsMaquina
-    totalParadaMs += paradaMsMaquina
-
-    // --- 2) produção / baixa eficiência ---
-    let prodMsMaquina = 0
-    let lowEffMsMaquina = 0
-
-    // acumulador de ocupação para calcular sem programação por complemento
-    const ocupados = []
-    // adicionar paradas como ocupação (já unidas)
-    stopsUnidos.forEach(([i, f]) => ocupados.push([i, f]))
-
-    for (const g of gruposOrdenados) {
-      const o = g.ordem || {}
-      const startMs = toTime(o.started_at)
-      if (!startMs) continue
-
-      // coletar eventos importantes (start, interrupt, restart, final)
-      const eventos = []
-      // garantir que started_at apareça como 'start' se existir
-      if (safe(o.started_at)) eventos.push({ t: toTime(o.started_at), type: 'start' })
-      if (safe(o.restarted_at)) eventos.push({ t: toTime(o.restarted_at), type: 'restart' })
-      if (safe(o.interrupted_at)) eventos.push({ t: toTime(o.interrupted_at), type: 'interrupt' })
-      if (safe(o.finalized_at)) eventos.push({ t: toTime(o.finalized_at), type: 'final' })
-
-      // ordenar por timestamp
-      eventos.sort((a, b) => a.t - b.t)
-
-      // === NOVA LÓGICA: scan linear com estado "running" ===
-      const prodBaseIntervals = []
-      let running = false
-      let runStart = null
-
-      // Se houver um started_at (inventário), mas nenhum evento posterior de start/restart, tratamos via eventos já inseridos.
-      // Iteramos os eventos em ordem; quando encontramos start/restart abrimos, ao encontrar interrupt/final fechamos.
-      for (let i = 0; i < eventos.length; i++) {
-        const ev = eventos[i]
-        if ((ev.type === 'start' || ev.type === 'restart')) {
-          // abrir apenas se não estiver rodando
-          if (!running) {
-            running = true
-            runStart = ev.t
-          } else {
-            // se já estava rodando, ignorar (evita sobreposição)
-          }
-        } else if (ev.type === 'interrupt' || ev.type === 'final') {
-          if (running) {
-            const ini = Math.max(runStart, filtroStartMs)
-            const fim = Math.min(ev.t, filtroEndMs)
-            if (ini < fim) prodBaseIntervals.push([ini, fim])
-            running = false
-            runStart = null
-          } else {
-            // se não estava rodando, ignoramos este interrupt/final
-          }
-        }
-      }
-
-      // se ao final o estado estiver "running", fechar até finalized_at (se existir) ou nowClamp
-      if (running) {
-        let fimAberto = safe(o.finalized_at) ? toTime(o.finalized_at) : nowClamp
-        fimAberto = Math.min(fimAberto, filtroEndMs)
-        const ini = Math.max(runStart || startMs, filtroStartMs)
-        if (ini < fimAberto) prodBaseIntervals.push([ini, fimAberto])
-      } else {
-        // se não havia eventos de start/restart mas existe started_at e possivelmente finalized_at,
-        // considerar o intervalo entre started_at e finalized_at/nowClamp
-        const hasStartEvent = eventos.some(e => e.type === 'start' || e.type === 'restart')
-        if (!hasStartEvent) {
-          const lastEnd = safe(o.finalized_at) ? toTime(o.finalized_at) : nowClamp
-          const ini = Math.max(startMs, filtroStartMs)
-          const fim = Math.min(lastEnd, filtroEndMs)
-          if (ini < fim) prodBaseIntervals.push([ini, fim])
-        }
-      }
-
-      // Agora, para cada base, remover paradas (stopsUnidos) e aplicar loweff
-      for (const [iniBase, fimBase] of prodBaseIntervals) {
-        // calcular paradas dentro do base
-        const paradaClipped = stopsUnidos
-          .map(([pIni, pFim]) => {
-            const ini = Math.max(pIni, iniBase)
-            const fim = Math.min(pFim, fimBase)
-            return ini < fim ? [ini, fim] : null
-          })
-          .filter(Boolean)
-        const paradaUnida = unirArrays(paradaClipped)
-
-        // gerar fatias livres (livres = porções de base sem parada)
-        let livres = []
-        let cursorLiv = iniBase
-        for (let i = 0; i < paradaUnida.length; i++) {
-          const [pIni, pFim] = paradaUnida[i]
-          if (pIni > cursorLiv) livres.push([cursorLiv, pIni])
-          cursorLiv = Math.max(cursorLiv, pFim)
-        }
-        if (cursorLiv < fimBase) livres.push([cursorLiv, fimBase])
-
-        // dentro de cada livre, separar loweff e produção
-        for (const [livreIni, livreFim] of livres) {
-          if (livreFim <= livreIni) continue
-
-          const lowEffIntervals = []
-          if (safe(o.loweff_started_at)) {
-            const leIni = toTime(o.loweff_started_at)
-            const leFim = safe(o.loweff_ended_at) ? toTime(o.loweff_ended_at) : livreFim
-            const leIniCalc = Math.max(leIni, filtroStartMs, livreIni)
-            const leFimCalc = Math.min(leFim, filtroEndMs, livreFim)
-            if (leIniCalc < leFimCalc) lowEffIntervals.push([leIniCalc, leFimCalc])
-          }
-          const lowUnidos = unirArrays(lowEffIntervals)
-
-          if (lowUnidos.length === 0) {
-            prodMsMaquina += Math.max(0, livreFim - livreIni)
-            ocupados.push([livreIni, livreFim])
-          } else {
-            let cursorF = livreIni
-            for (let i = 0; i < lowUnidos.length; i++) {
-              const [leIni, leFim] = lowUnidos[i]
-              if (leIni > cursorF) {
-                prodMsMaquina += Math.max(0, leIni - cursorF)
-                ocupados.push([cursorF, leIni])
-              }
-              const lowIni = Math.max(leIni, livreIni)
-              const lowFim = Math.min(leFim, livreFim)
-              if (lowFim > lowIni) {
-                lowEffMsMaquina += Math.max(0, lowFim - lowIni)
-                ocupados.push([lowIni, lowFim])
-              }
-              cursorF = Math.max(cursorF, leFim)
-            }
-            if (cursorF < livreFim) {
-              prodMsMaquina += Math.max(0, livreFim - cursorF)
-              ocupados.push([cursorF, livreFim])
-            }
-          }
-        }
-      } // fim prodBaseIntervals loop
-    } // fim for each OP
-
-    totalProdMs += prodMsMaquina
-    totalLowEffMs += lowEffMsMaquina
-
-    // --- 3) sem programação por complemento ---
-    const ocupadosUnidos = unirArrays(ocupados)
-    let ocupadoTotalMs = 0
-    ocupadosUnidos.forEach(([i, f]) => { ocupadoTotalMs += Math.max(0, f - i) })
-    const horasPeriodoMs = Math.max(0, filtroEndMs - filtroStartMs)
-    const semProgMsMaquina = Math.max(0, horasPeriodoMs - ocupadoTotalMs)
-    totalSemProgMs += semProgMsMaquina
-  } // fim maquinas loop
-
-  const totalProdH = totalProdMs / 1000 / 60 / 60
-  const totalParadaH = totalParadaMs / 1000 / 60 / 60
-  const totalLowEffH = totalLowEffMs / 1000 / 60 / 60
-  const totalSemProgH = totalSemProgMs / 1000 / 60 / 60
-  const totalH = totalProdH + totalParadaH + totalLowEffH + totalSemProgH
-
-  const horasPeriodo = (filtroEnd.getTime() - filtroStart.getTime()) / 1000 / 60 / 60
-  const totalDisponivelH = maquinasConsideradas.length * horasPeriodo
-
-  const pct = v => totalDisponivelH ? ((v / totalDisponivelH) * 100).toFixed(1) : '0.0'
-  const totalMaquinasParadas = maquinasConsideradas.filter(m => (machineParadaMs[m] || 0) > 0).length
+function calculateAggregates({ gruposPorMaquina, filterStart, filterEnd, maquinasConsideradas }) {
+  const metrics = calculateMachinePeriodMetrics({
+    groupsByMachine: gruposPorMaquina,
+    filterStart,
+    filterEnd,
+    machines: maquinasConsideradas,
+  })
 
   return {
-    totalProdH,
-    totalParadaH,
-    totalLowEffH,
-    totalSemProgH,
-    totalH,
-    totalDisponivelH,
-    pct,
-    totalMaquinasParadas,
-    machineParadaMs
+    ...metrics,
+    totalH: metrics.totalProdH + metrics.totalParadaH + metrics.totalLowEffH + metrics.totalSemProgH,
   }
 }
 
@@ -354,63 +114,31 @@ function Filters({ periodo, setPeriodo, customDate, setCustomDate, filtroMaquina
 // Componente principal (refatorado e com pontos de extensão claros)
 // =========================
 export default function Registro({ registroGrupos = [], openSet, toggleOpen, isAdmin = false }) {
-  // Estado para armazenar logs de baixa eficiência por ordem
-  // ...existing code...
-  // Estado para armazenar logs de baixa eficiência por ordem
   const [lowEffLogsByOrder, setLowEffLogsByOrder] = useState({});
-  const [tick, setTick] = useState(0)
+  const [currentNow, setCurrentNow] = useState(() => new Date())
   useEffect(() => {
-    const id = setInterval(() => setTick(t => t + 1), 1000)
+    const id = setInterval(() => setCurrentNow(new Date()), 1000)
     return () => clearInterval(id)
   }, [])
 
-  // Buscar logs de baixa eficiência para as ordens exibidas
   useEffect(() => {
-    async function fetchLowEffLogs() {
-      const orderIds = registroGrupos.map(g => g?.ordem?.id).filter(Boolean);
-      if (!orderIds.length) {
-        setLowEffLogsByOrder({});
-        return;
-      }
-      const { data, error } = await supabase
-        .from('low_efficiency_logs')
-        .select('*')
-        .in('order_id', orderIds);
-      if (error) {
-        setLowEffLogsByOrder({});
-        return;
-      }
-      // Agrupa por order_id
-      const logsByOrder = {};
-      for (const log of data) {
-        if (!logsByOrder[log.order_id]) logsByOrder[log.order_id] = [];
-        logsByOrder[log.order_id].push(log);
-      }
-      setLowEffLogsByOrder(logsByOrder);
+    const logsByGroup = {};
+    for (const group of registroGrupos) {
+      const groupId = group?.ordem?.id;
+      if (!groupId) continue;
+      logsByGroup[groupId] = [...(group?.lowEffLogs || [])].sort((a, b) => (toTime(a?.started_at) || 0) - (toTime(b?.started_at) || 0));
     }
-    fetchLowEffLogs();
+    setLowEffLogsByOrder(logsByGroup);
   }, [registroGrupos]);
 
-  // Re-fetch auxiliar após salvar correções
   async function refetchLowEffLogs() {
-    const orderIds = registroGrupos.map(g => g?.ordem?.id).filter(Boolean);
-    if (!orderIds.length) {
-      setLowEffLogsByOrder({});
-      return;
+    const logsByGroup = {};
+    for (const group of registroGrupos) {
+      const groupId = group?.ordem?.id;
+      if (!groupId) continue;
+      logsByGroup[groupId] = [...(group?.lowEffLogs || [])].sort((a, b) => (toTime(a?.started_at) || 0) - (toTime(b?.started_at) || 0));
     }
-    const { data, error } = await supabase
-      .from('low_efficiency_logs')
-      .select('*')
-      .in('order_id', orderIds);
-    if (error) {
-      return;
-    }
-    const logsByOrder = {};
-    for (const log of data) {
-      if (!logsByOrder[log.order_id]) logsByOrder[log.order_id] = [];
-      logsByOrder[log.order_id].push(log);
-    }
-    setLowEffLogsByOrder(logsByOrder);
+    setLowEffLogsByOrder(logsByGroup);
   }
 
   const [hoveredIndicador, setHoveredIndicador] = useState(null)
@@ -445,7 +173,7 @@ export default function Registro({ registroGrupos = [], openSet, toggleOpen, isA
   maquinasConsideradas = maquinasConsideradas.filter(m => MAQUINAS.includes(m))
 
   // 1) Period range (centralizado)
-  const periodoRange = useMemo(() => getPeriodoRange(periodo, customDate, undefined, new Date()), [periodo, customDate, tick])
+  const periodoRange = useMemo(() => getPeriodoRange(periodo, customDate, undefined, currentNow), [periodo, customDate, currentNow])
   const filtroStart = periodoRange.start
   const filtroEnd = periodoRange.end
 
@@ -460,7 +188,6 @@ export default function Registro({ registroGrupos = [], openSet, toggleOpen, isA
       const iniMs = toTime(o.started_at)
       const fimMs = toTime(o.finalized_at)
       const restartedMs = toTime(o.restarted_at)
-      const interruptedMs = toTime(o.interrupted_at)
       const filtroStartMs = filtroStart.getTime();
       const filtroEndMs = filtroEnd.getTime();
 
@@ -487,7 +214,7 @@ export default function Registro({ registroGrupos = [], openSet, toggleOpen, isA
       const resultado = startedInRange || restartedInRange || finalizedInRange || openInRange || abertaAposInicio || reiniciadaAberta || hasOpenStop
       return resultado
     })
-  }, [registroGrupos, filtroStart, filtroEnd, periodo, customDate, tick])
+  }, [registroGrupos, filtroStart, filtroEnd, periodo, customDate])
 
   // 3) Filtrar por máquina
   const gruposFiltradosMaquina = useMemo(() => {
@@ -499,7 +226,7 @@ export default function Registro({ registroGrupos = [], openSet, toggleOpen, isA
       return gruposFiltrados.filter(g => String(g?.ordem?.machine_id || '').toUpperCase().startsWith('I'))
     }
     return gruposFiltrados.filter(g => String(g?.ordem?.machine_id || 'SEM MÁQ.') === String(filtroMaquina))
-  }, [gruposFiltrados, filtroMaquina, tick])
+  }, [gruposFiltrados, filtroMaquina])
 
   // 4) Agrupar por máquina (simples e previsível)
   const gruposPorMaquina = useMemo(() => {
@@ -524,133 +251,12 @@ export default function Registro({ registroGrupos = [], openSet, toggleOpen, isA
     return map
   }, [gruposFiltrados])
 
-  // 5) Calcular agregados, somando baixa eficiência dos logs reais
+  // 5) Calcular agregados com o motor unificado de intervalos
   const aggregates = useMemo(() => {
-    // Calcula intervalos de parada e baixa eficiência por máquina, sem sobreposição
-    const filtroStartMs = filtroStart ? filtroStart.getTime() : null;
-    const filtroEndMs = filtroEnd ? filtroEnd.getTime() : null;
-    const machineLowEffMs = {};
-    const machineLowEffNoStopMs = {};
-    const machineParadaMs = {};
-    let totalLowEffMs = 0;
-    let totalParadaMs = 0;
-    for (const m of maquinasConsideradas) {
-      // Busca ordens dessa máquina
-      const grupos = gruposPorMaquina[m] || [];
-      // Coleta intervalos de parada
-      const paradaIntervals = [];
-      for (const gr of grupos) {
-        const stops = gr.stops || [];
-        for (const st of stops) {
-          let ini = toTime(st.started_at);
-          let fim = safe(st.resumed_at) ? toTime(st.resumed_at) : Date.now();
-          if (filtroStartMs !== null && ini < filtroStartMs) ini = filtroStartMs;
-          if (filtroEndMs !== null && fim > filtroEndMs) fim = filtroEndMs;
-          if (ini && fim && fim > ini) paradaIntervals.push([ini, fim]);
-        }
-      }
-      // Coleta intervalos de baixa eficiência
-      const lowEffIntervals = [];
-      for (const gr of grupos) {
-        const o = gr.ordem || {};
-        const logs = lowEffLogsByOrder[o.id] || [];
-        for (const log of logs) {
-          let ini = toTime(log.started_at);
-          let fim = log.ended_at ? toTime(log.ended_at) : Date.now();
-          if (filtroStartMs !== null && ini < filtroStartMs) ini = filtroStartMs;
-          if (filtroEndMs !== null && fim > filtroEndMs) fim = filtroEndMs;
-          if (ini && fim && fim > ini) lowEffIntervals.push([ini, fim]);
-        }
-      }
-      // Unir intervalos de parada e baixa eficiência
-      function unir(arr) {
-        if (!arr.length) return [];
-        arr.sort((a, b) => a[0] - b[0]);
-        const unidos = [arr[0].slice()];
-        for (let i = 1; i < arr.length; i++) {
-          const ultimo = unidos[unidos.length - 1];
-          const atual = arr[i];
-          if (atual[0] <= ultimo[1]) {
-            ultimo[1] = Math.max(ultimo[1], atual[1]);
-          } else {
-            unidos.push([atual[0], atual[1]]);
-          }
-        }
-        return unidos;
-      }
-      const paradaUnida = unir(paradaIntervals);
-      const lowEffUnida = unir(lowEffIntervals);
-      // 1. Baixa eficiência integral dos logs (para exibição)
-      let lowEffMs = 0;
-      for (const [leIni, leFim] of lowEffUnida) {
-        if (leFim > leIni) lowEffMs += Math.max(0, leFim - leIni);
-      }
-      // 1a. Baixa eficiência sem sobreposição com parada (para ajuste de produção)
-      let lowEffNoStopMs = 0;
-      for (const [leIni, leFim] of lowEffUnida) {
-        let fatias = [[leIni, leFim]];
-        for (const [pIni, pFim] of paradaUnida) {
-          const novasFatias = [];
-          for (const [fIni, fFim] of fatias) {
-            if (pFim <= fIni || pIni >= fFim) {
-              novasFatias.push([fIni, fFim]);
-              continue;
-            }
-            if (pIni > fIni && pIni < fFim) novasFatias.push([fIni, pIni]);
-            if (pFim > fIni && pFim < fFim) novasFatias.push([pFim, fFim]);
-          }
-          fatias = novasFatias;
-        }
-        for (const [fIni, fFim] of fatias) {
-          if (fFim > fIni) lowEffNoStopMs += Math.max(0, fFim - fIni);
-        }
-      }
-      // 2. Parada: desconta trechos de baixa eficiência (mantém exclusão para não duplicar parada)
-      let paradaMs = 0;
-      for (const [pIni, pFim] of paradaUnida) {
-        let fatias = [[pIni, pFim]];
-        for (const [leIni, leFim] of lowEffUnida) {
-          const novasFatias = [];
-          for (const [fIni, fFim] of fatias) {
-            if (leFim <= fIni || leIni >= fFim) {
-              novasFatias.push([fIni, fFim]);
-              continue;
-            }
-            if (leIni > fIni && leIni < fFim) novasFatias.push([fIni, leIni]);
-            if (leFim > fIni && leFim < fFim) novasFatias.push([leFim, fFim]);
-          }
-          fatias = novasFatias;
-        }
-        for (const [fIni, fFim] of fatias) {
-          if (fFim > fIni) paradaMs += Math.max(0, fFim - fIni);
-        }
-      }
-      machineLowEffMs[m] = lowEffMs;
-      machineLowEffNoStopMs[m] = lowEffNoStopMs;
-      machineParadaMs[m] = paradaMs;
-      totalLowEffMs += lowEffMs;
-      totalParadaMs += paradaMs;
-    }
-    // Chama agregador original, mas ignora os campos de parada e baixa eficiência dele
-    const aggs = calculateAggregates({ gruposPorMaquina, filtroStart, filtroEnd, maquinasConsideradas });
-    const totalLowEffH_logs = totalLowEffMs / 1000 / 60 / 60;
-    // Ajustar produção: subtrair apenas o delta de baixa eficiência (sem parada) que não foi considerado pelo agregador nativo
-    const totalLowEffNoStopH_logs = Object.values(machineLowEffNoStopMs).reduce((acc, ms) => acc + ms, 0) / 1000 / 60 / 60;
-    const deltaLowEffNoStopH = Math.max(0, totalLowEffNoStopH_logs - (aggs.totalLowEffH || 0));
-    const totalProdH_corrigido = Math.max(0, (aggs.totalProdH || 0) - deltaLowEffNoStopH);
-    return {
-      ...aggs,
-      totalProdH: totalProdH_corrigido,
-      totalLowEffH: totalLowEffH_logs,
-      // Mantém 'Sem Programação' calculado pelo agregador (evita subtração global indevida)
-      totalSemProgH: aggs.totalSemProgH,
-      machineLowEffH: Object.fromEntries(Object.entries(machineLowEffMs).map(([k, v]) => [k, v / 1000 / 60 / 60])),
-      totalParadaH: totalParadaMs / 1000 / 60 / 60,
-      machineParadaH: Object.fromEntries(Object.entries(machineParadaMs).map(([k, v]) => [k, v / 1000 / 60 / 60]))
-    };
-  }, [gruposPorMaquina, filtroStart, filtroEnd, maquinasConsideradas.length, tick, lowEffLogsByOrder]);
+    return calculateAggregates({ gruposPorMaquina, filterStart: filtroStart, filterEnd: filtroEnd, maquinasConsideradas })
+  }, [gruposPorMaquina, filtroStart, filtroEnd, maquinasConsideradas])
 
-  const { totalProdH, totalParadaH, totalLowEffH, totalSemProgH, totalDisponivelH, pct, totalMaquinasParadas, machineParadaMs } = aggregates;
+  const { totalProdH, totalParadaH, totalLowEffH, totalSemProgH, totalDisponivelH, totalMaquinasParadas } = aggregates;
 
   const items = useMemo(() => {
     const raw = [
@@ -661,7 +267,7 @@ export default function Registro({ registroGrupos = [], openSet, toggleOpen, isA
     ]
     // NÃO fazer rescaling silencioso — manter números reais e tratar visualmente se necessário
     return raw
-  }, [totalProdH, totalParadaH, totalLowEffH, totalSemProgH, totalDisponivelH, tick])
+  }, [totalProdH, totalParadaH, totalLowEffH, totalSemProgH])
 
   function formatHoursToHMS(hoursDecimal) {
     const totalSec = Math.round((Number(hoursDecimal) || 0) * 3600)
@@ -693,11 +299,6 @@ export default function Registro({ registroGrupos = [], openSet, toggleOpen, isA
   }
 
   // ====== PDF: Relatório de Indicadores por Setor ======
-  function secondsToHMS(sec){
-    const h = Math.floor(sec/3600); const m = Math.floor((sec%3600)/60); const s = Math.floor(sec%60)
-    const pad = n => String(n).padStart(2,'0')
-    return `${pad(h)}:${pad(m)}:${pad(s)}`
-  }
   function fmtCurrencyBR(v){
     try{ return new Intl.NumberFormat('pt-BR',{style:'currency',currency:'BRL'}).format(Number(v)||0) }catch{ return `R$ ${(Number(v)||0).toFixed(2)}` }
   }
@@ -705,112 +306,9 @@ export default function Registro({ registroGrupos = [], openSet, toggleOpen, isA
     // Subconjunto por máquinas pedidas
     const subset = {}
     for(const m of machines){ subset[m] = (gruposMap[m] || []) }
-
-    // Base via agregador original
-    const base = calculateAggregates({ gruposPorMaquina: subset, filtroStart, filtroEnd, maquinasConsideradas: machines })
-
-    // Recalcular baixa eficiência via logs reais e ajustar produção e parada
-    const filtroStartMs = filtroStart ? filtroStart.getTime() : null
-    const filtroEndMs = filtroEnd ? filtroEnd.getTime() : null
-    let totalLowEffMs = 0
-    let totalLowEffNoStopMsTotal = 0
-    let totalParadaMs = 0
-    function unir(arr){
-      if(!arr.length) return []
-      arr.sort((a,b)=>a[0]-b[0])
-      const out=[arr[0].slice()]
-      for(let i=1;i<arr.length;i++){
-        const u=out[out.length-1]; const c=arr[i]
-        if(c[0]<=u[1]) u[1]=Math.max(u[1], c[1]); else out.push([c[0],c[1]])
-      }
-      return out
-    }
-    for(const m of machines){
-      const grupos = subset[m] || []
-      const paradaIntervals=[]
-      for(const gr of grupos){
-        const stops = gr.stops || []
-        for(const st of stops){
-          let ini = toTime(st.started_at); let fim = safe(st.resumed_at)?toTime(st.resumed_at):Date.now()
-          if(filtroStartMs!==null && ini < filtroStartMs) ini = filtroStartMs
-          if(filtroEndMs!==null && fim > filtroEndMs) fim = filtroEndMs
-          if(ini && fim && fim>ini) paradaIntervals.push([ini,fim])
-        }
-      }
-      const lowEffIntervals=[]
-      for(const gr of grupos){
-        const o = gr.ordem || {}
-        const logs = lowEffLogsByOrder[o.id] || []
-        for(const log of logs){
-          let ini = toTime(log.started_at); let fim = log.ended_at ? toTime(log.ended_at) : Date.now()
-          if(filtroStartMs!==null && ini < filtroStartMs) ini = filtroStartMs
-          if(filtroEndMs!==null && fim > filtroEndMs) fim = filtroEndMs
-          if(ini && fim && fim>ini) lowEffIntervals.push([ini,fim])
-        }
-      }
-      const paradaUnida = unir(paradaIntervals)
-      const lowEffUnida = unir(lowEffIntervals)
-      // low eff integral
-      for(const [a,b] of lowEffUnida) totalLowEffMs += Math.max(0,b-a)
-      // low eff sem sobrepor parada (para ajuste de produção)
-      let lowEffNoStopMs = 0
-      for(const [leIni, leFim] of lowEffUnida){
-        let fatias=[[leIni,leFim]]
-        for(const [pIni,pFim] of paradaUnida){
-          const n=[]
-          for(const [fIni,fFim] of fatias){
-            const s=Math.max(fIni,pIni); const e=Math.min(fFim,pFim)
-            if(e<=s){ n.push([fIni,fFim]) }
-            else{
-              if(fIni<s) n.push([fIni,s])
-              if(e<fFim) n.push([e,fFim])
-            }
-          }
-          fatias=n
-          if(!fatias.length) break
-        }
-        for(const [fIni,fFim] of fatias) lowEffNoStopMs += Math.max(0,fFim-fIni)
-      }
-      totalLowEffNoStopMsTotal += lowEffNoStopMs
-      // parada descontando baixa eficiência para não duplicar
-      for(const [pIni,pFim] of paradaUnida){
-        let fatias=[[pIni,pFim]]
-        for(const [leIni,leFim] of lowEffUnida){
-          const n=[]
-          for(const [fIni,fFim] of fatias){
-            const s=Math.max(fIni,leIni); const e=Math.min(fFim,leFim)
-            if(e<=s){ n.push([fIni,fFim]) }
-            else{
-              if(fIni<s) n.push([fIni,s])
-              if(e<fFim) n.push([e,fFim])
-            }
-          }
-          fatias=n
-          if(!fatias.length) break
-        }
-        for(const [fIni,fFim] of fatias) totalParadaMs += Math.max(0,fFim-fIni)
-      }
-    }
-    const totalLowEffH_logs = totalLowEffMs/1000/60/60
-    const totalLowEffNoStopH_logs = totalLowEffNoStopMsTotal/1000/60/60
-    const deltaLowEffNoStopH = Math.max(0, totalLowEffNoStopH_logs - (base.totalLowEffH||0))
-    const totalProdH_corrigido = Math.max(0, (base.totalProdH||0) - deltaLowEffNoStopH)
-    return {
-      ...base,
-      totalProdH: totalProdH_corrigido,
-      totalLowEffH: totalLowEffH_logs,
-      totalParadaH: totalParadaMs/1000/60/60,
-    }
+    return calculateAggregates({ gruposPorMaquina: subset, filterStart: filtroStart, filterEnd: filtroEnd, maquinasConsideradas: machines })
   }
-  // Geração de donut idêntico ao componente (SVG -> PNG)
-  function formatHoursToHMS(hoursDecimal) {
-    const totalSec = Math.round((Number(hoursDecimal) || 0) * 3600)
-    const h = Math.floor(totalSec / 3600)
-    const m = Math.floor((totalSec % 3600) / 60)
-    const s = totalSec % 60
-    const pad = n => String(n).padStart(2, '0')
-    return `${pad(h)}:${pad(m)}:${pad(s)}`
-  }
+  // Geração de donut idêntico ao componente
   function createDonutSvg({ items, total }){
     const radius = 90, cx = 100, cy = 100
     // Se total 0, evita divisão por zero
@@ -1057,10 +555,9 @@ export default function Registro({ registroGrupos = [], openSet, toggleOpen, isA
           { label: 'Sem Programação', value: ag.totalSemProgH||0, color: '#3498db' }
         ]
         const svg = createDonutSvg({ items, total: ag.totalDisponivelH||0 })
-        const png = await svgToPngDataUrl(svg, 240, 240)
         const donutX = x + 16
         const donutY = innerY + 8
-        doc.addImage(png, 'PNG', donutX, donutY, 240, 240)
+        await renderSvgToPdf(doc, svg, donutX, donutY, 240, 240)
 
         // Valor total disponível
         let infoY = donutY + 240 + 10
@@ -1142,22 +639,22 @@ export default function Registro({ registroGrupos = [], openSet, toggleOpen, isA
         const { error } = await supabase.from('low_efficiency_logs').update(updates).eq('id', editEv.rawId)
         if(error) throw error
       } else if (editEv.type === 'start') {
-        const { error } = await supabase.from('orders').update({ started_at: localInputToIso(editForm.started) }).eq('id', editEv.orderId)
+        const { error } = await supabase.from('order_machine_sessions').update({ started_at: localInputToIso(editForm.started) }).eq('id', editEv.sessionId)
         if(error) throw error
       } else if (editEv.type === 'interrupt') {
-        const { error } = await supabase.from('orders').update({ interrupted_at: localInputToIso(editForm.started) }).eq('id', editEv.orderId)
+        const { error } = await supabase.from('order_machine_sessions').update({ ended_at: localInputToIso(editForm.started) }).eq('id', editEv.sessionId)
         if(error) throw error
       } else if (editEv.type === 'restart') {
-        const { error } = await supabase.from('orders').update({ restarted_at: localInputToIso(editForm.started) }).eq('id', editEv.orderId)
+        const { error } = await supabase.from('order_machine_sessions').update({ started_at: localInputToIso(editForm.started) }).eq('id', editEv.sessionId)
         if(error) throw error
       } else if (editEv.type === 'end') {
-        const { error } = await supabase.from('orders').update({ finalized_at: localInputToIso(editForm.started) }).eq('id', editEv.orderId)
+        const { error } = await supabase.from('order_machine_sessions').update({ ended_at: localInputToIso(editForm.started), end_reason: 'FINALIZED' }).eq('id', editEv.sessionId)
         if(error) throw error
       }
       setEditEv(null)
       // Recarrega logs de baixa eficiência e força rerender
       await refetchLowEffLogs();
-      setTick(t => t + 1);
+      setCurrentNow(new Date())
     }catch(err){
       console.error('Falha ao salvar correção:', err)
       alert('Falha ao salvar correção. Veja o console para detalhes.')
@@ -1244,9 +741,10 @@ export default function Registro({ registroGrupos = [], openSet, toggleOpen, isA
                       {grupos.map(gr => {
                         const o = gr.ordem || {}
                         const events = []
-                        if (safe(o.started_at)) events.push({ id: `start-${o.id}`, type: 'start', title: 'Início da produção', when: o.started_at, who: o.started_by || '-', orderId: o.id })
-                        if (safe(o.interrupted_at)) events.push({ id: `interrupt-${o.id}`, type: 'interrupt', title: 'Produção interrompida', when: o.interrupted_at, who: o.interrupted_by || '-', orderId: o.id })
-                        if (safe(o.restarted_at)) events.push({ id: `restart-${o.id}`, type: 'restart', title: 'Reinício da produção', when: o.restarted_at, who: o.restarted_by || '-', orderId: o.id })
+                        const sessionId = gr?.session?.id || null
+                        const sessionIndex = Number(gr?.sessionIndex || 1)
+                        if (safe(o.started_at)) events.push({ id: `start-${o.id}`, type: sessionIndex > 1 ? 'restart' : 'start', title: sessionIndex > 1 ? 'Reinício da produção' : 'Início da produção', when: o.started_at, who: o.started_by || '-', orderId: o.source_order_id || o.id, sessionId })
+                        if (safe(o.interrupted_at)) events.push({ id: `interrupt-${o.id}`, type: 'interrupt', title: 'Produção interrompida', when: o.interrupted_at, who: o.interrupted_by || '-', orderId: o.source_order_id || o.id, sessionId })
                         // Adiciona eventos de baixa eficiência vindos dos logs
                         const lowEffLogs = lowEffLogsByOrder[o.id] || [];
                         for (const log of lowEffLogs) {
@@ -1262,7 +760,7 @@ export default function Registro({ registroGrupos = [], openSet, toggleOpen, isA
                           });
                         }
                         ;(gr.stops || []).forEach(st => { if (safe(st.started_at)) events.push({ id: `stop-${st.id}`, type: 'stop', title: 'Parada', when: st.started_at, end: safe(st.resumed_at) ? st.resumed_at : null, who: st.started_by || '-', reason: st.reason || '', notes: st.notes || '', rawId: st.id }) })
-                        if (safe(o.finalized_at)) events.push({ id: `end-${o.id}`, type: 'end', title: 'Fim da produção', when: o.finalized_at, who: o.finalized_by || '-' })
+                        if (safe(o.finalized_at)) events.push({ id: `end-${o.id}`, type: 'end', title: 'Fim da produção', when: o.finalized_at, who: o.finalized_by || '-', orderId: o.source_order_id || o.id, sessionId })
                         if (!events.length) events.push({ id: `empty-${o.id}`, type: 'empty', title: 'Sem eventos', when: null })
                         events.sort((a, b) => (toTime(a.when) || 0) - (toTime(b.when) || 0))
 
@@ -1297,7 +795,7 @@ export default function Registro({ registroGrupos = [], openSet, toggleOpen, isA
                                           {isAdmin && (
                                             <div className="flex" style={{ justifyContent: 'flex-end' }}>
                                               <button className="btn" onClick={() => {
-                                                setEditEv({ type: 'start', id: ev.id, orderId: ev.orderId })
+                                                setEditEv({ type: 'start', id: ev.id, orderId: ev.orderId, sessionId: ev.sessionId })
                                                 setEditForm({ started: isoToLocalInput(ev.when), ended: '', reason: '', notes: '' })
                                               }}>Corrigir</button>
                                             </div>
@@ -1314,7 +812,7 @@ export default function Registro({ registroGrupos = [], openSet, toggleOpen, isA
                                           {isAdmin && (
                                             <div className="flex" style={{ justifyContent: 'flex-end' }}>
                                               <button className="btn" onClick={() => {
-                                                setEditEv({ type: 'restart', id: ev.id, orderId: ev.orderId })
+                                                setEditEv({ type: 'restart', id: ev.id, orderId: ev.orderId, sessionId: ev.sessionId })
                                                 setEditForm({ started: isoToLocalInput(ev.when), ended: '', reason: '', notes: '' })
                                               }}>Corrigir</button>
                                             </div>
@@ -1332,7 +830,7 @@ export default function Registro({ registroGrupos = [], openSet, toggleOpen, isA
                                           {isAdmin && (
                                             <div className="flex" style={{ justifyContent: 'flex-end' }}>
                                               <button className="btn" onClick={() => {
-                                                setEditEv({ type: 'interrupt', id: ev.id, orderId: ev.orderId })
+                                                setEditEv({ type: 'interrupt', id: ev.id, orderId: ev.orderId, sessionId: ev.sessionId })
                                                 setEditForm({ started: isoToLocalInput(ev.when), ended: '', reason: '', notes: '' })
                                               }}>Corrigir</button>
                                             </div>
@@ -1392,7 +890,7 @@ export default function Registro({ registroGrupos = [], openSet, toggleOpen, isA
                                           {isAdmin && (
                                             <div className="flex" style={{ justifyContent: 'flex-end' }}>
                                               <button className="btn" onClick={() => {
-                                                setEditEv({ type: 'end', id: ev.id, orderId: ev.orderId })
+                                                setEditEv({ type: 'end', id: ev.id, orderId: ev.orderId, sessionId: ev.sessionId })
                                                 setEditForm({ started: isoToLocalInput(ev.when), ended: '', reason: '', notes: '' })
                                               }}>Corrigir</button>
                                             </div>

@@ -1,8 +1,7 @@
-import React, { useEffect, useState } from "react";
+import React from "react";
 import Etiqueta from "../components/Etiqueta";
 import { MAQUINAS } from "../lib/constants";
 import { statusClass } from "../lib/utils";
-import { supabase } from "../lib/supabaseClient";
 import "../styles/PainelTV.css";
 
 function formatHHMMSS(totalSeconds) {
@@ -70,32 +69,6 @@ export default function PainelTV({
   lastFinalizadoPorMaquina,
 }) {
   const source = ativosPorMaquina || {};
-  const [lowEffStartedAt, setLowEffStartedAt] = useState({});
-
-  useEffect(() => {
-    async function fetchLowEffLogs() {
-      const result = {};
-      for (const m of MAQUINAS) {
-        const lista = (source && source[m]) || [];
-        const ativa = lista[0] || null;
-        if (ativa && ativa.status === "BAIXA_EFICIENCIA") {
-          let query = supabase
-            .from("low_efficiency_logs")
-            .select("started_at")
-            .is("ended_at", null)
-            .eq("machine_id", m);
-          if (ativa.id) query = query.eq("order_id", ativa.id);
-          const { data, error } = await query;
-          if (!error && data && data.length > 0) {
-            result[m] = data[0].started_at;
-          }
-        }
-      }
-      setLowEffStartedAt(result);
-    }
-
-    fetchLowEffLogs();
-  }, [ativosPorMaquina]);
 
   return (
     <div className="tv-wrapper">
@@ -138,11 +111,11 @@ export default function PainelTV({
             : null;
 
           const lowEffText =
-            atual?.status === "BAIXA_EFICIENCIA" && lowEffStartedAt[machineId]
+            atual?.status === "BAIXA_EFICIENCIA" && atual?.loweff_started_at
               ? (() => {
                   const _ = tick;
                   const secs =
-                    (Date.now() - new Date(lowEffStartedAt[machineId]).getTime()) / 1000;
+                    (Date.now() - new Date(atual.loweff_started_at).getTime()) / 1000;
                   return formatHHMMSS(secs);
                 })()
               : null;
