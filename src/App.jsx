@@ -263,10 +263,18 @@ export default function App(){
     }
   }, [authChecked, authUser, tab, isMendes, accessLevel, isStockOnlyAccess, isAdmin, hasGestaoAccess])
 
+  // Revisão: só faz fetchOrdensAbertas ao autenticar, evitando loops desnecessários
   useEffect(() => {
-    if (!authChecked || !authUser) return
-    fetchOrdensAbertas()
-  }, [authChecked, authUser, fetchOrdensAbertas])
+    if (!authChecked || !authUser) return;
+    // Protege contra múltiplas execuções: só busca se ordens estiverem vazias
+    if (!ordens || ordens.length === 0) {
+      fetchOrdensAbertas();
+    }
+    // Se quiser garantir que só rode 1x por login, pode usar um ref para controle
+    // Exemplo:
+    // const fetchedRef = useRef(false);
+    // if (!fetchedRef.current) { fetchOrdensAbertas(); fetchedRef.current = true; }
+  }, [authChecked, authUser]) // Removido fetchOrdensAbertas das dependências para evitar re-render loop
 
   async function handleSignOut() {
     try {
