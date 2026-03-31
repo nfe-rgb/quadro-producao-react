@@ -166,7 +166,8 @@ export default function Painel({
     }
 
     fetchValorizacaoMes();
-    const intervalId = setInterval(fetchValorizacaoMes, 60000);
+    // IMPORTANTE: Intervalo aumentado para 5 minutos para reduzir consumo de saída do Supabase
+    const intervalId = setInterval(fetchValorizacaoMes, 300000); // 5 minutos
 
     return () => {
       active = false;

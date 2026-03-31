@@ -49,8 +49,26 @@ function countByOrderId(rows) {
   return counts
 }
 
+const ORDERS_CACHE_KEY = 'cached_production_orders_v1';
+
+function saveOrdersToCache(orders) {
+  try {
+    localStorage.setItem(ORDERS_CACHE_KEY, JSON.stringify(orders));
+  } catch {}
+}
+
+function loadOrdersFromCache() {
+  try {
+    const raw = localStorage.getItem(ORDERS_CACHE_KEY);
+    if (!raw) return [];
+    return JSON.parse(raw);
+  } catch {
+    return [];
+  }
+}
+
 export default function useOrders() {
-  const [ordens, setOrdens] = useState([])
+  const [ordens, setOrdens] = useState(() => loadOrdersFromCache())
   const [finalizadas, setFinalizadas] = useState([])
   const [paradas, setParadas] = useState([])
   const [sessions, setSessions] = useState([])
@@ -59,6 +77,7 @@ export default function useOrders() {
   const runtimeErrorFallbackWarnedRef = useRef(false)
   const sessionsFallbackWarnedRef = useRef(false)
 
+  // Reduzido para buscar apenas o campo necessário
   const fetchScanCounts = useCallback(async (orderIds) => {
     if (!Array.isArray(orderIds) || orderIds.length === 0) return {}
 
@@ -75,25 +94,27 @@ export default function useOrders() {
     return countByOrderId(data)
   }, [])
 
+  // Reduzido: selecione apenas os campos realmente usados na UI
   const fetchOrdersBaseSnapshot = useCallback(async () => {
+    const selectFields = 'id, machine_id, code, product, color, qty, boxes, standard, due_date, status, pos, finalized, finalized_at, created_at, updated_at';
     const [openRes, finalizedRes] = await Promise.all([
       supabase
         .from('orders')
-        .select('id, machine_id, code, customer, product, color, qty, boxes, standard, due_date, notes, status, pos, finalized, finalized_at, finalized_by, created_at, updated_at')
+        .select(selectFields)
         .eq('finalized', false)
         .order('pos', { ascending: true })
         .order('created_at', { ascending: true }),
       supabase
         .from('orders')
-        .select('id, machine_id, code, customer, product, color, qty, boxes, standard, due_date, notes, status, pos, finalized, finalized_at, finalized_by, created_at, updated_at')
+        .select(selectFields)
         .eq('finalized', true)
         .order('finalized_at', { ascending: false })
-        .limit(500),
+        .limit(200), // Reduzido para evitar excesso de dados
     ])
-
     return { openRes, finalizedRes }
   }, [])
 
+  // ATENÇÃO: Este método faz várias queries grandes. Considere cachear resultados e aumentar intervalos de atualização!
   const fetchRuntimeSnapshot = useCallback(async () => {
     let openRes
     let finalizedRes
@@ -102,9 +123,10 @@ export default function useOrders() {
     let shouldDeriveRuntime = runtimeViewMissing
 
     if (runtimeViewAvailability === 'unknown') {
+      // Busca apenas campos essenciais para o painel
       const runtimeProbeRes = await supabase
         .from('production_orders_runtime_v')
-        .select('*')
+        .select('id, machine_id, code, product, color, qty, boxes, standard, due_date, status, pos, finalized, finalized_at, created_at, updated_at')
         .limit(1)
 
       if (isMissingRelationError(runtimeProbeRes.error, 'production_orders_runtime_v')) {
@@ -118,19 +140,21 @@ export default function useOrders() {
     }
 
     if (!runtimeViewMissing) {
+      // Busca apenas campos essenciais para o painel
+      const selectFields = 'id, machine_id, code, product, color, qty, boxes, standard, due_date, status, pos, finalized, finalized_at, created_at, updated_at';
       const [runtimeOpenRes, runtimeFinalizedRes] = await Promise.all([
         supabase
           .from('production_orders_runtime_v')
-          .select('*')
+          .select(selectFields)
           .eq('finalized', false)
           .order('pos', { ascending: true })
           .order('created_at', { ascending: true }),
         supabase
           .from('production_orders_runtime_v')
-          .select('*')
+          .select(selectFields)
           .eq('finalized', true)
           .order('finalized_at', { ascending: false })
-          .limit(500),
+          .limit(200), // Reduzido para evitar excesso de dados
       ])
 
       openRes = runtimeOpenRes
@@ -194,21 +218,21 @@ export default function useOrders() {
       sessionsTableAvailability !== 'missing' && relevantIds.length
         ? supabase
             .from('order_machine_sessions')
-            .select('*')
+            .select('id, order_id, machine_id, started_at, stopped_at, status')
             .in('order_id', relevantIds)
             .order('started_at', { ascending: true })
         : Promise.resolve({ data: [], error: null }),
       relevantIds.length
         ? supabase
             .from('machine_stops')
-            .select('*')
+            .select('id, order_id, machine_id, started_at, resumed_at, reason, notes')
             .in('order_id', relevantIds)
             .order('started_at', { ascending: false })
         : Promise.resolve({ data: [], error: null }),
       relevantIds.length
         ? supabase
             .from('low_efficiency_logs')
-            .select('*')
+            .select('id, order_id, machine_id, started_at, ended_at, reason, notes')
             .in('order_id', relevantIds)
             .order('started_at', { ascending: false })
         : Promise.resolve({ data: [], error: null }),
@@ -260,8 +284,14 @@ export default function useOrders() {
       scanned_count: Number(order.scanned_count || 0),
     }))
 
-    setOrdens(normalizedOpenOrders)
-    setFinalizadas(normalizedFinalizedOrders)
+    // Só atualiza se houver ordens válidas
+    if (normalizedOpenOrders.length > 0) {
+      setOrdens(normalizedOpenOrders)
+      saveOrdersToCache(normalizedOpenOrders)
+    }
+    if (normalizedFinalizedOrders.length > 0) {
+      setFinalizadas(normalizedFinalizedOrders)
+    }
     setSessions(sessionsRes.data || [])
     setParadas(mapStopsForUi(stopsRes.data || []))
     setLowEffLogs(mapLowEffLogsForUi(lowEffRes.data || []))
@@ -280,7 +310,17 @@ export default function useOrders() {
   }
 
   useEffect(() => {
-    fetchRuntimeSnapshot()
+    // Tenta buscar do Supabase, se falhar, carrega do cache
+    fetchRuntimeSnapshot().then(() => {
+      // Se não vier nada do Supabase, mantém o cache
+      if (ordens.length === 0) {
+        const cached = loadOrdersFromCache();
+        if (cached.length > 0) setOrdens(cached)
+      }
+    }).catch(() => {
+      const cached = loadOrdersFromCache();
+      if (cached.length > 0) setOrdens(cached)
+    })
 
     const trackedTables = ['orders', 'order_machine_sessions', 'machine_stops', 'low_efficiency_logs']
     const channels = trackedTables.map((tableName) => (

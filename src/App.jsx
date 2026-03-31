@@ -52,7 +52,8 @@ export default function App(){
   const [manualProductionModalOpen, setManualProductionModalOpen] = useState(false)
 
   const [tick, setTick] = useState(0)
-  useEffect(()=>{ const id=setInterval(()=>setTick(t=>t+1),1000); return ()=>clearInterval(id) },[])
+  // ATENÇÃO: Este polling global roda a cada 1s. Para produção, aumente para 10s ou mais se possível para reduzir consumo de saída.
+  useEffect(()=>{ const id=setInterval(()=>setTick(t=>t+1),10000); return ()=>clearInterval(id) },[])
 
   const [openSet, setOpenSet] = useState(()=>new Set())
   function toggleOpen(id){ setOpenSet(prev=>{ const n=new Set(prev); if(n.has(id)) n.delete(id); else n.add(id); return n }) }
