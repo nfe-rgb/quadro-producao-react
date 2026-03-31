@@ -18,6 +18,14 @@ function sortByTimeAsc(items, key = 'started_at') {
   });
 }
 
+function sortByTimeDesc(items, key = 'started_at') {
+  return [...items].sort((left, right) => {
+    const leftTime = toTimestamp(left?.[key]) || 0;
+    const rightTime = toTimestamp(right?.[key]) || 0;
+    return rightTime - leftTime;
+  });
+}
+
 export function mapRuntimeOrder(row) {
   if (!row) return null;
 
@@ -33,7 +41,7 @@ export function mapRuntimeOrder(row) {
     ...row,
     source_order_id: row.id,
     machine_id: machineId,
-    status: row.status || row.persisted_status || 'AGUARDANDO',
+    status: row.finalized ? 'FINALIZADA' : (row.status || row.persisted_status || 'AGUARDANDO'),
     started_at: row.started_at || null,
     started_by: row.started_by || row.active_session_started_by || null,
     restarted_at: row.restarted_at || null,
@@ -54,6 +62,89 @@ export function mapRuntimeOrder(row) {
     active_stop_notes: row.active_stop_notes || null,
     session_count: Number(row.session_count || 0),
   };
+}
+
+export function deriveRuntimeOrders(baseOrders, sessions = [], stops = [], lowEffLogs = []) {
+  const sessionsByOrderId = new Map();
+  const stopsByOrderId = new Map();
+  const lowEffByOrderId = new Map();
+
+  for (const session of sessions || []) {
+    const orderKey = session?.order_id != null ? String(session.order_id) : null;
+    if (!orderKey) continue;
+    if (!sessionsByOrderId.has(orderKey)) sessionsByOrderId.set(orderKey, []);
+    sessionsByOrderId.get(orderKey).push(session);
+  }
+
+  for (const stop of stops || []) {
+    const orderKey = stop?.order_id != null ? String(stop.order_id) : null;
+    if (!orderKey) continue;
+    if (!stopsByOrderId.has(orderKey)) stopsByOrderId.set(orderKey, []);
+    stopsByOrderId.get(orderKey).push(stop);
+  }
+
+  for (const event of lowEffLogs || []) {
+    const orderKey = event?.order_id != null ? String(event.order_id) : null;
+    if (!orderKey) continue;
+    if (!lowEffByOrderId.has(orderKey)) lowEffByOrderId.set(orderKey, []);
+    lowEffByOrderId.get(orderKey).push(event);
+  }
+
+  return (baseOrders || []).map((order) => {
+    const orderKey = order?.id != null ? String(order.id) : null;
+    const orderSessions = sortByTimeAsc(sessionsByOrderId.get(orderKey) || []);
+    const orderStops = sortByTimeAsc(stopsByOrderId.get(orderKey) || []);
+    const orderLowEffLogs = sortByTimeAsc(lowEffByOrderId.get(orderKey) || []);
+    const firstSession = orderSessions[0] || null;
+    const latestSession = orderSessions[orderSessions.length - 1] || null;
+    const latestRestartSession = orderSessions.length > 1 ? latestSession : null;
+    const activeSession = sortByTimeDesc(orderSessions.filter((session) => !session?.ended_at))[0] || null;
+    const latestInterruptedSession = sortByTimeDesc(
+      orderSessions.filter((session) => session?.ended_at && session?.end_reason !== 'FINALIZED'),
+      'ended_at'
+    )[0] || null;
+    const latestFinalizedSession = sortByTimeDesc(
+      orderSessions.filter((session) => session?.end_reason === 'FINALIZED' && session?.ended_at),
+      'ended_at'
+    )[0] || null;
+    const activeStop = sortByTimeDesc(
+      orderStops.filter((stop) => !stop?.ended_at && !stop?.resumed_at)
+    )[0] || null;
+    const activeLowEff = sortByTimeDesc(
+      orderLowEffLogs.filter((event) => !event?.ended_at)
+    )[0] || null;
+
+    return mapRuntimeOrder({
+      ...order,
+      persisted_status: order?.persisted_status || order?.status || null,
+      started_at: firstSession?.started_at || null,
+      started_by: firstSession?.started_by || null,
+      restarted_at: latestRestartSession?.started_at || null,
+      restarted_by: latestRestartSession?.started_by || null,
+      interrupted_at: latestInterruptedSession?.ended_at || null,
+      interrupted_by: latestInterruptedSession?.ended_by || null,
+      finalized_at: order?.finalized_at || latestFinalizedSession?.ended_at || null,
+      finalized_by: order?.finalized_by || latestFinalizedSession?.ended_by || null,
+      loweff_started_at: activeLowEff?.started_at || null,
+      loweff_ended_at: activeLowEff?.ended_at || null,
+      loweff_notes: activeLowEff?.notes || null,
+      loweff_reason: activeLowEff?.reason || null,
+      active_session_id: activeSession?.id || null,
+      active_machine_id: activeSession?.machine_id || null,
+      active_session_started_at: activeSession?.started_at || null,
+      active_session_started_by: activeSession?.started_by || null,
+      active_stop_id: activeStop?.id || null,
+      active_stop_started_at: activeStop?.started_at || null,
+      active_stop_reason: activeStop?.reason || null,
+      active_stop_notes: activeStop?.notes || null,
+      session_count: orderSessions.length,
+      first_session_id: firstSession?.id || null,
+      latest_session_id: latestSession?.id || null,
+      restarted_session_id: latestRestartSession?.id || null,
+      interrupted_session_id: latestInterruptedSession?.id || null,
+      finalized_session_id: latestFinalizedSession?.id || null,
+    });
+  });
 }
 
 function buildSessionStatus(session, openStops, openLowEffLogs) {

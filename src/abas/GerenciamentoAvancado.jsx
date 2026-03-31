@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import Modal from '../components/Modal'
 import { supabase } from '../lib/supabaseClient'
-import { isMissingRelationError } from '../lib/productionRuntime'
+import { deriveRuntimeOrders, isMissingRelationError } from '../lib/productionRuntime'
 import { fmtDateTime } from '../lib/utils'
 import '../styles/gerenciamento-avancado.css'
 
@@ -126,13 +126,32 @@ export default function GerenciamentoAvancado() {
       .limit(1000)
 
     if (isMissingRelationError(error, 'production_orders_runtime_v')) {
-      const legacyRes = await supabase
+      const baseRes = await supabase
         .from('orders')
-        .select('id, code, product, customer, machine_id, status, finalized, created_at, started_at, interrupted_at, restarted_at, finalized_at')
+        .select('id, code, product, customer, machine_id, status, finalized, created_at, finalized_at, finalized_by')
         .order('created_at', { ascending: false })
         .limit(1000)
-      data = legacyRes.data
-      error = legacyRes.error
+      if (!baseRes.error && Array.isArray(baseRes.data) && baseRes.data.length) {
+        const orderIds = baseRes.data.map((row) => row.id).filter(Boolean)
+        const sessionsRes = orderIds.length
+          ? await supabase
+              .from('order_machine_sessions')
+              .select('id, order_id, machine_id, started_at, ended_at, started_by, ended_by, end_reason')
+              .in('order_id', orderIds)
+              .order('started_at', { ascending: true })
+          : { data: [], error: null }
+
+        if (sessionsRes.error) {
+          data = []
+          error = sessionsRes.error
+        } else {
+          data = deriveRuntimeOrders(baseRes.data, sessionsRes.data || [], [], [])
+          error = null
+        }
+      } else {
+        data = baseRes.data
+        error = baseRes.error
+      }
     }
 
     if (error) {
@@ -531,54 +550,10 @@ export default function GerenciamentoAvancado() {
     }
 
     if (editModal.type === 'order_milestones') {
-      const payload = {
-        started_at: localDateTimeToIso(editModal.form.started_at),
-        interrupted_at: localDateTimeToIso(editModal.form.interrupted_at),
-        restarted_at: localDateTimeToIso(editModal.form.restarted_at),
-        finalized_at: localDateTimeToIso(editModal.form.finalized_at),
-      }
-
-      const { error } = await supabase.from('orders').update(payload).eq('id', editModal.id)
-
-      if (error) {
-        pushFeedback(formatError(error, 'Não foi possível atualizar os eventos da O.P.'), 'err')
-        setEditModal((prev) => ({ ...prev, busy: false }))
-        return
-      }
-
-      setEditModal({ open: false, type: '', id: null, form: {}, busy: false })
-      await loadOrders()
-      pushFeedback('Eventos da O.P atualizados com sucesso.', 'ok')
-    }
-  }
-
-  async function clearOrderMilestone(fieldName, fieldLabel) {
-    if (!editModal?.id) return
-
-    const confirmed = window.confirm(`Tem certeza que deseja excluir o evento de ${fieldLabel} desta O.P?`)
-    if (!confirmed) return
-
-    setEditModal((prev) => ({ ...prev, busy: true }))
-
-    const { error } = await supabase.from('orders').update({ [fieldName]: null }).eq('id', editModal.id)
-
-    if (error) {
-      pushFeedback(formatError(error, `Não foi possível excluir o evento de ${fieldLabel}.`), 'err')
+      pushFeedback('As correções de início, interrupção, retomada e fim agora devem ser feitas na aba Registro, usando o runtime normalizado.', 'err')
       setEditModal((prev) => ({ ...prev, busy: false }))
       return
     }
-
-    setEditModal((prev) => ({
-      ...prev,
-      busy: false,
-      form: {
-        ...prev.form,
-        [fieldName]: '',
-      },
-    }))
-
-    await loadOrders()
-    pushFeedback(`Evento de ${fieldLabel} excluído com sucesso.`, 'ok')
   }
 
   function renderFeedback() {
@@ -650,7 +625,7 @@ export default function GerenciamentoAvancado() {
                   <td>{fmtDateTime(row.finalized_at)}</td>
                   <td>{fmtDateTime(row.created_at)}</td>
                   <td className="ga-actions">
-                    <button className="btn" onClick={() => openEditModal('order_milestones', row)}>Editar eventos O.P</button>
+                    <button className="btn" onClick={() => openEditModal('order_milestones', row)}>Ver eventos O.P</button>
                     <button className="btn" onClick={() => openDeleteModal('orders', row)}>Excluir</button>
                   </td>
                 </tr>
@@ -1056,6 +1031,9 @@ export default function GerenciamentoAvancado() {
 
         {editModal.type === 'order_milestones' && (
           <div className="ga-form-grid">
+            <div className="ga-col-span ga-error">
+              Correções de início, interrupção, retomada e fim foram movidas para a aba Registro. Esta tela agora exibe apenas o resumo normalizado e permanece compatível com a remoção das colunas legadas da tabela orders.
+            </div>
             <label className="label ga-col-span">O.P
               <input className="input" value={editModal.form.code || ''} disabled />
             </label>
@@ -1065,7 +1043,7 @@ export default function GerenciamentoAvancado() {
                 className="input"
                 type="datetime-local"
                 value={editModal.form.started_at || ''}
-                onChange={(e) => setEditModal((prev) => ({ ...prev, form: { ...prev.form, started_at: e.target.value } }))}
+                disabled
               />
             </label>
 
@@ -1074,7 +1052,7 @@ export default function GerenciamentoAvancado() {
                 className="input"
                 type="datetime-local"
                 value={editModal.form.interrupted_at || ''}
-                onChange={(e) => setEditModal((prev) => ({ ...prev, form: { ...prev.form, interrupted_at: e.target.value } }))}
+                disabled
               />
             </label>
 
@@ -1083,7 +1061,7 @@ export default function GerenciamentoAvancado() {
                 className="input"
                 type="datetime-local"
                 value={editModal.form.restarted_at || ''}
-                onChange={(e) => setEditModal((prev) => ({ ...prev, form: { ...prev.form, restarted_at: e.target.value } }))}
+                disabled
               />
             </label>
 
@@ -1092,22 +1070,15 @@ export default function GerenciamentoAvancado() {
                 className="input"
                 type="datetime-local"
                 value={editModal.form.finalized_at || ''}
-                onChange={(e) => setEditModal((prev) => ({ ...prev, form: { ...prev.form, finalized_at: e.target.value } }))}
+                disabled
               />
             </label>
-
-            <div className="ga-col-span ga-milestone-clear-wrap">
-              <button className="btn" onClick={() => clearOrderMilestone('started_at', 'início')} disabled={editModal.busy}>Excluir início</button>
-              <button className="btn" onClick={() => clearOrderMilestone('interrupted_at', 'interrupção')} disabled={editModal.busy}>Excluir interrupção</button>
-              <button className="btn" onClick={() => clearOrderMilestone('restarted_at', 'retomada')} disabled={editModal.busy}>Excluir retomada</button>
-              <button className="btn" onClick={() => clearOrderMilestone('finalized_at', 'fim')} disabled={editModal.busy}>Excluir fim</button>
-            </div>
           </div>
         )}
 
         <div className="ga-modal-actions">
           <button className="btn" onClick={() => setEditModal({ open: false, type: '', id: null, form: {}, busy: false })} disabled={editModal.busy}>Cancelar</button>
-          <button className="btn primary" onClick={saveEdition} disabled={editModal.busy}>
+          <button className="btn primary" onClick={saveEdition} disabled={editModal.busy || editModal.type === 'order_milestones'}>
             {editModal.busy ? 'Salvando...' : 'Salvar alterações'}
           </button>
         </div>

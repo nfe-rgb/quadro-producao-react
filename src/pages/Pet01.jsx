@@ -10,7 +10,6 @@ import "../styles/Pet01.css";
 import { REFUGO_MOTIVOS } from "../lib/constants";
 
 export default function Pet01({
-  registroGrupos,
   ativosP1,
   paradas,
   tick,
@@ -98,6 +97,19 @@ export default function Pet01({
     if (!ativa.loweff_started_at) return null;
     const _ = tick;
     const diff = Math.floor((Date.now() - new Date(ativa.loweff_started_at).getTime()) / 1000);
+    const hh = String(Math.floor(diff / 3600)).padStart(2, "0");
+    const mm = String(Math.floor((diff % 3600) / 60)).padStart(2, "0");
+    const ss = String(diff % 60).padStart(2, "0");
+    return `${hh}:${mm}:${ss}`;
+  }, [ativa, tick]);
+
+  const tempoSemProg = useMemo(() => {
+    if (!ativa) return null;
+    if (ativa.status !== "SEM_PROGRAMACAO") return null;
+    const sinceSource = ativa.interrupted_at || ativa.created_at;
+    if (!sinceSource) return null;
+    const _ = tick;
+    const diff = Math.floor((Date.now() - new Date(sinceSource).getTime()) / 1000);
     const hh = String(Math.floor(diff / 3600)).padStart(2, "0");
     const mm = String(Math.floor((diff % 3600) / 60)).padStart(2, "0");
     const ss = String(diff % 60).padStart(2, "0");

@@ -262,6 +262,11 @@ export default function App(){
     }
   }, [authChecked, authUser, tab, isMendes, accessLevel, isStockOnlyAccess, isAdmin, hasGestaoAccess])
 
+  useEffect(() => {
+    if (!authChecked || !authUser) return
+    fetchOrdensAbertas()
+  }, [authChecked, authUser, fetchOrdensAbertas])
+
   async function handleSignOut() {
     try {
       await supabase.auth.signOut()
@@ -274,6 +279,7 @@ export default function App(){
 
   function handleLoginSuccess(user) {
     if (!user) return
+    fetchOrdensAbertas()
     setTab('painel')
   }
 
@@ -478,7 +484,7 @@ export default function App(){
   }
 
       if (location && location.pathname === '/pet-04') {
-    const ativosP4 = ordens.filter(o => o.machine_id === 'p4' && !o.finalized).sort((a,b)=>(a.pos??999)-(b.pos??999))
+    const ativosP4 = ordens.filter(o => o.machine_id === 'P4' && !o.finalized).sort((a,b)=>(a.pos??999)-(b.pos??999))
     return (
       <>
         <Pet04

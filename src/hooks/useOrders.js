@@ -4,6 +4,7 @@ import { MAQUINAS, MOTIVOS_PARADA } from '../lib/constants'
 import { localDateTimeToISO, jaIniciou } from '../lib/utils'
 import {
   buildRegistroGroups,
+  deriveRuntimeOrders,
   isMissingRelationError,
   mapLowEffLogsForUi,
   mapRuntimeOrder,
@@ -74,17 +75,17 @@ export default function useOrders() {
     return countByOrderId(data)
   }, [])
 
-  const fetchOrdersLegacySnapshot = useCallback(async () => {
+  const fetchOrdersBaseSnapshot = useCallback(async () => {
     const [openRes, finalizedRes] = await Promise.all([
       supabase
         .from('orders')
-        .select('*')
+        .select('id, machine_id, code, customer, product, color, qty, boxes, standard, due_date, notes, status, pos, finalized, finalized_at, finalized_by, created_at, updated_at')
         .eq('finalized', false)
         .order('pos', { ascending: true })
         .order('created_at', { ascending: true }),
       supabase
         .from('orders')
-        .select('*')
+        .select('id, machine_id, code, customer, product, color, qty, boxes, standard, due_date, notes, status, pos, finalized, finalized_at, finalized_by, created_at, updated_at')
         .eq('finalized', true)
         .order('finalized_at', { ascending: false })
         .limit(500),
@@ -98,6 +99,7 @@ export default function useOrders() {
     let finalizedRes
     let runtimeViewMissing = runtimeViewAvailability === 'missing'
     let runtimeViewErrored = false
+    let shouldDeriveRuntime = runtimeViewMissing
 
     if (runtimeViewAvailability === 'unknown') {
       const runtimeProbeRes = await supabase
@@ -115,11 +117,7 @@ export default function useOrders() {
       }
     }
 
-    if (runtimeViewMissing) {
-      const legacySnapshot = await fetchOrdersLegacySnapshot()
-      openRes = legacySnapshot.openRes
-      finalizedRes = legacySnapshot.finalizedRes
-    } else {
+    if (!runtimeViewMissing) {
       const [runtimeOpenRes, runtimeFinalizedRes] = await Promise.all([
         supabase
           .from('production_orders_runtime_v')
@@ -140,18 +138,11 @@ export default function useOrders() {
       runtimeViewMissing = isMissingRelationError(runtimeOpenRes.error, 'production_orders_runtime_v')
         || isMissingRelationError(runtimeFinalizedRes.error, 'production_orders_runtime_v')
       runtimeViewErrored = !!runtimeOpenRes.error || !!runtimeFinalizedRes.error
+      shouldDeriveRuntime = runtimeViewMissing || runtimeViewErrored
 
       if (runtimeViewMissing) {
         runtimeViewAvailability = 'missing'
         writeCachedAvailability(RUNTIME_VIEW_STORAGE_KEY, 'missing')
-
-        const legacySnapshot = await fetchOrdersLegacySnapshot()
-        openRes = legacySnapshot.openRes
-        finalizedRes = legacySnapshot.finalizedRes
-      } else if (runtimeViewErrored) {
-        const legacySnapshot = await fetchOrdersLegacySnapshot()
-        openRes = legacySnapshot.openRes
-        finalizedRes = legacySnapshot.finalizedRes
       } else if (!runtimeOpenRes.error && !runtimeFinalizedRes.error) {
         runtimeViewAvailability = 'available'
         writeCachedAvailability(RUNTIME_VIEW_STORAGE_KEY, 'available')
@@ -160,11 +151,11 @@ export default function useOrders() {
 
     if (runtimeViewMissing) {
       if (!runtimeFallbackWarnedRef.current) {
-        console.warn('View production_orders_runtime_v não encontrada no Supabase. Usando fallback na tabela orders até aplicar as migrations.')
+        console.warn('View production_orders_runtime_v não encontrada no Supabase. Reconstruindo o runtime a partir de orders + sessões/eventos, sem depender das colunas legadas.')
         runtimeFallbackWarnedRef.current = true
       }
     } else if (runtimeViewErrored && !runtimeErrorFallbackWarnedRef.current) {
-      console.warn('Falha ao consultar production_orders_runtime_v. Usando fallback na tabela orders até o runtime normalizado ficar íntegro.')
+      console.warn('Falha ao consultar production_orders_runtime_v. Reconstruindo o runtime a partir de orders + sessões/eventos.')
       runtimeErrorFallbackWarnedRef.current = true
     }
 
@@ -175,14 +166,32 @@ export default function useOrders() {
       console.warn('Falha ao carregar ordens finalizadas do runtime:', finalizedRes.error)
     }
 
-    const openOrders = (openRes.data || []).map(mapRuntimeOrder)
-    const finalizedOrders = (finalizedRes.data || []).map(mapRuntimeOrder)
-    const allOrders = [...openOrders, ...finalizedOrders]
-    const relevantIds = Array.from(new Set(allOrders.map((order) => order?.id).filter(Boolean)))
+    const baseSnapshot = await fetchOrdersBaseSnapshot()
+    const baseOpenRows = baseSnapshot?.openRes?.data || []
+    const baseFinalizedRows = baseSnapshot?.finalizedRes?.data || []
+    const runtimeOpenRows = openRes?.data || []
+    const runtimeFinalizedRows = finalizedRes?.data || []
 
-    const [scanCounts, rawSessionsRes, stopsRes, lowEffRes] = await Promise.all([
-      fetchScanCounts(openOrders.map((order) => order.id)),
-      !runtimeViewMissing && sessionsTableAvailability !== 'missing' && relevantIds.length
+    const runtimeLooksIncomplete = !runtimeViewMissing
+      && !runtimeViewErrored
+      && runtimeOpenRows.length === 0
+      && baseOpenRows.length > 0
+
+    if (runtimeLooksIncomplete) {
+      shouldDeriveRuntime = true
+      if (!runtimeErrorFallbackWarnedRef.current) {
+        console.warn('View production_orders_runtime_v retornou vazia para ordens abertas. Reconstituindo o painel a partir de orders + sessões/eventos.')
+        runtimeErrorFallbackWarnedRef.current = true
+      }
+    }
+
+    const relevantSourceRows = shouldDeriveRuntime
+      ? [...baseOpenRows, ...baseFinalizedRows]
+      : [...runtimeOpenRows, ...runtimeFinalizedRows]
+    const relevantIds = Array.from(new Set(relevantSourceRows.map((order) => order?.id).filter(Boolean)))
+
+    const [rawSessionsRes, stopsRes, lowEffRes] = await Promise.all([
+      sessionsTableAvailability !== 'missing' && relevantIds.length
         ? supabase
             .from('order_machine_sessions')
             .select('*')
@@ -230,6 +239,17 @@ export default function useOrders() {
       console.warn('Falha ao carregar baixa eficiência normalizada:', lowEffRes.error)
     }
 
+    const runtimeOrders = shouldDeriveRuntime
+      ? deriveRuntimeOrders(relevantSourceRows, sessionsRes.data || [], stopsRes.data || [], lowEffRes.data || [])
+      : []
+    const openOrders = shouldDeriveRuntime
+      ? runtimeOrders.filter((order) => !order?.finalized)
+      : runtimeOpenRows.map(mapRuntimeOrder)
+    const finalizedOrders = shouldDeriveRuntime
+      ? runtimeOrders.filter((order) => !!order?.finalized)
+      : runtimeFinalizedRows.map(mapRuntimeOrder)
+    const scanCounts = await fetchScanCounts(openOrders.map((order) => order.id))
+
     const normalizedOpenOrders = openOrders.map((order) => ({
       ...order,
       scanned_count: Number(scanCounts[String(order.id)] || 0),
@@ -245,7 +265,7 @@ export default function useOrders() {
     setSessions(sessionsRes.data || [])
     setParadas(mapStopsForUi(stopsRes.data || []))
     setLowEffLogs(mapLowEffLogsForUi(lowEffRes.data || []))
-  }, [fetchOrdersLegacySnapshot, fetchScanCounts])
+  }, [fetchOrdersBaseSnapshot, fetchScanCounts])
 
   async function fetchOrdensAbertas() {
     await fetchRuntimeSnapshot()
@@ -558,7 +578,7 @@ export default function useOrders() {
       return
     }
 
-    const { error } = await supabase.rpc('production_enter_low_efficiency', {
+    const { error } = await supabase.rpc('production_enter_low_efficiency_v3', {
       p_order_id: String(ordem.source_order_id || ordem.id),
       p_started_at: localDateTimeToISO(data, hora),
       p_actor: operador,

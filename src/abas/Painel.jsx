@@ -400,6 +400,7 @@ export default function Painel({
           // lidas / saldo: scanned_count agora pode vir do fetch inicial ou do realtime
           const lidas = Number(ativa?.scanned_count || 0);
           const saldo = ativa ? Math.max(0, (Number(ativa.boxes) || 0) - lidas) : 0;
+          const showPetCounts = ["P1", "P2", "P3", "P4"].includes(m);
 
           const priorityValue = machinePriorities?.[m];
 
@@ -445,8 +446,8 @@ export default function Painel({
                     <Etiqueta
                       o={ativa}
                       variant="painel"
-                      lidasCaixas={["P1", "P2", "P3"].includes(m) ? lidas : undefined}
-                      saldoCaixas={["P1", "P2", "P3"].includes(m) ? saldo : undefined}
+                      lidasCaixas={showPetCounts ? lidas : undefined}
+                      saldoCaixas={showPetCounts ? saldo : undefined}
                       paradaReason={openStop?.reason}
                       paradaNotes={openStop?.notes}
                     />

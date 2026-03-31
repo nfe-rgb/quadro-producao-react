@@ -6,6 +6,38 @@
   gap: 16px;
 }
 
+.rastreio-view-nav {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px;
+  border-radius: 14px;
+  background: linear-gradient(135deg, #e2e8f0, #f8fafc);
+  border: 1px solid #dbe3ee;
+  width: fit-content;
+}
+
+.rastreio-view-btn {
+  border: none;
+  background: transparent;
+  color: #334155;
+  font-weight: 700;
+  padding: 10px 14px;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background 140ms ease, color 140ms ease, transform 140ms ease, box-shadow 140ms ease;
+}
+
+.rastreio-view-btn:hover {
+  transform: translateY(-1px);
+}
+
+.rastreio-view-btn.active {
+  background: linear-gradient(135deg, #0f172a, #1d4ed8);
+  color: #fff;
+  box-shadow: 0 10px 22px rgba(29, 78, 216, 0.22);
+}
+
 .rastreio-header {
   display: flex;
   justify-content: space-between;
@@ -75,6 +107,270 @@
 }
 
 .rastreio-card span {
+  color: #475569;
+  font-size: 12px;
+}
+
+.rastreio-summary-view {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.rastreio-filter-bar {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.rastreio-filter-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.rastreio-filter-group label {
+  font-size: 12px;
+  font-weight: 700;
+  color: #475569;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.rastreio-filter-group select,
+.rastreio-filter-group input {
+  min-height: 42px;
+  padding: 10px 12px;
+  border: 1px solid #d0d5dd;
+  border-radius: 10px;
+  font-size: 14px;
+  background: #fff;
+}
+
+.rastreio-summary-highlights {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.rastreio-summary-highlight-card {
+  border-radius: 14px;
+  padding: 14px;
+  border: 1px solid #e2e8f0;
+  background: #fff;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.05);
+}
+
+.rastreio-summary-highlight-card span,
+.rastreio-summary-highlight-card small {
+  color: #475569;
+}
+
+.rastreio-summary-highlight-card strong {
+  font-size: 28px;
+  line-height: 1;
+  color: #0f172a;
+}
+
+.rastreio-summary-highlight-card.good {
+  background: linear-gradient(135deg, #ecfdf3, #f8fffb);
+  border-color: #b7ebc6;
+}
+
+.rastreio-summary-highlight-card.scrap {
+  background: linear-gradient(135deg, #fff1f2, #fffaf5);
+  border-color: #fecdd3;
+}
+
+.rastreio-summary-highlight-card.neutral {
+  background: linear-gradient(135deg, #eff6ff, #f8fbff);
+  border-color: #bfdbfe;
+}
+
+.rastreio-summary-table-wrap {
+  overflow: auto;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 8px 22px rgba(15, 23, 42, 0.04);
+}
+
+.rastreio-summary-table-wrap.compact {
+  border-radius: 12px;
+  box-shadow: none;
+}
+
+.rastreio-summary-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 880px;
+}
+
+.rastreio-summary-table.compact {
+  min-width: 640px;
+}
+
+.rastreio-summary-table th,
+.rastreio-summary-table td {
+  padding: 12px 14px;
+  border-bottom: 1px solid #eef2f7;
+  text-align: left;
+  vertical-align: middle;
+  font-size: 13px;
+  color: #0f172a;
+}
+
+.rastreio-summary-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #f8fafc;
+  color: #475569;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.rastreio-summary-row {
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+
+.rastreio-summary-row:hover,
+.rastreio-summary-row:focus-visible {
+  background: #f8fbff;
+  outline: none;
+}
+
+.rastreio-summary-machine {
+  font-weight: 800;
+  font-size: 14px;
+}
+
+.rastreio-summary-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 88px;
+  border-radius: 999px;
+  padding: 7px 12px;
+  font-weight: 800;
+}
+
+.rastreio-summary-pill.good {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.rastreio-summary-pill.scrap {
+  background: #ffe4e6;
+  color: #be123c;
+}
+
+.rastreio-summary-pill.warn {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.rastreio-summary-pill.neutral {
+  background: #e2e8f0;
+  color: #334155;
+}
+
+.rastreio-summary-modal-shell {
+  width: min(1440px, calc(100vw - 20px));
+  max-height: 90vh;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.rastreio-summary-modal-content {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  overflow-x: hidden;
+}
+
+.rastreio-summary-detail-note {
+  font-size: 13px;
+  color: #475569;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+}
+
+.rastreio-summary-kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+}
+
+.rastreio-detail-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  align-items: start;
+}
+
+.rastreio-summary-modal-content .rastreio-detail-grid {
+  grid-template-columns: 1fr;
+}
+
+.rastreio-summary-modal-content .rastreio-summary-table-wrap.compact {
+  overflow-x: visible;
+}
+
+.rastreio-summary-modal-content .rastreio-summary-table.compact {
+  min-width: 0;
+  width: 100%;
+  table-layout: fixed;
+}
+
+.rastreio-summary-modal-content .rastreio-summary-table.compact th,
+.rastreio-summary-modal-content .rastreio-summary-table.compact td {
+  white-space: normal;
+  word-break: break-word;
+}
+
+.rastreio-detail-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.rastreio-section-subtitle {
+  font-size: 13px;
+  font-weight: 800;
+  color: #1e3a8a;
+  margin-bottom: 8px;
+}
+
+.rastreio-order-chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.rastreio-order-chip {
+  min-width: 180px;
+  border: 1px solid #dbeafe;
+  border-radius: 12px;
+  padding: 10px 12px;
+  background: linear-gradient(135deg, #eff6ff, #f8fbff);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.rastreio-order-chip strong {
+  color: #0f172a;
+}
+
+.rastreio-order-chip span {
   color: #475569;
   font-size: 12px;
 }
@@ -310,6 +606,14 @@
 }
 
 @media (max-width: 760px) {
+  .rastreio-view-nav {
+    width: 100%;
+  }
+
+  .rastreio-view-btn {
+    flex: 1;
+  }
+
   .rastreio-modal-form {
     grid-template-columns: 1fr;
   }
@@ -317,6 +621,10 @@
   .rastreio-order-option {
     grid-template-columns: 1fr;
     gap: 4px;
+  }
+
+  .rastreio-detail-grid {
+    grid-template-columns: 1fr;
   }
 }
 
