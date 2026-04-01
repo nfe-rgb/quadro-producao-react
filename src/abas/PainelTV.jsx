@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import Etiqueta from "../components/Etiqueta";
 import { MAQUINAS } from "../lib/constants";
 import { statusClass } from "../lib/utils";
@@ -59,10 +59,15 @@ function ItemResumo({
 export default function PainelTV({
   ativosPorMaquina,
   paradas,
-  tick,
   lastFinalizadoPorMaquina,
 }) {
   const source = ativosPorMaquina || {};
+  const [currentTimeMs, setCurrentTimeMs] = useState(() => Date.now());
+
+  useEffect(() => {
+    const intervalId = setInterval(() => setCurrentTimeMs(Date.now()), 1000);
+    return () => clearInterval(intervalId);
+  }, []);
 
   return (
     <div className="tv-wrapper">
@@ -82,10 +87,9 @@ export default function PainelTV({
 
           const stopText = openStop
             ? (() => {
-                const _ = tick;
                 const total = Math.max(
                   0,
-                  Math.floor((Date.now() - new Date(openStop.started_at).getTime()) / 1000)
+                  Math.floor((currentTimeMs - new Date(openStop.started_at).getTime()) / 1000)
                 );
                 return formatHHMMSS(total);
               })()
@@ -95,10 +99,9 @@ export default function PainelTV({
             ? (() => {
                 const lastFinISO = lastFinalizadoPorMaquina?.[machineId] || null;
                 if (!lastFinISO) return null;
-                const _ = tick;
                 const total = Math.max(
                   0,
-                  Math.floor((Date.now() - new Date(lastFinISO).getTime()) / 1000)
+                  Math.floor((currentTimeMs - new Date(lastFinISO).getTime()) / 1000)
                 );
                 return formatHHMMSS(total);
               })()
@@ -107,9 +110,8 @@ export default function PainelTV({
           const lowEffText =
             atual?.status === "BAIXA_EFICIENCIA" && atual?.loweff_started_at
               ? (() => {
-                  const _ = tick;
                   const secs =
-                    (Date.now() - new Date(atual.loweff_started_at).getTime()) / 1000;
+                    (currentTimeMs - new Date(atual.loweff_started_at).getTime()) / 1000;
                   return formatHHMMSS(secs);
                 })()
               : null;

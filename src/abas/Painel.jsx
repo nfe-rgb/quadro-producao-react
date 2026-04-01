@@ -35,7 +35,6 @@ function formatHHMMSS(totalSeconds) {
 export default function Painel({
   ativosPorMaquina,
   paradas,
-  tick,
   onStatusChange,
   setStartModal,
   setFinalizando,
@@ -46,6 +45,7 @@ export default function Painel({
 }) {
   const META_MENSAL = 770000;
   const [producaoMesAtual, setProducaoMesAtual] = useState(0);
+  const [currentTimeMs, setCurrentTimeMs] = useState(() => Date.now());
 
   const metaMensalPercent =
     META_MENSAL > 0 ? (producaoMesAtual / META_MENSAL) * 100 : 0;
@@ -54,6 +54,11 @@ export default function Painel({
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })}%`;
+
+  useEffect(() => {
+    const intervalId = setInterval(() => setCurrentTimeMs(Date.now()), 1000);
+    return () => clearInterval(intervalId);
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -366,8 +371,7 @@ export default function Painel({
 
           const durText = sinceMs
             ? (() => {
-                const _ = tick;
-                const total = Math.max(0, Math.floor((Date.now() - sinceMs) / 1000));
+                const total = Math.max(0, Math.floor((currentTimeMs - sinceMs) / 1000));
                 return formatHHMMSS(total);
               })()
             : null;
@@ -376,9 +380,8 @@ export default function Painel({
           const lowEffText =
             ativa?.status === "BAIXA_EFICIENCIA" && ativa?.loweff_started_at
               ? (() => {
-                  const _ = tick;
                   const secs =
-                    (Date.now() - new Date(ativa.loweff_started_at).getTime()) / 1000;
+                    (currentTimeMs - new Date(ativa.loweff_started_at).getTime()) / 1000;
                   return formatHHMMSS(secs);
                 })()
               : null;
@@ -389,9 +392,8 @@ export default function Painel({
           if (!ativa || ativa.status === "AGUARDANDO") {
             const lastFinISO = lastFinalizadoPorMaquina?.[m] || null;
             if (lastFinISO) {
-              const _ = tick;
               const since = new Date(lastFinISO).getTime();
-              const total = Math.max(0, Math.floor((Date.now() - since) / 1000));
+              const total = Math.max(0, Math.floor((currentTimeMs - since) / 1000));
               semProgText = formatHHMMSS(total);
             }
           }

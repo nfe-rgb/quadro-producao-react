@@ -29,6 +29,13 @@ const SHIFT_OPTIONS = [
   { value: '2', label: 'Turno 2' },
 ]
 
+const DATE_PRESET_OPTIONS = [
+  { value: 'today', label: 'Hoje' },
+  { value: 'yesterday', label: 'Ontem' },
+  { value: 'thisMonth', label: 'Este Mês' },
+  { value: 'custom', label: 'Intervalo personalizado' },
+]
+
 const TYPE_LABELS = {
   order: 'O.S.',
   production: 'Produção',
@@ -53,6 +60,31 @@ const DATA_PAGE_SIZE = 1000
 
 function getTodayDate() {
   return DateTime.now().setZone('America/Sao_Paulo').toISODate()
+}
+
+function getDatePresetRange(preset) {
+  const now = DateTime.now().setZone('America/Sao_Paulo')
+
+  if (preset === 'yesterday') {
+    const yesterday = now.minus({ days: 1 })
+    return {
+      startDate: yesterday.toISODate(),
+      endDate: yesterday.toISODate(),
+    }
+  }
+
+  if (preset === 'thisMonth') {
+    return {
+      startDate: now.startOf('month').toISODate(),
+      endDate: now.toISODate(),
+    }
+  }
+
+  const today = now.toISODate()
+  return {
+    startDate: today,
+    endDate: today,
+  }
 }
 
 function text(value) {
@@ -440,8 +472,10 @@ function StatCard({ label, value, hint, tone = 'default' }) {
 }
 
 export default function Gestao({ registroGrupos = [], openSet, toggleOpen, isAdmin = false }) {
-  const [startDate, setStartDate] = useState(getTodayDate)
-  const [endDate, setEndDate] = useState(getTodayDate)
+  const defaultDateRange = getDatePresetRange('today')
+  const [datePreset, setDatePreset] = useState('today')
+  const [startDate, setStartDate] = useState(defaultDateRange.startDate)
+  const [endDate, setEndDate] = useState(defaultDateRange.endDate)
   const [search, setSearch] = useState('')
   const [typeFilter, setTypeFilter] = useState('all')
   const [sectorFilter, setSectorFilter] = useState('all')
@@ -474,6 +508,15 @@ export default function Gestao({ registroGrupos = [], openSet, toggleOpen, isAdm
       else next.add(recordId)
       return next
     })
+  }
+
+  function handleDatePresetChange(nextPreset) {
+    setDatePreset(nextPreset)
+    if (nextPreset === 'custom') return
+
+    const nextRange = getDatePresetRange(nextPreset)
+    setStartDate(nextRange.startDate)
+    setEndDate(nextRange.endDate)
   }
 
   const range = useMemo(() => buildRange(startDate, endDate), [startDate, endDate])
@@ -1449,14 +1492,25 @@ export default function Gestao({ registroGrupos = [], openSet, toggleOpen, isAdm
       <div className="gestao-panel gestao-filters-panel">
         <div className="gestao-filters-grid">
           <label>
-            <span>Data inicial</span>
-            <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+            <span>Período</span>
+            <select value={datePreset} onChange={(e) => handleDatePresetChange(e.target.value)}>
+              {DATE_PRESET_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+            </select>
           </label>
 
-          <label>
-            <span>Data final</span>
-            <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
-          </label>
+          {datePreset === 'custom' ? (
+            <>
+              <label>
+                <span>Data inicial</span>
+                <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+              </label>
+
+              <label>
+                <span>Data final</span>
+                <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+              </label>
+            </>
+          ) : null}
 
           <label className="is-wide">
             <span>Buscar O.S., cliente, produto ou máquina</span>
@@ -1509,9 +1563,10 @@ export default function Gestao({ registroGrupos = [], openSet, toggleOpen, isAdm
             type="button"
             className="btn"
             onClick={() => {
-              const today = getTodayDate()
-              setStartDate(today)
-              setEndDate(today)
+              const nextRange = getDatePresetRange('today')
+              setDatePreset('today')
+              setStartDate(nextRange.startDate)
+              setEndDate(nextRange.endDate)
               setSearch('')
               setTypeFilter('all')
               setSectorFilter('all')
