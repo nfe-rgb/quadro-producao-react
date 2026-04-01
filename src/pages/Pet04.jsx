@@ -323,12 +323,7 @@ export default function Pet04({
 // Substitua sua função biparWithCode por esta (coloque no mesmo escopo)
 async function biparWithCode(code) {
   const value = (code || "").trim();
-  if (!ativa) {
-    showToast("Nenhuma ordem ativa.", "err");
-    return;
-  }
-
-  const reg = /^OS\s+(\d+)\s*-\s*(\d{3})$/i;
+  const reg = /^OS\s*(\d+)\s*-\s*(\d+)$/i;
   const m = value.match(reg);
   if (!m) {
     showToast("Formato inválido. Use: OS 753 - 001", "err");
@@ -337,12 +332,29 @@ async function biparWithCode(code) {
   const op = m[1];
   const caixa = Number(m[2]);
 
-  if (String(op) !== String(ativa.code)) {
-    showToast(`Código não pertence à O.P ${ativa.code}`, "err");
-    return;
+  await ensureAnonymousSession();
+
+  let ordemAlvo = ativa && String(ativa.code) === String(op) ? ativa : null;
+  if (!ordemAlvo) {
+    const { data: orderRows, error: orderError } = await supabase
+      .from("orders")
+      .select("id, code, boxes, standard, machine_id, active_session_id, source_order_id")
+      .eq("code", String(op))
+      .eq("finalized", false)
+      .order("created_at", { ascending: false })
+      .limit(10);
+
+    if (orderError) {
+      console.error("Erro ao buscar O.P da bipagem:", orderError);
+      showToast("Erro ao localizar a O.P da caixa.", "err");
+      return;
+    }
+
+    ordemAlvo = (orderRows || []).find((row) => String(row?.machine_id || '').toUpperCase() === machineId) || orderRows?.[0] || null;
   }
-  if (caixa < 1 || caixa > Number(ativa.boxes)) {
-    showToast("Caixa fora do intervalo.", "err");
+
+  if (!ordemAlvo) {
+    showToast(`O.P ${op} não encontrada.`, "err");
     return;
   }
 
@@ -350,7 +362,7 @@ async function biparWithCode(code) {
   const { data: dup, error: dupErr } = await supabase
     .from("production_scans")
     .select("id")
-    .eq("order_id", ativa.id)
+    .eq("order_id", ordemAlvo.id)
     .eq("scanned_box", caixa)
     .maybeSingle();
 
@@ -376,17 +388,13 @@ async function biparWithCode(code) {
     return parseInt(digitsOnly, 10);
   }
 
-  const qtyPiecesPerBox = parsePiecesPerBox(ativa.standard);
+  const qtyPiecesPerBox = parsePiecesPerBox(ordemAlvo.standard);
 
   // --- FORÇA horário BR e calcula turno com BR ---
   const nowBr = DateTime.now().setZone("America/Sao_Paulo");
   const turnoAtual = getTurnoAtual(nowBr);
-  if (!turnoAtual) {
-    showToast("Fora dos turnos ativos. Apenas Turno 1 e 2 podem apontar.", "err");
-    return;
-  }
   const createdAtUtcIso = nowBr.toUTC().toISO(); // será gravado no supabase
-  const turnoCalc = String(turnoAtual);
+  const turnoCalc = String(turnoAtual || shiftInfo?.shiftKey || "");
 
   // logs detalhados antes do insert
   console.info("[biparWithCode] nowBr (BR):", nowBr.toISO());
@@ -395,13 +403,13 @@ async function biparWithCode(code) {
 
   const payload = {
     created_at: createdAtUtcIso,
-    machine_id: machineId,
+    machine_id: ordemAlvo.machine_id || machineId,
     shift: turnoCalc,
-    order_id: ativa.id,
-    op_code: String(ativa.code),
+    order_id: ordemAlvo.id,
+    op_code: String(ordemAlvo.code || op),
     scanned_box: caixa,
     qty_pieces: qtyPiecesPerBox,
-    code: value,
+    code: `OS ${op} - ${String(caixa).padStart(3, "0")}`,
   };
 
   console.info("[biparWithCode] payload -> antes do insert:", payload);
@@ -425,7 +433,9 @@ async function biparWithCode(code) {
   }
 
   // Atualiza UI
-  await loadScans(ativa.id);
+  if (ativa?.id && String(ativa.id) === String(ordemAlvo.id)) {
+    await loadScans(ordemAlvo.id);
+  }
   showToast(`Caixa ${String(caixa).padStart(3, "0")} registrada • Turno ${turnoCalc}`, "ok");
 
   if (saldo - 1 <= 0) {
@@ -716,15 +726,12 @@ if (typeof window !== "undefined") {
           }
 
           // calcula aqui o instante em São Paulo e converte para UTC para gravar
+          await ensureAnonymousSession();
           const nowBr = DateTime.now().setZone('America/Sao_Paulo');
           const turnoAtual = getTurnoAtual(nowBr);
-          if (!turnoAtual) {
-            showToast("Fora dos turnos ativos. Apenas Turno 1 e 2 podem apontar.", "err");
-            return;
-          }
           const createdAtUtcIso = nowBr.toUTC().toISO();
 
-          const turnoCalc = String(turnoAtual);
+          const turnoCalc = String(turnoAtual || shiftInfo?.shiftKey || '');
 
           // payload final compatível com scrap_logs
         const payload = {

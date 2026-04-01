@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { SUPABASE_CACHE_SCOPE, supabase } from '../lib/supabaseClient'
+import { ensureAnonymousSession, SUPABASE_CACHE_SCOPE, supabase } from '../lib/supabaseClient'
 import { MAQUINAS, MOTIVOS_PARADA } from '../lib/constants'
 import { localDateTimeToISO, jaIniciou } from '../lib/utils'
 import {
@@ -529,6 +529,7 @@ export default function useOrders() {
 
   async function finalizar(ordem, payload) {
     const iso = localDateTimeToISO(payload.data, payload.hora)
+    await ensureAnonymousSession()
     const { error } = await supabase.rpc('production_finalize_order', {
       p_order_id: String(ordem.id),
       p_finalized_at: iso,
@@ -562,6 +563,7 @@ export default function useOrders() {
       ? localDateTimeToISO(opts.data, opts.hora)
       : new Date().toISOString()
 
+    await ensureAnonymousSession()
     const { error } = await supabase.rpc('production_send_to_queue', {
       p_order_id: String(activeOrder.id),
       p_promoted_order_id: String(promotedOrder.id),
@@ -583,6 +585,7 @@ export default function useOrders() {
       return
     }
 
+    await ensureAnonymousSession()
     const { error } = await supabase.rpc('production_start_order', {
       p_order_id: String(ordem.source_order_id || ordem.id),
       p_started_at: localDateTimeToISO(data, hora),
@@ -606,7 +609,7 @@ export default function useOrders() {
     return null
   }
 
-  async function confirmarParada({ ordem, operador, motivo, obs, data, hora }) {
+  async function confirmarParada({ ordem, operador, motivo, obs, data, hora, skipValidation = false }) {
     if (!operador || !data || !hora) {
       alert('Preencha operador, data e hora.')
       return
@@ -616,17 +619,18 @@ export default function useOrders() {
       return
     }
 
-    if (!hasActiveSession(ordem)) {
+    if (!skipValidation && !hasActiveSession(ordem)) {
       alert('Esta ordem está sem sessão ativa. Regularize iniciando a produção novamente antes de registrar a parada.')
       return
     }
 
-    const overlapMsg = await validarSobreposicaoParada({ machineId: ordem.machine_id })
+    const overlapMsg = skipValidation ? null : await validarSobreposicaoParada({ machineId: ordem.machine_id })
     if (overlapMsg) {
       alert(overlapMsg)
       return
     }
 
+    await ensureAnonymousSession()
     const { error } = await supabase.rpc('production_stop_order', {
       p_order_id: String(ordem.source_order_id || ordem.id),
       p_started_at: localDateTimeToISO(data, hora),
@@ -643,17 +647,18 @@ export default function useOrders() {
     await fetchRuntimeSnapshot()
   }
 
-  async function confirmarRetomada({ ordem, operador, data, hora, targetStatus }) {
+  async function confirmarRetomada({ ordem, operador, data, hora, targetStatus, skipValidation = false }) {
     if (!operador || !data || !hora) {
       alert('Preencha operador, data e hora.')
       return
     }
 
-    if (!hasActiveSession(ordem)) {
+    if (!skipValidation && !hasActiveSession(ordem)) {
       alert('Esta ordem está sem sessão ativa. Regularize iniciando a produção novamente antes de retomar.')
       return
     }
 
+    await ensureAnonymousSession()
     const { error } = await supabase.rpc('production_resume_order', {
       p_order_id: String(ordem.source_order_id || ordem.id),
       p_resumed_at: localDateTimeToISO(data, hora),
@@ -669,17 +674,18 @@ export default function useOrders() {
     await fetchRuntimeSnapshot()
   }
 
-  async function confirmarBaixaEf({ ordem, operador, data, hora, obs }) {
+  async function confirmarBaixaEf({ ordem, operador, data, hora, obs, skipValidation = false }) {
     if (!operador || !data || !hora) {
       alert('Preencha operador, data e hora.')
       return
     }
 
-    if (!hasActiveSession(ordem)) {
+    if (!skipValidation && !hasActiveSession(ordem)) {
       alert('Esta ordem está sem sessão ativa. Regularize iniciando a produção novamente antes de registrar baixa eficiência.')
       return
     }
 
+    await ensureAnonymousSession()
     const { error } = await supabase.rpc('production_enter_low_efficiency_v3', {
       p_order_id: String(ordem.source_order_id || ordem.id),
       p_started_at: localDateTimeToISO(data, hora),
@@ -702,6 +708,7 @@ export default function useOrders() {
       return
     }
 
+    await ensureAnonymousSession()
     const { error } = await supabase.rpc('production_exit_low_efficiency', {
       p_order_id: String(ordem.source_order_id || ordem.id),
       p_ended_at: localDateTimeToISO(data, hora),
@@ -717,7 +724,8 @@ export default function useOrders() {
     await fetchRuntimeSnapshot()
   }
 
-  const onStatusChange = async (ordem, targetStatus) => {
+  const onStatusChange = async (ordem, targetStatus, options = {}) => {
+    const skipValidation = Boolean(options?.skipValidation)
     const atual = ordem.status
     const currentStatus = String(atual || '').toUpperCase()
     const activeSession = hasActiveSession(ordem)
@@ -726,7 +734,7 @@ export default function useOrders() {
       return { action: 'alert', message: 'Após iniciar a produção, não é permitido voltar para "Aguardando".' }
     }
 
-    if (!activeSession && currentStatus !== 'AGUARDANDO') {
+    if (!skipValidation && !activeSession && currentStatus !== 'AGUARDANDO') {
       return {
         action: 'alert',
         message: 'Esta ordem está marcada em operação, mas está sem sessão ativa. Use "Iniciar Produção" para regularizar antes de trocar para parada, retomada ou baixa eficiência.',

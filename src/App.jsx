@@ -201,8 +201,8 @@ export default function App(){
   }, [authUser, isMendes]);
 
   // central handler: recebe instrução do hook onStatusChange e abre modais localmente
-  async function handleStatusChange(ordem, targetStatus){
-    const res = await onStatusChange(ordem, targetStatus)
+  async function handleStatusChange(ordem, targetStatus, options = {}){
+    const res = await onStatusChange(ordem, targetStatus, options)
     if (!res) return
     if (res.action === 'alert') {
       alert(res.message)
@@ -222,6 +222,11 @@ export default function App(){
     }
     return
   }
+
+  const handleStatusChangeRelaxed = (ordem, targetStatus) => handleStatusChange(ordem, targetStatus, { skipValidation: true })
+  const confirmarParadaRelaxed = (payload) => confirmarParada({ ...payload, skipValidation: true })
+  const confirmarRetomadaRelaxed = (payload) => confirmarRetomada({ ...payload, skipValidation: true })
+  const confirmarBaixaEfRelaxed = (payload) => confirmarBaixaEf({ ...payload, skipValidation: true })
 
   useEffect(() => {
     if (!authChecked) return
@@ -348,7 +353,7 @@ export default function App(){
           ativosP1={ativosP1}
           tick={tick}
           paradas={paradas}
-          onStatusChange={handleStatusChange}
+          onStatusChange={handleStatusChangeRelaxed}
           setStartModal={setStartModal}
           setStopModal={setStopModal}
           setLowEffModal={setLowEffModal}
@@ -369,9 +374,9 @@ export default function App(){
           onUpdateOrder={atualizar}
           onFinalize={finalizar}
           onConfirmStart={confirmarInicio}
-          onConfirmStop={confirmarParada}
-          onConfirmResume={confirmarRetomada}
-          onConfirmLowEffStart={confirmarBaixaEf}
+          onConfirmStop={confirmarParadaRelaxed}
+          onConfirmResume={confirmarRetomadaRelaxed}
+          onConfirmLowEffStart={confirmarBaixaEfRelaxed}
           onConfirmLowEffEnd={confirmarEncerrarBaixaEf}
         />
       </>
@@ -413,7 +418,7 @@ export default function App(){
           ativosP2={ativosP2}
           tick={tick}
           paradas={paradas}
-          onStatusChange={handleStatusChange}
+          onStatusChange={handleStatusChangeRelaxed}
           setStartModal={setStartModal}
           setStopModal={setStopModal}
           setLowEffModal={setLowEffModal}
@@ -434,9 +439,9 @@ export default function App(){
           onUpdateOrder={atualizar}
           onFinalize={finalizar}
           onConfirmStart={confirmarInicio}
-          onConfirmStop={confirmarParada}
-          onConfirmResume={confirmarRetomada}
-          onConfirmLowEffStart={confirmarBaixaEf}
+          onConfirmStop={confirmarParadaRelaxed}
+          onConfirmResume={confirmarRetomadaRelaxed}
+          onConfirmLowEffStart={confirmarBaixaEfRelaxed}
           onConfirmLowEffEnd={confirmarEncerrarBaixaEf}
         />
       </>
@@ -452,7 +457,7 @@ export default function App(){
           ativosP3={ativosP3}
           tick={tick}
           paradas={paradas}
-          onStatusChange={handleStatusChange}
+          onStatusChange={handleStatusChangeRelaxed}
           setStartModal={setStartModal}
           setStopModal={setStopModal}
           setLowEffModal={setLowEffModal}
@@ -473,9 +478,9 @@ export default function App(){
           onUpdateOrder={atualizar}
           onFinalize={finalizar}
           onConfirmStart={confirmarInicio}
-          onConfirmStop={confirmarParada}
-          onConfirmResume={confirmarRetomada}
-          onConfirmLowEffStart={confirmarBaixaEf}
+          onConfirmStop={confirmarParadaRelaxed}
+          onConfirmResume={confirmarRetomadaRelaxed}
+          onConfirmLowEffStart={confirmarBaixaEfRelaxed}
           onConfirmLowEffEnd={confirmarEncerrarBaixaEf}
         />
       </>
@@ -491,7 +496,7 @@ export default function App(){
           ativosP4={ativosP4}
           tick={tick}
           paradas={paradas}
-          onStatusChange={handleStatusChange}
+          onStatusChange={handleStatusChangeRelaxed}
           setStartModal={setStartModal}
           setStopModal={setStopModal}
           setLowEffModal={setLowEffModal}
@@ -512,9 +517,9 @@ export default function App(){
           onUpdateOrder={atualizar}
           onFinalize={finalizar}
           onConfirmStart={confirmarInicio}
-          onConfirmStop={confirmarParada}
-          onConfirmResume={confirmarRetomada}
-          onConfirmLowEffStart={confirmarBaixaEf}
+          onConfirmStop={confirmarParadaRelaxed}
+          onConfirmResume={confirmarRetomadaRelaxed}
+          onConfirmLowEffStart={confirmarBaixaEfRelaxed}
           onConfirmLowEffEnd={confirmarEncerrarBaixaEf}
         />
       </>

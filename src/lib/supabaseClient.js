@@ -17,6 +17,12 @@ export const SUPABASE_CACHE_SCOPE = resolveCacheScope(url);
 export const supabase = createClient(url, anon);
 
 let anonymousSessionPromise = null;
+let anonymousSignInDisabledWarned = false;
+
+function isAnonymousSignInDisabledError(error) {
+	const message = String(error?.message || '').toLowerCase();
+	return message.includes('anonymous sign-ins are disabled');
+}
 
 export async function ensureAnonymousSession() {
 	const {
@@ -31,8 +37,27 @@ export async function ensureAnonymousSession() {
 		anonymousSessionPromise = supabase.auth
 			.signInAnonymously()
 			.then(({ data, error }) => {
-				if (error) throw error;
+				if (error) {
+					if (isAnonymousSignInDisabledError(error)) {
+						if (!anonymousSignInDisabledWarned) {
+							console.info('Supabase: anonymous sign-ins desabilitado; continuando com a role anon da chave publica.');
+							anonymousSignInDisabledWarned = true;
+						}
+						return null;
+					}
+					throw error;
+				}
 				return data?.session || null;
+			})
+			.catch((error) => {
+				if (isAnonymousSignInDisabledError(error)) {
+					if (!anonymousSignInDisabledWarned) {
+						console.info('Supabase: anonymous sign-ins desabilitado; continuando com a role anon da chave publica.');
+						anonymousSignInDisabledWarned = true;
+					}
+					return null;
+				}
+				throw error;
 			})
 			.finally(() => {
 				anonymousSessionPromise = null;
