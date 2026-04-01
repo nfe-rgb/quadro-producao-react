@@ -224,14 +224,21 @@ export default function Lista({
                     <div className="grid2">
                       <div>
                         <div className="label">Situação (só painel)</div>
+                        {(() => {
+                          const precisaRegularizarSessao = Boolean(
+                            ativa && String(ativa.status || '').toUpperCase() !== 'AGUARDANDO' && !ativa.active_session_id
+                          )
+                          return (
                         <select
                           className="select"
                           value={ativa.status}
                           onChange={e => onStatusChange(ativa, e.target.value)}
-                          disabled={ativa.status === 'AGUARDANDO'}
+                          disabled={ativa.status === 'AGUARDANDO' || precisaRegularizarSessao}
                         >
                           {STATUS
-                            .filter(s => (jaIniciou(ativa) ? s !== 'AGUARDANDO' : true))
+                            .filter(s => (s === 'AGUARDANDO'
+                              ? String(ativa?.status || '').toUpperCase() === 'AGUARDANDO'
+                              : true))
                             .map(s => (
                               <option key={s} value={s}>
                                 {s==='AGUARDANDO'?'Aguardando'
@@ -241,10 +248,17 @@ export default function Lista({
                               </option>
                             ))}
                         </select>
+                          )
+                        })()}
+                        {Boolean(ativa && String(ativa.status || '').toUpperCase() !== 'AGUARDANDO' && !ativa.active_session_id) && (
+                          <div className="small" style={{ marginTop: 6, color: '#b45309' }}>
+                            Ordem sem sessão ativa. Regularize pelo botão de início.
+                          </div>
+                        )}
                       </div>
 
                       <div className="flex" style={{ justifyContent:'flex-end', gap:8 }}>
-                        {ativa.status === 'AGUARDANDO' ? (
+                        {ativa.status === 'AGUARDANDO' || Boolean(ativa && String(ativa.status || '').toUpperCase() !== 'AGUARDANDO' && !ativa.active_session_id) ? (
                           <>
                             <button className="btn" onClick={()=>{
                               const nowBr = DateTime.now().setZone("America/Sao_Paulo");
@@ -254,7 +268,7 @@ export default function Lista({
                                 data: nowBr.toISODate(), 
                                 hora: nowBr.toFormat("HH:mm"),
                               })
-                            }}>Iniciar Produção</button>
+                            }}>{Boolean(ativa && String(ativa.status || '').toUpperCase() !== 'AGUARDANDO' && !ativa.active_session_id) ? 'Regularizar Produção' : 'Iniciar Produção'}</button>
                             {isAdmin && (
                               <button className="btn" onClick={() => setEditando(ativa)}>Editar</button>
                             )}

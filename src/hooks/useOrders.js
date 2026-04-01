@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { supabase } from '../lib/supabaseClient'
+import { SUPABASE_CACHE_SCOPE, supabase } from '../lib/supabaseClient'
 import { MAQUINAS, MOTIVOS_PARADA } from '../lib/constants'
 import { localDateTimeToISO, jaIniciou } from '../lib/utils'
 import {
@@ -11,7 +11,7 @@ import {
   mapStopsForUi,
 } from '../lib/productionRuntime'
 
-const RUNTIME_VIEW_STORAGE_KEY = 'production_runtime_view_availability'
+const RUNTIME_VIEW_STORAGE_KEY = `production_runtime_view_availability:${SUPABASE_CACHE_SCOPE}`
 
 function readCachedAvailability(storageKey) {
   if (typeof window === 'undefined') return 'unknown'
@@ -49,7 +49,7 @@ function countByOrderId(rows) {
   return counts
 }
 
-const ORDERS_CACHE_KEY = 'cached_production_orders_v1';
+const ORDERS_CACHE_KEY = `cached_production_orders_v1:${SUPABASE_CACHE_SCOPE}`;
 
 function saveOrdersToCache(orders) {
   try {
@@ -65,6 +65,10 @@ function loadOrdersFromCache() {
   } catch {
     return [];
   }
+}
+
+function hasActiveSession(order) {
+  return !!String(order?.active_session_id || '').trim()
 }
 
 export default function useOrders() {
@@ -96,7 +100,7 @@ export default function useOrders() {
 
   // Reduzido: selecione apenas os campos realmente usados na UI
   const fetchOrdersBaseSnapshot = useCallback(async () => {
-    const selectFields = 'id, machine_id, code, product, color, qty, boxes, standard, due_date, status, pos, finalized, finalized_at, created_at, updated_at';
+    const selectFields = 'id, machine_id, code, customer, product, color, qty, boxes, standard, due_date, notes, status, pos, finalized, finalized_at, created_at, updated_at';
     const [openRes, finalizedRes] = await Promise.all([
       supabase
         .from('orders')
@@ -126,7 +130,7 @@ export default function useOrders() {
       // Busca apenas campos essenciais para o painel
       const runtimeProbeRes = await supabase
         .from('production_orders_runtime_v')
-        .select('id, machine_id, code, product, color, qty, boxes, standard, due_date, status, pos, finalized, finalized_at, created_at, updated_at')
+        .select('id')
         .limit(1)
 
       if (isMissingRelationError(runtimeProbeRes.error, 'production_orders_runtime_v')) {
@@ -141,7 +145,44 @@ export default function useOrders() {
 
     if (!runtimeViewMissing) {
       // Busca apenas campos essenciais para o painel
-      const selectFields = 'id, machine_id, code, product, color, qty, boxes, standard, due_date, status, pos, finalized, finalized_at, created_at, updated_at';
+      const selectFields = [
+        'id',
+        'machine_id',
+        'code',
+        'customer',
+        'product',
+        'color',
+        'qty',
+        'boxes',
+        'standard',
+        'due_date',
+        'notes',
+        'status',
+        'pos',
+        'finalized',
+        'created_at',
+        'updated_at',
+        'finalized_at',
+        'finalized_by',
+        'started_at',
+        'started_by',
+        'restarted_at',
+        'restarted_by',
+        'interrupted_at',
+        'interrupted_by',
+        'loweff_started_at',
+        'loweff_ended_at',
+        'loweff_notes',
+        'loweff_reason',
+        'active_session_id',
+        'active_machine_id',
+        'active_session_started_at',
+        'active_session_started_by',
+        'active_stop_started_at',
+        'active_stop_reason',
+        'active_stop_notes',
+        'session_count',
+      ].join(', ')
       const [runtimeOpenRes, runtimeFinalizedRes] = await Promise.all([
         supabase
           .from('production_orders_runtime_v')
@@ -175,7 +216,7 @@ export default function useOrders() {
 
     if (runtimeViewMissing) {
       if (!runtimeFallbackWarnedRef.current) {
-        console.warn('View production_orders_runtime_v não encontrada no Supabase. Reconstruindo o runtime a partir de orders + sessões/eventos, sem depender das colunas legadas.')
+        console.warn('View production_orders_runtime_v não encontrada no Supabase. Reconstruindo o runtime a partir de orders + sessões/eventos.')
         runtimeFallbackWarnedRef.current = true
       }
     } else if (runtimeViewErrored && !runtimeErrorFallbackWarnedRef.current) {
@@ -218,7 +259,7 @@ export default function useOrders() {
       sessionsTableAvailability !== 'missing' && relevantIds.length
         ? supabase
             .from('order_machine_sessions')
-            .select('id, order_id, machine_id, started_at, stopped_at, status')
+            .select('id, order_id, machine_id, started_at, ended_at, started_by, ended_by, end_reason')
             .in('order_id', relevantIds)
             .order('started_at', { ascending: true })
         : Promise.resolve({ data: [], error: null }),
@@ -249,7 +290,7 @@ export default function useOrders() {
     }
 
     if (isMissingRelationError(rawSessionsRes.error, 'order_machine_sessions') && !sessionsFallbackWarnedRef.current) {
-      console.warn('Tabela order_machine_sessions não encontrada no Supabase. O histórico seguirá em modo legado até aplicar as migrations.')
+      console.warn('Tabela order_machine_sessions não encontrada no Supabase. O runtime ficará incompleto até o schema normalizado ser aplicado.')
       sessionsFallbackWarnedRef.current = true
     }
 
@@ -284,12 +325,18 @@ export default function useOrders() {
       scanned_count: Number(order.scanned_count || 0),
     }))
 
-    // Só atualiza se houver ordens válidas
-    if (normalizedOpenOrders.length > 0) {
+    const canPersistOpenOrders = shouldDeriveRuntime
+      ? !baseSnapshot?.openRes?.error
+      : !openRes?.error
+    const canPersistFinalizedOrders = shouldDeriveRuntime
+      ? !baseSnapshot?.finalizedRes?.error
+      : !finalizedRes?.error
+
+    if (canPersistOpenOrders) {
       setOrdens(normalizedOpenOrders)
       saveOrdersToCache(normalizedOpenOrders)
     }
-    if (normalizedFinalizedOrders.length > 0) {
+    if (canPersistFinalizedOrders) {
       setFinalizadas(normalizedFinalizedOrders)
     }
     setSessions(sessionsRes.data || [])
@@ -569,6 +616,11 @@ export default function useOrders() {
       return
     }
 
+    if (!hasActiveSession(ordem)) {
+      alert('Esta ordem está sem sessão ativa. Regularize iniciando a produção novamente antes de registrar a parada.')
+      return
+    }
+
     const overlapMsg = await validarSobreposicaoParada({ machineId: ordem.machine_id })
     if (overlapMsg) {
       alert(overlapMsg)
@@ -597,6 +649,11 @@ export default function useOrders() {
       return
     }
 
+    if (!hasActiveSession(ordem)) {
+      alert('Esta ordem está sem sessão ativa. Regularize iniciando a produção novamente antes de retomar.')
+      return
+    }
+
     const { error } = await supabase.rpc('production_resume_order', {
       p_order_id: String(ordem.source_order_id || ordem.id),
       p_resumed_at: localDateTimeToISO(data, hora),
@@ -615,6 +672,11 @@ export default function useOrders() {
   async function confirmarBaixaEf({ ordem, operador, data, hora, obs }) {
     if (!operador || !data || !hora) {
       alert('Preencha operador, data e hora.')
+      return
+    }
+
+    if (!hasActiveSession(ordem)) {
+      alert('Esta ordem está sem sessão ativa. Regularize iniciando a produção novamente antes de registrar baixa eficiência.')
       return
     }
 
@@ -657,9 +719,18 @@ export default function useOrders() {
 
   const onStatusChange = async (ordem, targetStatus) => {
     const atual = ordem.status
+    const currentStatus = String(atual || '').toUpperCase()
+    const activeSession = hasActiveSession(ordem)
 
-    if (jaIniciou(ordem) && targetStatus === 'AGUARDANDO') {
+    if (targetStatus === 'AGUARDANDO' && currentStatus !== 'AGUARDANDO') {
       return { action: 'alert', message: 'Após iniciar a produção, não é permitido voltar para "Aguardando".' }
+    }
+
+    if (!activeSession && currentStatus !== 'AGUARDANDO') {
+      return {
+        action: 'alert',
+        message: 'Esta ordem está marcada em operação, mas está sem sessão ativa. Use "Iniciar Produção" para regularizar antes de trocar para parada, retomada ou baixa eficiência.',
+      }
     }
 
     if (targetStatus === 'BAIXA_EFICIENCIA' && atual !== 'BAIXA_EFICIENCIA') {

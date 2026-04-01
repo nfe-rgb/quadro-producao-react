@@ -254,7 +254,7 @@ export default function RastreioResumoPeriodo() {
         .lt('created_at', endIso)
       let stopsQuery = supabase
         .from('machine_stops')
-        .select('id, order_id, machine_id, session_id, started_at, resumed_at, ended_at, reason, notes, started_by')
+        .select('id, order_id, machine_id, session_id, started_at, resumed_at, reason, notes, started_by')
         .lt('started_at', endIso)
       let sessionsQuery = supabase
         .from('order_machine_sessions')
@@ -280,7 +280,7 @@ export default function RastreioResumoPeriodo() {
         manualQuery = manualQuery.eq('shift', shiftFilter)
       }
 
-      stopsQuery = stopsQuery.or(`resumed_at.gte.${startIso},ended_at.gte.${startIso},resumed_at.is.null,ended_at.is.null`)
+      stopsQuery = stopsQuery.or(`resumed_at.gte.${startIso},resumed_at.is.null`)
       sessionsQuery = sessionsQuery.or(`ended_at.gte.${startIso},ended_at.is.null`)
       lowEffQuery = lowEffQuery.or(`ended_at.gte.${startIso},ended_at.is.null`)
 
@@ -374,7 +374,7 @@ export default function RastreioResumoPeriodo() {
         scraps: scrapsRes.data || [],
         stops: (rawStopsRes.data || []).map((stop) => ({
           ...stop,
-          ended_at: stop?.resumed_at || stop?.ended_at || null,
+          ended_at: stop?.resumed_at || null,
         })),
         manualEntries: manualRes.data || [],
         sessions: sessionsRes.data || [],
@@ -517,6 +517,21 @@ export default function RastreioResumoPeriodo() {
         )
       )
 
+      const mergedLowEffIntervals = mergeIntervals(
+        machineLowEffLogs.flatMap((record) =>
+          intersectIntervals(
+            mapRecordsToIntervals([record], {
+              rangeStartMs,
+              rangeEndMs,
+              startKey: 'started_at',
+              endKey: 'ended_at',
+              fallbackEndMs: rangeEndMs,
+            }),
+            allowedIntervals
+          )
+        )
+      )
+
       const loadedIntervals = mergeIntervals(
         machineSessions.flatMap((record) =>
           intersectIntervals(
@@ -553,19 +568,34 @@ export default function RastreioResumoPeriodo() {
           allowedIntervals
         )
         const stopInsideSession = intersectIntervals(mergedStopIntervals, sessionIntervals)
-        const runtimeIntervals = subtractIntervals(sessionIntervals, stopInsideSession)
+        const lowEffInsideSession = intersectIntervals(mergedLowEffIntervals, sessionIntervals)
+        const effectiveStopIntervals = subtractIntervals(stopInsideSession, lowEffInsideSession)
+        const effectiveLowEffIntervals = subtractIntervals(lowEffInsideSession, stopInsideSession)
+        const runtimeIntervals = subtractIntervals(
+          sessionIntervals,
+          mergeIntervals([...effectiveStopIntervals, ...effectiveLowEffIntervals])
+        )
         idealPieces += (sumIntervals(runtimeIntervals) / 1000 / 60 / 60) * piecesPerHour
       }
 
       const actualPieces = goodPieces + scrapPieces
       const loadedMs = sumIntervals(loadedIntervals)
-      const stopMs = sumIntervals(mergedStopIntervals)
-      const productiveIntervals = subtractIntervals(loadedIntervals, mergedStopIntervals)
+      const stopIntervals = subtractIntervals(
+        intersectIntervals(mergedStopIntervals, loadedIntervals),
+        intersectIntervals(mergedLowEffIntervals, loadedIntervals)
+      )
+      const lowEffIntervals = subtractIntervals(
+        intersectIntervals(mergedLowEffIntervals, loadedIntervals),
+        intersectIntervals(mergedStopIntervals, loadedIntervals)
+      )
+      const stopMs = sumIntervals(stopIntervals)
+      const lowEffMs = sumIntervals(lowEffIntervals)
+      const productiveIntervals = subtractIntervals(loadedIntervals, mergeIntervals([...stopIntervals, ...lowEffIntervals]))
       const runtimeMs = sumIntervals(productiveIntervals)
       const firstProductionAt = productiveIntervals.length
         ? new Date(productiveIntervals[0][0]).toISOString()
         : (loadedIntervals.length ? new Date(loadedIntervals[0][0]).toISOString() : null)
-      const availability = loadedMs > 0 ? Math.max(0, (loadedMs - stopMs) / loadedMs) : null
+      const availability = loadedMs > 0 ? Math.max(0, (loadedMs - stopMs - lowEffMs) / loadedMs) : null
       const performance = idealPieces > 0 ? Math.max(0, actualPieces / idealPieces) : null
       const quality = actualPieces > 0 ? Math.max(0, goodPieces / actualPieces) : 1
       const oee = availability != null && performance != null
@@ -581,6 +611,7 @@ export default function RastreioResumoPeriodo() {
             ...machineScraps.map((record) => String(record?.order_id || '')),
             ...machineStops.map((record) => String(record?.order_id || '')),
             ...machineSessions.map((record) => String(record?.order_id || '')),
+            ...machineLowEffLogs.map((record) => String(record?.order_id || '')),
           ].filter(Boolean)
         )
       )
@@ -599,6 +630,7 @@ export default function RastreioResumoPeriodo() {
         performancePercent: performance == null ? null : Math.min(100, performance * 100),
         qualityPercent: quality == null ? null : Math.min(100, quality * 100),
         stopHours: stopMs / 1000 / 60 / 60,
+        lowEffHours: lowEffMs / 1000 / 60 / 60,
         runtimeHours: runtimeMs / 1000 / 60 / 60,
         loadedHours: loadedMs / 1000 / 60 / 60,
         firstProductionAt,
@@ -606,6 +638,7 @@ export default function RastreioResumoPeriodo() {
         actualPieces,
         scanBoxes: machineScans.length,
         manualEntriesCount: machineManualEntries.length,
+        transferCount: machineSessions.filter((session) => String(session?.end_reason || '').toUpperCase() === 'TRANSFERRED').length,
         missingTargets: Array.from(missingTargets),
       }
 
@@ -632,9 +665,10 @@ export default function RastreioResumoPeriodo() {
           scrapPieces: acc.scrapPieces + row.scrapPieces,
           scrapValue: acc.scrapValue + row.scrapValue,
           stopHours: acc.stopHours + row.stopHours,
+          lowEffHours: acc.lowEffHours + row.lowEffHours,
           actualPieces: acc.actualPieces + row.actualPieces,
         }),
-        { goodPieces: 0, producedValue: 0, scrapPieces: 0, scrapValue: 0, stopHours: 0, actualPieces: 0 }
+        { goodPieces: 0, producedValue: 0, scrapPieces: 0, scrapValue: 0, stopHours: 0, lowEffHours: 0, actualPieces: 0 }
       ),
     }
   }, [activeShiftKeys, range, shiftFilter, summaryDataset, visibleMachines])
@@ -736,7 +770,7 @@ export default function RastreioResumoPeriodo() {
         <div className="rastreio-summary-highlight-card neutral">
           <span>Horas paradas</span>
           <strong>{formatHours(summary.totals.stopHours)}</strong>
-          <small>{rangeLabel}</small>
+          <small>Baixa eficiência {formatHours(summary.totals.lowEffHours)}</small>
         </div>
       </div>
 
@@ -832,12 +866,17 @@ export default function RastreioResumoPeriodo() {
               <div className="rastreio-summary-highlight-card neutral">
                 <span>OEE</span>
                 <strong>{formatPercent(detail.oeePercent)}</strong>
-                <small>Paradas {formatHours(detail.stopHours)}</small>
+                <small>Paradas {formatHours(detail.stopHours)} • Baixa eficiência {formatHours(detail.lowEffHours)}</small>
               </div>
               <div className="rastreio-summary-highlight-card neutral">
                 <span>Hora de início</span>
                 <strong>{formatDateTimeOrDash(detail.firstProductionAt)}</strong>
                 <small>Primeiro início de produção no recorte</small>
+              </div>
+              <div className="rastreio-summary-highlight-card neutral">
+                <span>Transferências</span>
+                <strong>{detail.transferCount}</strong>
+                <small>Sessões encerradas por troca de máquina</small>
               </div>
             </div>
 
@@ -861,6 +900,10 @@ export default function RastreioResumoPeriodo() {
               <div className="rastreio-card">
                 <span>Tempo produtivo</span>
                 <strong>{formatHours(detail.runtimeHours)}</strong>
+              </div>
+              <div className="rastreio-card">
+                <span>Baixa eficiência</span>
+                <strong>{formatHours(detail.lowEffHours)}</strong>
               </div>
               <div className="rastreio-card">
                 <span>Peças ideais</span>

@@ -908,11 +908,47 @@ export default function Gestao({ registroGrupos = [], openSet, toggleOpen, isAdm
     })
   }, [orderGroupsInRange, range.endIso, range.endMs, range.startMs])
 
+  const lowEffRecords = useMemo(() => {
+    return orderGroupsInRange.flatMap((group) => {
+      const order = group?.ordem || {}
+      const sourceOrderId = text(group?.orderId || order?.source_order_id || order?.id)
+      return (group?.lowEffLogs || []).map((event) => {
+        const machineId = text(event?.machine_id || order?.machine_id)
+        const sector = getSectorByMachine(machineId)
+        const shift = resolveShift(null, event?.started_at)
+        const durationMs = clampDurationMs(event?.started_at, event?.ended_at || range.endIso, range.startMs, range.endMs)
+        const reasonLabel = text(event?.reason) || 'Baixa eficiência'
+        return {
+          id: `loweff:${event.id}`,
+          type: 'stop',
+          timestamp: event?.started_at || null,
+          orderId: sourceOrderId,
+          code: text(order?.code),
+          product: text(order?.product),
+          customer: text(order?.customer),
+          machineId,
+          sector,
+          shift,
+          value: 0,
+          quantity: durationMs / 1000 / 60 / 60,
+          status: `Baixa eficiência${reasonLabel && reasonLabel !== 'Baixa eficiência' ? ` • ${reasonLabel}` : ''}`,
+          subtitle: `${machineId || 'Sem máquina'} • ${formatHours(durationMs / 1000 / 60 / 60)}`,
+          details: [
+            `Início: ${fmtDateTime(event?.started_at) || '-'}`,
+            `Fim: ${fmtDateTime(event?.ended_at) || 'Em aberto'}`,
+            `Motivo: ${reasonLabel}`,
+            `Observação: ${text(event?.notes) || 'Sem observação'}`,
+          ],
+        }
+      })
+    })
+  }, [orderGroupsInRange, range.endIso, range.endMs, range.startMs])
+
   const allRecords = useMemo(() => {
-    return [...orderRecords, ...productionRecords, ...scrapRecords, ...stopRecords]
+    return [...orderRecords, ...productionRecords, ...scrapRecords, ...stopRecords, ...lowEffRecords]
       .filter((record) => record.timestamp)
       .sort((left, right) => new Date(right.timestamp).getTime() - new Date(left.timestamp).getTime())
-  }, [orderRecords, productionRecords, scrapRecords, stopRecords])
+  }, [lowEffRecords, orderRecords, productionRecords, scrapRecords, stopRecords])
 
   const recordsByScope = useMemo(() => {
     return allRecords.filter((record) => {

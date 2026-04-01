@@ -4,7 +4,9 @@
 
 import { supabase } from './supabaseClient'
 
-const STORAGE_KEY = 'tech-sheets-v1'
+import { SUPABASE_CACHE_SCOPE } from './supabaseClient'
+
+const STORAGE_KEY = `tech-sheets-v1:${SUPABASE_CACHE_SCOPE}`
 const TABLE_SHEETS = 'tech_sheets'
 const TABLE_REVISIONS = 'tech_sheet_revisions'
 const TABLE_ITEMS = 'items'

@@ -47,14 +47,27 @@ const INSUMO_TECH_DEFAULTS = {
 }
 const PRODUCT_IMAGES_BUCKET = import.meta.env.VITE_SUPABASE_PRODUCT_IMAGES_BUCKET || 'product-images'
 
-// Cabeçalhos esperados (CSV)
-const EXPECTED_HEADERS = [
-  'code','description','color','cycle_seconds','cavities','part_weight_g','unit_value','resin'
+// Cabeçalhos de CSV
+const REQUIRED_HEADERS = ['code', 'description']
+const CSV_TEMPLATE_HEADERS = [
+  'code',
+  'description',
+  'item_type',
+  'color',
+  'cycle_seconds',
+  'cavities',
+  'part_weight_g',
+  'unit_value',
+  'resin',
+  'unidade',
+  'cliente',
+  'estoque_minimo',
 ]
 const normalizeKey = (k) => String(k ?? '').trim().toLowerCase().replace(/\s+/g, '_')
+const normalizeComparableText = (value) => cleanText(value).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
 const validateHeaders = (fields=[]) => {
   const got = new Set(fields.map(normalizeKey))
-  for (const h of EXPECTED_HEADERS) if (!got.has(h)) return `Cabeçalho ausente: ${h}`
+  for (const h of REQUIRED_HEADERS) if (!got.has(h)) return `Cabeçalho ausente: ${h}`
   return null
 }
 const getFileExtension = (fileName = '') => {
@@ -503,22 +516,58 @@ export default function CadastroItens() {
     })
   }
 
+  function resolveCsvItemType(row) {
+    const explicitType = normalizeComparableText(row?.item_type)
+    if (['insumo', 'materia prima', 'materia_prima', 'materia-prima'].includes(explicitType)) {
+      return 'insumo'
+    }
+    if (['produto acabado', 'produto_acabado', 'produto-acabado', 'produto', 'acabado'].includes(explicitType)) {
+      return 'produto_acabado'
+    }
+
+    const code = cleanText(row?.code)
+    const hasInsumoFields = !!cleanText(row?.unidade) || !!cleanText(row?.cliente) || toNonNegFloat(row?.estoque_minimo) != null
+    const hasProductFields = !!toPosFloat(row?.cycle_seconds) && !!toPosInt(row?.cavities) && !!toPosFloat(row?.part_weight_g) && !!toPosFloat(row?.unit_value)
+
+    if (hasInsumoFields && !hasProductFields) return 'insumo'
+    if (hasProductFields) return 'produto_acabado'
+    if (code.startsWith('5')) return 'produto_acabado'
+    return 'insumo'
+  }
+
   function mapRows(data) {
     const seenCodes = new Set()
     const mapped = []
     for (const row of data) {
-      const payload = {
-        code: cleanText(row.code),
-        description: cleanText(row.description),
-        color: cleanText(row.color),
-        cycle_seconds: toPosFloat(row.cycle_seconds),
-        cavities: toPosInt(row.cavities),
-        part_weight_g: toPosFloat(row.part_weight_g),
-        unit_value: toPosFloat(row.unit_value),
-        resin: cleanText(row.resin),
-      }
+      const normalizedType = resolveCsvItemType(row)
+      const payload = normalizedType === 'insumo'
+        ? {
+            code: cleanText(row.code),
+            description: cleanText(row.description),
+            item_type: 'insumo',
+            color: cleanText(row.color) || INSUMO_TECH_DEFAULTS.color,
+            cycle_seconds: toPosFloat(row.cycle_seconds) ?? INSUMO_TECH_DEFAULTS.cycle_seconds,
+            cavities: toPosInt(row.cavities) ?? INSUMO_TECH_DEFAULTS.cavities,
+            part_weight_g: toPosFloat(row.part_weight_g) ?? INSUMO_TECH_DEFAULTS.part_weight_g,
+            unit_value: toNonNegFloat(row.unit_value) ?? INSUMO_TECH_DEFAULTS.unit_value,
+            resin: cleanText(row.resin) || INSUMO_TECH_DEFAULTS.resin,
+            unidade: cleanText(row.unidade) || null,
+            cliente: cleanText(row.cliente) || null,
+            estoque_minimo: toNonNegFloat(row.estoque_minimo),
+          }
+        : {
+            code: cleanText(row.code),
+            description: cleanText(row.description),
+            item_type: 'produto_acabado',
+            color: cleanText(row.color),
+            cycle_seconds: toPosFloat(row.cycle_seconds),
+            cavities: toPosInt(row.cavities),
+            part_weight_g: toPosFloat(row.part_weight_g),
+            unit_value: toPosFloat(row.unit_value),
+            resin: cleanText(row.resin),
+          }
       if (!payload.code || !payload.description) continue
-      if (!payload.cycle_seconds || !payload.cavities || !payload.part_weight_g || !payload.unit_value) continue
+      if (normalizedType === 'produto_acabado' && (!payload.cycle_seconds || !payload.cavities || !payload.part_weight_g || !payload.unit_value)) continue
       if (seenCodes.has(payload.code)) continue
       seenCodes.add(payload.code)
       mapped.push(payload)
@@ -572,10 +621,10 @@ export default function CadastroItens() {
     else await fetchItems()
   }
   function downloadCSVTemplate() {
-    const header = EXPECTED_HEADERS.join(',') + '\n'
+    const header = CSV_TEMPLATE_HEADERS.join(',') + '\n'
     const sample = [
-      'ABC-001,Tampa 200ml,Branco,12,2,8.5,0.32,PP',
-      'ABC-002,Tampa 500ml,Preto,14,4,10.2,0.35,PEAD',
+      '500001,Tampa 200ml,produto_acabado,Branco,12,2,8.5,0.32,PP,,,',
+      'MP-001,Resina virgem,insumo,-,1,1,1,0,PP,KG,Cliente Exemplo,100',
     ].join('\n')
     const blob = new Blob([header + sample], { type: 'text/csv;charset=utf-8;' })
     const url = URL.createObjectURL(blob)
@@ -611,7 +660,7 @@ export default function CadastroItens() {
               <h2 style={{ margin: 0 }}>Cadastro de Itens</h2>
               <small style={{ opacity: 0.8 }}>Somente administradores</small>
             </div>
-              <div style={{ display: 'flex', gap: 8 }}>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               <button
                 onClick={downloadCSVTemplate}
                 style={{ padding: '10px 14px', borderRadius: 12, border: '1px solid #ddd', cursor: 'pointer', fontWeight: 600, background: '#fff' }}

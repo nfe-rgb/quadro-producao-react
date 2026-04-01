@@ -4,6 +4,7 @@ export default function Etiqueta({ o, variant = 'painel', saldoCaixas, lidasCaix
   if (!o) return null
 
   const opCode = o.code || o.op_code || o.o?.code || o.ordem?.code
+  const customer = o.customer || o.cliente || o.customer_name || o.client || ''
 
   const temObsLowEff = !!o.loweff_notes
   const interrompida = o.status === 'AGUARDANDO' && !!o.interrupted_at
@@ -25,7 +26,7 @@ export default function Etiqueta({ o, variant = 'painel', saldoCaixas, lidasCaix
         <div className="etiqueta-fila-main">
           {interrompida && <div className="badge-interrompida">⚠️ Produção Interrompida</div>}
           {opCode && <div><b>O.P:</b> {opCode}</div>}
-          {o.customer && <div><b>Cliente:</b> {o.customer}</div>}
+          {customer && <div><b>Cliente:</b> {customer}</div>}
           {o.product && <div><b>Produto:</b> {o.product}</div>}
           {o.color && <div><b>Cor:</b> {o.color}</div>}
           {o.qty && <div><b>Qtd:</b> {o.qty}</div>}
@@ -61,7 +62,7 @@ export default function Etiqueta({ o, variant = 'painel', saldoCaixas, lidasCaix
     <div className={`small ${isWeekendStop ? 'etiqueta-weekend' : ''}`}>
       {interrompida && <div className="badge-interrompida">⚠️ Produção Interrompida</div>}
 
-      {o.customer && <div><b>Cliente:</b> {o.customer}</div>}
+      {customer && <div><b>Cliente:</b> {customer}</div>}
       {o.product && <div><b>Produto:</b> {o.product}</div>}
       {o.color && <div><b>Cor:</b> {o.color}</div>}
       {o.qty && <div><b>Qtd:</b> {o.qty}</div>}
@@ -103,7 +104,7 @@ export default function Etiqueta({ o, variant = 'painel', saldoCaixas, lidasCaix
     >
       {interrompida && <div className="badge-interrompida">⚠️ Produção Interrompida</div>}
  
-      {o.customer && <div><b>Cliente:</b> {o.customer}</div>}
+      {customer && <div><b>Cliente:</b> {customer}</div>}
       {o.product && <div><b>Produto:</b> {o.product}</div>}
       {o.color && <div><b>Cor:</b> {o.color}</div>}
       {o.qty && <div><b>Qtd:</b> {o.qty}</div>}

@@ -397,6 +397,9 @@ export default function Painel({
           }
 
           const opCode = ativa?.code || ativa?.o?.code || ativa?.op_code || "";
+          const precisaRegularizarSessao = Boolean(
+            ativa && String(ativa.status || '').toUpperCase() !== 'AGUARDANDO' && !ativa.active_session_id
+          );
 
           // lidas / saldo: scanned_count agora pode vir do fetch inicial ou do realtime
           const lidas = Number(ativa?.scanned_count || 0);
@@ -475,10 +478,12 @@ export default function Painel({
                               console.warn("onStatusChange falhou:", err);
                             }
                           }}
-                          disabled={ativa.status === "AGUARDANDO"}
+                          disabled={ativa.status === "AGUARDANDO" || precisaRegularizarSessao}
                         >
                           {STATUS.filter((s) =>
-                            jaIniciou(ativa) ? s !== "AGUARDANDO" : true
+                            s === "AGUARDANDO"
+                              ? String(ativa?.status || "").toUpperCase() === "AGUARDANDO"
+                              : true
                           ).map((s) => (
                             <option key={s} value={s}>
                               {s === "AGUARDANDO"
@@ -491,10 +496,15 @@ export default function Painel({
                             </option>
                           ))}
                         </select>
+                        {precisaRegularizarSessao && (
+                          <div className="small" style={{ marginTop: 6, color: '#b45309' }}>
+                            Ordem sem sessão ativa. Regularize pelo botão de início.
+                          </div>
+                        )}
                       </div>
 
                       <div className="flex" style={{ justifyContent: "flex-end", gap: 8 }}>
-                        {ativa.status === "AGUARDANDO" ? (
+                        {ativa.status === "AGUARDANDO" || precisaRegularizarSessao ? (
                           <button
                             className="btn"
                             onClick={() => {
@@ -507,7 +517,7 @@ export default function Painel({
                               });
                             }}
                           >
-                            Iniciar Produção
+                            {precisaRegularizarSessao ? 'Regularizar Produção' : 'Iniciar Produção'}
                           </button>
                         ) : (
                           <button className="btn" onClick={() => setFinalizando(ativa)}>
