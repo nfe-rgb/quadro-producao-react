@@ -1,6 +1,6 @@
 // src/pages/Pet01.jsx
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { supabase } from "../lib/supabaseClient";
+import { ensureAnonymousSession, supabase } from "../lib/supabaseClient";
 import Etiqueta from "../components/Etiqueta";
 import FichaTecnicaModal from "../components/FichaTecnicaModal";
 import { getTurnoAtual, statusClass } from "../lib/utils";
@@ -297,6 +297,7 @@ export default function Pet02({
     }
 
     try {
+      await ensureAnonymousSession();
       const nowBr = DateTime.now().setZone("America/Sao_Paulo");
       const payload = {
         machine_id: machineId,

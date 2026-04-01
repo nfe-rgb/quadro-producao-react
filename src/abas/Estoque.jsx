@@ -1,9 +1,15 @@
 import { useEffect, useMemo, useState } from 'react'
+import { DateTime } from 'luxon'
 import { supabase } from '../lib/supabaseClient'
-import { fmtDateTime } from '../lib/utils'
+import { fmtDateTime, getTurnoAtual } from '../lib/utils'
 import { getProductImageCandidates } from '../lib/productImageMap'
 import Modal from '../components/Modal'
 import '../styles/estoque.css'
+
+const STOCK_CONTEXTS = [
+  { id: 'inputs', label: 'Insumos' },
+  { id: 'finished', label: 'Produtos acabados' },
+]
 
 const TABS = [
   { id: 'inventario', label: 'Inventário' },
@@ -18,6 +24,24 @@ const nowIsoDate = () => new Date().toISOString().slice(0, 10)
 const toPositiveNumber = (value) => {
   const parsed = Number(String(value ?? '').replace(',', '.').trim())
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null
+}
+
+const parsePiecesPerBox = (value) => {
+  if (value == null) return 0
+  const digitsOnly = String(value).replace(/[^0-9]/g, '')
+  return digitsOnly ? Number.parseInt(digitsOnly, 10) : 0
+}
+
+const parseScannedBoxLabel = (value) => {
+  const normalized = normalize(value)
+  const match = normalized.match(/^(?:OS\s*)?(\d+)\s*-\s*(\d+)$/i)
+  if (!match) return null
+
+  return {
+    opCode: match[1],
+    boxNumber: Number.parseInt(match[2], 10),
+    normalizedCode: `OS ${match[1]} - ${match[2].padStart(3, '0')}`,
+  }
 }
 
 const normalize = (value) => String(value ?? '').trim()
@@ -221,8 +245,10 @@ function ProductCellWithHoverImage({
 }
 
 export default function Estoque({ readOnly = false, allowedClient = '', enableProductImagePreview = false }) {
+  const [stockContext, setStockContext] = useState('inputs')
   const [tab, setTab] = useState('inventario')
   const [inventoryClientFilter, setInventoryClientFilter] = useState('')
+  const [finishedInventoryClientFilter, setFinishedInventoryClientFilter] = useState('')
   const [items, setItems] = useState([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -253,12 +279,28 @@ export default function Estoque({ readOnly = false, allowedClient = '', enablePr
   const [returns, setReturns] = useState([])
   const [itemStructures, setItemStructures] = useState([])
   const [requisitionManualByCode, setRequisitionManualByCode] = useState({})
+  const [finishedScans, setFinishedScans] = useState([])
+  const [finishedScansLoading, setFinishedScansLoading] = useState(false)
+  const [finishedScansError, setFinishedScansError] = useState('')
+  const [finishedScanCode, setFinishedScanCode] = useState('')
+  const [finishedScanSubmitting, setFinishedScanSubmitting] = useState(false)
+  const [finishedScanError, setFinishedScanError] = useState('')
+  const [finishedScanInfo, setFinishedScanInfo] = useState('')
+  const [finishedScanConfirm, setFinishedScanConfirm] = useState({
+    open: false,
+    order: null,
+    scanCode: '',
+    boxNumber: null,
+    manualQty: '',
+    error: '',
+  })
   const allowedClientNormalized = useMemo(() => normalizeClientValue(allowedClient), [allowedClient])
 
   useEffect(() => {
     fetchItems()
     fetchStockMovements()
     fetchItemStructures()
+    fetchFinishedProductScans()
   }, [])
 
   useEffect(() => {
@@ -297,6 +339,13 @@ export default function Estoque({ readOnly = false, allowedClient = '', enablePr
         { event: '*', schema: 'public', table: 'item_structures' },
         () => {
           fetchItemStructures()
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'production_scans' },
+        () => {
+          fetchFinishedProductScans()
         }
       )
       .subscribe()
@@ -410,6 +459,87 @@ export default function Estoque({ readOnly = false, allowedClient = '', enablePr
     }
   }
 
+  async function fetchOrdersByIds(orderIds) {
+    const uniqueIds = Array.from(new Set((orderIds || []).map((value) => normalize(value)).filter(Boolean)))
+    if (uniqueIds.length === 0) return {}
+
+    const map = {}
+    const chunkSize = 150
+
+    for (let index = 0; index < uniqueIds.length; index += chunkSize) {
+      const chunk = uniqueIds.slice(index, index + chunkSize)
+      const { data, error: queryError } = await supabase
+        .from('orders')
+        .select('id, code, customer, product, machine_id, boxes, standard, created_at')
+        .in('id', chunk)
+
+      if (queryError) throw queryError
+
+      ;(data || []).forEach((order) => {
+        const key = normalize(order?.id)
+        if (!key || map[key]) return
+        map[key] = order
+      })
+    }
+
+    return map
+  }
+
+  async function fetchLatestOrderByCode(opCode) {
+    const code = normalize(opCode)
+    if (!code) return null
+
+    const { data, error: queryError } = await supabase
+      .from('orders')
+      .select('id, code, customer, product, machine_id, boxes, standard, created_at')
+      .eq('code', code)
+      .order('created_at', { ascending: false })
+      .limit(1)
+
+    if (queryError) throw queryError
+    return Array.isArray(data) && data.length > 0 ? data[0] : null
+  }
+
+  async function fetchFinishedProductScans() {
+    setFinishedScansLoading(true)
+    setFinishedScansError('')
+
+    try {
+      const { data, error: queryError } = await supabase
+        .from('production_scans')
+        .select('id, created_at, order_id, op_code, machine_id, shift, scanned_box, qty_pieces, code')
+        .order('created_at', { ascending: false })
+
+      if (queryError) throw queryError
+
+      const rows = data || []
+      const orderMap = await fetchOrdersByIds(rows.map((row) => row?.order_id))
+
+      setFinishedScans(rows.map((row) => {
+        const order = orderMap[normalize(row?.order_id)] || null
+        return {
+          id: row.id,
+          createdAt: row.created_at,
+          orderId: normalize(row?.order_id),
+          opCode: normalize(order?.code || row?.op_code),
+          machineId: normalize(row?.machine_id || order?.machine_id),
+          shift: normalize(row?.shift),
+          scannedBox: Number(row?.scanned_box),
+          qtyPieces: Number(row?.qty_pieces),
+          rawCode: normalize(row?.code),
+          customer: normalize(order?.customer),
+          product: normalize(order?.product),
+          finishedItemCode: extractFinishedCodeFromOrderProduct(order?.product),
+        }
+      }))
+    } catch (err) {
+      setFinishedScans([])
+      setFinishedScansError(err?.message || 'Não foi possível carregar as bipagens de produtos acabados.')
+    } finally {
+      setFinishedScansLoading(false)
+    }
+  }
+
   async function resolveRequisitionOpContext(opValue) {
     const op = normalize(opValue)
     if (!op) {
@@ -474,6 +604,16 @@ export default function Estoque({ readOnly = false, allowedClient = '', enablePr
     return map
   }, [items, allowedClientNormalized])
 
+  const allItemsByCode = useMemo(() => {
+    const map = {}
+    ;(items || []).forEach((item) => {
+      const code = normalize(item?.code)
+      if (!code) return
+      map[code] = item
+    })
+    return map
+  }, [items])
+
   const scopedItems = useMemo(() => {
     return (items || []).filter((item) => matchesAllowedClient(item?.cliente || item?.client, allowedClientNormalized))
   }, [items, allowedClientNormalized])
@@ -508,6 +648,11 @@ export default function Estoque({ readOnly = false, allowedClient = '', enablePr
     if (!allowedClientNormalized) return
     if (inventoryClientFilter) setInventoryClientFilter('')
   }, [allowedClientNormalized, inventoryClientFilter])
+
+  useEffect(() => {
+    if (!allowedClientNormalized) return
+    if (finishedInventoryClientFilter) setFinishedInventoryClientFilter('')
+  }, [allowedClientNormalized, finishedInventoryClientFilter])
 
   const purchaseBalanceByCode = useMemo(() => {
     const acc = {}
@@ -627,6 +772,241 @@ export default function Estoque({ readOnly = false, allowedClient = '', enablePr
 
     return set
   }, [requisitions, returns])
+
+  const finishedInventoryClientOptions = useMemo(() => {
+    const set = new Set()
+
+    ;(finishedScans || []).forEach((row) => {
+      const sourceItem = allItemsByCode[normalize(row?.finishedItemCode)]
+      const client = normalize(row?.customer || sourceItem?.cliente || sourceItem?.client)
+      if (!client) return
+      if (allowedClientNormalized && !matchesAllowedClient(client, allowedClientNormalized)) return
+      set.add(client)
+    })
+
+    return Array.from(set).sort((a, b) => a.localeCompare(b, 'pt-BR'))
+  }, [finishedScans, allItemsByCode, allowedClientNormalized])
+
+  useEffect(() => {
+    if (!finishedInventoryClientFilter) return
+    const selectedNormalized = normalizeClientValue(finishedInventoryClientFilter)
+    const stillExists = finishedInventoryClientOptions.some(
+      (client) => normalizeClientValue(client) === selectedNormalized
+    )
+    if (!stillExists) setFinishedInventoryClientFilter('')
+  }, [finishedInventoryClientFilter, finishedInventoryClientOptions])
+
+  const finishedScanRows = useMemo(() => {
+    const selectedClientNormalized = allowedClientNormalized
+      ? ''
+      : normalizeClientValue(finishedInventoryClientFilter)
+
+    return (finishedScans || [])
+      .map((row) => {
+        const sourceItem = allItemsByCode[normalize(row?.finishedItemCode)]
+        const client = normalize(row?.customer || sourceItem?.cliente || sourceItem?.client)
+
+        if (allowedClientNormalized && !matchesAllowedClient(client, allowedClientNormalized)) return null
+        if (selectedClientNormalized && !matchesAllowedClient(client, selectedClientNormalized)) return null
+
+        return {
+          ...row,
+          itemDescription: normalize(sourceItem?.description) || normalize(row?.product) || '-',
+          imageUrl: normalize(sourceItem?.image_url),
+          color: normalize(sourceItem?.color),
+          client: client || '-',
+        }
+      })
+      .filter(Boolean)
+  }, [finishedScans, allItemsByCode, allowedClientNormalized, finishedInventoryClientFilter])
+
+  const finishedInventoryRows = useMemo(() => {
+    const grouped = new Map()
+
+    finishedScanRows.forEach((row) => {
+      const key = normalize(row?.finishedItemCode) || `op:${normalize(row?.opCode)}`
+      if (!key) return
+
+      const current = grouped.get(key) || {
+        key,
+        itemCode: normalize(row?.finishedItemCode) || '-',
+        product: row?.itemDescription || normalize(row?.product) || '-',
+        imageUrl: row?.imageUrl,
+        client: row?.client || '-',
+        boxes: 0,
+        pieces: 0,
+        lastEntryAt: row?.createdAt || null,
+        lastOp: row?.opCode || '-',
+      }
+
+      current.boxes += 1
+      current.pieces += Number(row?.qtyPieces) || 0
+
+      const currentLastMs = new Date(current.lastEntryAt || 0).getTime()
+      const nextLastMs = new Date(row?.createdAt || 0).getTime()
+      if (nextLastMs >= currentLastMs) {
+        current.lastEntryAt = row?.createdAt || current.lastEntryAt
+        current.lastOp = row?.opCode || current.lastOp
+      }
+
+      if ((!current.product || current.product === '-') && row?.itemDescription) {
+        current.product = row.itemDescription
+      }
+      if ((!current.client || current.client === '-') && row?.client) {
+        current.client = row.client
+      }
+      if (!current.imageUrl && row?.imageUrl) {
+        current.imageUrl = row.imageUrl
+      }
+
+      grouped.set(key, current)
+    })
+
+    return Array.from(grouped.values()).sort((left, right) => {
+      const leftDate = new Date(left?.lastEntryAt || 0).getTime()
+      const rightDate = new Date(right?.lastEntryAt || 0).getTime()
+      return rightDate - leftDate
+    })
+  }, [finishedScanRows])
+
+  const finishedInventoryTotals = useMemo(() => {
+    return finishedScanRows.reduce((acc, row) => {
+      acc.boxes += 1
+      acc.pieces += Number(row?.qtyPieces) || 0
+      return acc
+    }, { boxes: 0, pieces: 0 })
+  }, [finishedScanRows])
+
+  const recentFinishedScanRows = useMemo(
+    () => finishedScanRows.slice(0, 80),
+    [finishedScanRows]
+  )
+
+  async function registerFinishedProductScan({ order, scanCode, boxNumber, qtyPieces }) {
+    const nowBr = DateTime.now().setZone('America/Sao_Paulo')
+    const shift = getTurnoAtual(nowBr)
+
+    const payload = {
+      created_at: nowBr.toUTC().toISO(),
+      machine_id: normalize(order?.machine_id) || null,
+      shift: shift ? String(shift) : '',
+      order_id: order?.id,
+      op_code: normalize(order?.code),
+      scanned_box: boxNumber,
+      qty_pieces: qtyPieces,
+      code: scanCode,
+    }
+
+    const { error: insertError } = await supabase
+      .from('production_scans')
+      .insert([payload])
+
+    if (insertError) throw insertError
+
+    await fetchFinishedProductScans()
+  }
+
+  async function submitFinishedScan(scanValue, manualQty = null) {
+    setFinishedScanError('')
+    setFinishedScanInfo('')
+    setFinishedScanSubmitting(true)
+
+    try {
+      const parsedScan = parseScannedBoxLabel(scanValue)
+      if (!parsedScan) {
+        setFinishedScanError('Formato inválido. Use: OS 753 - 001.')
+        return
+      }
+
+      const order = await fetchLatestOrderByCode(parsedScan.opCode)
+      if (!order) {
+        setFinishedScanError(`O.S ${parsedScan.opCode} não encontrada.`)
+        return
+      }
+
+      const orderClient = normalize(order?.customer)
+      if (allowedClientNormalized && !matchesAllowedClient(orderClient, allowedClientNormalized)) {
+        setFinishedScanError('Esta O.S não pertence ao cliente liberado neste acesso.')
+        return
+      }
+
+      const totalBoxes = Number(order?.boxes)
+      if (Number.isFinite(totalBoxes) && totalBoxes > 0) {
+        if (parsedScan.boxNumber < 1 || parsedScan.boxNumber > totalBoxes) {
+          setFinishedScanError(`Caixa fora do intervalo desta O.S. Máximo permitido: ${totalBoxes}.`)
+          return
+        }
+      }
+
+      const { data: duplicateRow, error: duplicateError } = await supabase
+        .from('production_scans')
+        .select('id')
+        .eq('order_id', order.id)
+        .eq('scanned_box', parsedScan.boxNumber)
+        .limit(1)
+        .maybeSingle()
+
+      if (duplicateError) throw duplicateError
+      if (duplicateRow) {
+        setFinishedScanError(`A caixa ${String(parsedScan.boxNumber).padStart(3, '0')} já foi bipada para a O.S ${parsedScan.opCode}.`)
+        return
+      }
+
+      const qtyPiecesPerBox = manualQty || parsePiecesPerBox(order?.standard)
+
+      if (!manualQty && qtyPiecesPerBox <= 0) {
+        setFinishedScanConfirm({
+          open: true,
+          order,
+          scanCode: parsedScan.normalizedCode,
+          boxNumber: parsedScan.boxNumber,
+          manualQty: '',
+          error: '',
+        })
+        return
+      }
+
+      if (!Number.isFinite(qtyPiecesPerBox) || qtyPiecesPerBox <= 0) {
+        setFinishedScanError('Quantidade de peças por caixa inválida para esta bipagem.')
+        return
+      }
+
+      await registerFinishedProductScan({
+        order,
+        scanCode: parsedScan.normalizedCode,
+        boxNumber: parsedScan.boxNumber,
+        qtyPieces: qtyPiecesPerBox,
+      })
+
+      setFinishedScanCode('')
+      setFinishedScanConfirm({ open: false, order: null, scanCode: '', boxNumber: null, manualQty: '', error: '' })
+      setFinishedScanInfo(`Caixa ${String(parsedScan.boxNumber).padStart(3, '0')} da O.S ${parsedScan.opCode} registrada no estoque.`)
+    } catch (err) {
+      setFinishedScanError(err?.message || 'Não foi possível validar a bipagem do produto acabado.')
+    } finally {
+      setFinishedScanSubmitting(false)
+    }
+  }
+
+  function handleFinishedScanSubmit(e) {
+    e.preventDefault()
+    submitFinishedScan(finishedScanCode)
+  }
+
+  function closeFinishedScanConfirm() {
+    if (finishedScanSubmitting) return
+    setFinishedScanConfirm({ open: false, order: null, scanCode: '', boxNumber: null, manualQty: '', error: '' })
+  }
+
+  async function handleConfirmFinishedScanQty() {
+    const manualQty = parsePiecesPerBox(finishedScanConfirm.manualQty)
+    if (!manualQty) {
+      setFinishedScanConfirm((prev) => ({ ...prev, error: 'Informe a quantidade de peças desta caixa.' }))
+      return
+    }
+
+    await submitFinishedScan(finishedScanConfirm.scanCode, manualQty)
+  }
 
   const requisitionStructureRows = useMemo(() => {
     const finishedItemCode = normalize(requisitionOpContext.finishedItemCode)
@@ -1234,24 +1614,211 @@ export default function Estoque({ readOnly = false, allowedClient = '', enablePr
     <div className="estoque-page">
       <div className="estoque-header">
         <div>
-          <h2 className="estoque-title">Controle de Insumos</h2>
-          <p className="estoque-sub">Inventário, requisição, retorno e compras por Nota Fiscal.</p>
+          <h2 className="estoque-title">
+            {stockContext === 'inputs' ? 'Controle de Insumos' : 'Controle de Produtos Acabados'}
+          </h2>
+          <p className="estoque-sub">
+            {stockContext === 'inputs'
+              ? 'Inventário, requisição, retorno e compras por Nota Fiscal.'
+              : 'Validação de bipagem e entrada de caixas em estoque para qualquer O.S.'}
+          </p>
+        </div>
+
+        <div className="estoque-actions">
+          {STOCK_CONTEXTS.map((context) => (
+            <button
+              key={context.id}
+              type="button"
+              className={`estoque-tabbtn ${stockContext === context.id ? 'active' : ''}`}
+              onClick={() => setStockContext(context.id)}
+            >
+              {context.label}
+            </button>
+          ))}
         </div>
       </div>
 
-      <div className="estoque-tabs">
-        {TABS.map((item) => (
-          <button
-            key={item.id}
-            className={`estoque-tabbtn ${tab === item.id ? 'active' : ''}`}
-            onClick={() => setTab(item.id)}
-          >
-            {item.label}
-          </button>
-        ))}
-      </div>
+      {stockContext === 'inputs' && (
+        <div className="estoque-tabs">
+          {TABS.map((item) => (
+            <button
+              key={item.id}
+              className={`estoque-tabbtn ${tab === item.id ? 'active' : ''}`}
+              onClick={() => setTab(item.id)}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+      )}
 
-      {tab === 'inventario' && (
+      {stockContext === 'finished' && (
+        <>
+          <div className="estoque-card">
+            <div className="estoque-card-head">
+              <div>
+                <h3>Entrada por bipagem</h3>
+                <p className="estoque-sub">Leia ou digite o código da caixa para validar a O.S e registrar a entrada no estoque.</p>
+              </div>
+            </div>
+
+            {!readOnly ? (
+              <form className="estoque-form" onSubmit={handleFinishedScanSubmit}>
+                <div className="estoque-form-grid" style={{ gridTemplateColumns: 'minmax(260px, 380px) auto' }}>
+                  <label>
+                    Código da caixa
+                    <input
+                      value={finishedScanCode}
+                      onChange={(e) => setFinishedScanCode(e.target.value)}
+                      placeholder="Ex.: OS 753 - 001"
+                    />
+                  </label>
+
+                  <div className="estoque-form-actions" style={{ alignItems: 'flex-end' }}>
+                    <button className="btn primary" type="submit" disabled={finishedScanSubmitting}>
+                      {finishedScanSubmitting ? 'Validando…' : 'Validar e bipar'}
+                    </button>
+                  </div>
+                </div>
+              </form>
+            ) : (
+              <div className="estoque-alert">Visualização habilitada. A bipagem de entrada está bloqueada para este perfil.</div>
+            )}
+
+            {finishedScanError ? <div className="estoque-alert">{finishedScanError}</div> : null}
+            {finishedScanInfo ? <div className="estoque-alert">{finishedScanInfo}</div> : null}
+          </div>
+
+          <div className="estoque-card">
+            <div className="estoque-card-head">
+              <div>
+                <h3>Estoque de produtos acabados</h3>
+                <p className="estoque-sub">{formatQty(finishedInventoryTotals.boxes)} caixas registradas • {formatQty(finishedInventoryTotals.pieces)} peças no acumulado.</p>
+              </div>
+
+              <div className="estoque-inventory-controls">
+                {!allowedClientNormalized && (
+                  <select
+                    className="estoque-filter-select"
+                    value={finishedInventoryClientFilter}
+                    onChange={(e) => setFinishedInventoryClientFilter(e.target.value)}
+                    aria-label="Filtrar produtos acabados por cliente"
+                    disabled={finishedInventoryClientOptions.length === 0}
+                  >
+                    <option value="">Todos os clientes</option>
+                    {finishedInventoryClientOptions.map((client) => (
+                      <option key={client} value={client}>{client}</option>
+                    ))}
+                  </select>
+                )}
+              </div>
+            </div>
+
+            {finishedScansError ? <div className="estoque-alert">{finishedScansError}</div> : null}
+
+            <div className="estoque-table-wrap">
+              <table className="estoque-table">
+                <thead>
+                  <tr>
+                    <th>Cod Item</th>
+                    <th>Produto</th>
+                    <th>Cliente</th>
+                    <th>Caixas</th>
+                    <th>Peças</th>
+                    <th>Última entrada</th>
+                    <th>Última O.S</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {finishedInventoryRows.length === 0 && (
+                    <tr>
+                      <td colSpan="7" className="estoque-empty">
+                        {finishedScansLoading ? 'Carregando produtos acabados…' : 'Nenhuma caixa de produto acabado foi registrada ainda.'}
+                      </td>
+                    </tr>
+                  )}
+
+                  {finishedInventoryRows.map((row) => (
+                    <tr key={row.key}>
+                      <td>{row.itemCode || '-'}</td>
+                      <td>
+                        <ProductCellWithHoverImage
+                          itemCode={row.itemCode}
+                          product={row.product}
+                          imageUrl={row.imageUrl}
+                          enablePreview={enableProductImagePreview}
+                        />
+                      </td>
+                      <td>{row.client || '-'}</td>
+                      <td>{formatQty(row.boxes)}</td>
+                      <td>{formatQty(row.pieces)}</td>
+                      <td>{row.lastEntryAt ? fmtDateTime(row.lastEntryAt) : '-'}</td>
+                      <td>{row.lastOp || '-'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div className="estoque-card">
+            <div className="estoque-card-head">
+              <div>
+                <h3>Últimas bipagens</h3>
+                <p className="estoque-sub">Histórico recente das caixas validadas na entrada do estoque.</p>
+              </div>
+            </div>
+
+            <div className="estoque-table-wrap">
+              <table className="estoque-table">
+                <thead>
+                  <tr>
+                    <th>Data</th>
+                    <th>O.S</th>
+                    <th>Caixa</th>
+                    <th>Cod Item</th>
+                    <th>Produto</th>
+                    <th>Cliente</th>
+                    <th>Peças</th>
+                    <th>Máquina</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {recentFinishedScanRows.length === 0 && (
+                    <tr>
+                      <td colSpan="8" className="estoque-empty">
+                        {finishedScansLoading ? 'Carregando histórico de bipagens…' : 'Nenhuma bipagem registrada para produtos acabados.'}
+                      </td>
+                    </tr>
+                  )}
+
+                  {recentFinishedScanRows.map((row) => (
+                    <tr key={row.id}>
+                      <td>{row.createdAt ? fmtDateTime(row.createdAt) : '-'}</td>
+                      <td>{row.opCode || '-'}</td>
+                      <td>{Number.isFinite(row.scannedBox) ? String(row.scannedBox).padStart(3, '0') : '-'}</td>
+                      <td>{row.finishedItemCode || '-'}</td>
+                      <td>
+                        <ProductCellWithHoverImage
+                          itemCode={row.finishedItemCode}
+                          product={row.itemDescription}
+                          imageUrl={row.imageUrl}
+                          enablePreview={enableProductImagePreview}
+                        />
+                      </td>
+                      <td>{row.client || '-'}</td>
+                      <td>{formatQty(row.qtyPieces)}</td>
+                      <td>{row.machineId || '-'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </>
+      )}
+
+      {stockContext === 'inputs' && tab === 'inventario' && (
         <div className="estoque-card">
           <div className="estoque-card-head">
             <h3>Inventário</h3>
@@ -1318,7 +1885,7 @@ export default function Estoque({ readOnly = false, allowedClient = '', enablePr
         </div>
       )}
 
-      {tab === 'requisicao' && (
+      {stockContext === 'inputs' && tab === 'requisicao' && (
         <div className="estoque-card">
           <div className="estoque-card-head">
             <h3>Requisição</h3>
@@ -1464,7 +2031,7 @@ export default function Estoque({ readOnly = false, allowedClient = '', enablePr
         </div>
       )}
 
-      {tab === 'retorno' && (
+      {stockContext === 'inputs' && tab === 'retorno' && (
         <div className="estoque-card">
           <div className="estoque-card-head">
             <h3>Retorno</h3>
@@ -1570,7 +2137,7 @@ export default function Estoque({ readOnly = false, allowedClient = '', enablePr
         </div>
       )}
 
-      {tab === 'compras' && (
+      {stockContext === 'inputs' && tab === 'compras' && (
         <div className="estoque-card">
           <div className="estoque-card-head">
             <h3>Compras</h3>
@@ -1898,6 +2465,43 @@ export default function Estoque({ readOnly = false, allowedClient = '', enablePr
               ))}
             </tbody>
           </table>
+        </div>
+      </Modal>
+
+      <Modal
+        open={finishedScanConfirm.open}
+        onClose={closeFinishedScanConfirm}
+        title="Caixa sem padrão definido"
+        closeOnBackdrop={!finishedScanSubmitting}
+      >
+        <div className="estoque-form" style={{ marginBottom: 0, minWidth: 320 }}>
+          <div>
+            A O.S {normalize(finishedScanConfirm?.order?.code) || '-'} não possui padrão de peças por caixa definido.
+            Confirme a bipagem da caixa {Number.isFinite(finishedScanConfirm?.boxNumber) ? String(finishedScanConfirm.boxNumber).padStart(3, '0') : '-'} e informe a quantidade de peças.
+          </div>
+
+          <label>
+            Peças nesta caixa
+            <input
+              type="number"
+              min="1"
+              step="1"
+              value={finishedScanConfirm.manualQty}
+              onChange={(e) => setFinishedScanConfirm((prev) => ({ ...prev, manualQty: e.target.value, error: '' }))}
+              placeholder="Ex.: 120"
+            />
+          </label>
+
+          {finishedScanConfirm.error ? <div className="estoque-alert">{finishedScanConfirm.error}</div> : null}
+
+          <div className="estoque-form-actions" style={{ gap: 8 }}>
+            <button className="btn ghost" type="button" onClick={closeFinishedScanConfirm} disabled={finishedScanSubmitting}>
+              Cancelar
+            </button>
+            <button className="btn primary" type="button" onClick={handleConfirmFinishedScanQty} disabled={finishedScanSubmitting}>
+              {finishedScanSubmitting ? 'Confirmando…' : 'Confirmar bipagem'}
+            </button>
+          </div>
         </div>
       </Modal>
     </div>
