@@ -1,5 +1,14 @@
 import { toTimestamp } from './productionIntervals';
 
+function stopBelongsToSession(stop, session) {
+  const stopStart = toTimestamp(stop?.started_at)
+  const sessionStart = toTimestamp(session?.started_at)
+  const sessionEnd = toTimestamp(session?.ended_at)
+  if (!stopStart || !sessionStart) return false
+  if (sessionEnd) return stopStart >= sessionStart && stopStart <= sessionEnd
+  return stopStart >= sessionStart
+}
+
 export function isMissingRelationError(error, relationName = '') {
   if (!error) return false;
   const code = String(error.code || '').toUpperCase();
@@ -164,12 +173,13 @@ function buildSessionStatus(session, openStops, openLowEffLogs) {
   return 'ENCERRADA';
 }
 
-export function buildRegistroGroups(runtimeOrders, sessions, stops, lowEffLogs) {
+export function buildRegistroGroups(runtimeOrders, sessions, stops, lowEffLogs, scheduledStops = []) {
   const ordersById = new Map((runtimeOrders || []).map((order) => [String(order.id), order]));
   const stopsBySessionId = new Map();
   const lowEffBySessionId = new Map();
   const sessionsByOrderId = new Map();
   const stopsByOrderId = new Map();
+  const scheduledStopsByOrderId = new Map();
   const lowEffByOrderId = new Map();
 
   for (const stop of stops || []) {
@@ -184,6 +194,13 @@ export function buildRegistroGroups(runtimeOrders, sessions, stops, lowEffLogs) 
     if (!orderKey) continue;
     if (!stopsByOrderId.has(orderKey)) stopsByOrderId.set(orderKey, []);
     stopsByOrderId.get(orderKey).push(stop);
+  }
+
+  for (const stop of scheduledStops || []) {
+    const orderKey = stop?.order_id != null ? String(stop.order_id) : null;
+    if (!orderKey) continue;
+    if (!scheduledStopsByOrderId.has(orderKey)) scheduledStopsByOrderId.set(orderKey, []);
+    scheduledStopsByOrderId.get(orderKey).push(stop);
   }
 
   for (const event of lowEffLogs || []) {
@@ -214,10 +231,12 @@ export function buildRegistroGroups(runtimeOrders, sessions, stops, lowEffLogs) 
     groupedOrderIds.add(orderId);
     const runtimeOrder = ordersById.get(orderId);
     const sortedSessions = sortByTimeAsc(orderSessions);
+    const orderScheduledStops = sortByTimeAsc(scheduledStopsByOrderId.get(orderId) || []);
 
     sortedSessions.forEach((session, index) => {
       const sessionKey = String(session.id);
-      const sessionStops = sortByTimeAsc(stopsBySessionId.get(sessionKey) || []);
+      const sessionScheduledStops = orderScheduledStops.filter((stop) => stopBelongsToSession(stop, session));
+      const sessionStops = sortByTimeAsc([...(stopsBySessionId.get(sessionKey) || []), ...sessionScheduledStops]);
       const sessionLowEffLogs = sortByTimeAsc(lowEffBySessionId.get(sessionKey) || []);
       const openStops = sessionStops.filter((stop) => !stop?.ended_at && !stop?.resumed_at);
       const openLowEffLogs = sessionLowEffLogs.filter((event) => !event?.ended_at);
@@ -267,7 +286,7 @@ export function buildRegistroGroups(runtimeOrders, sessions, stops, lowEffLogs) 
       session: null,
       sessionIndex: 1,
       sessions: [],
-      stops: sortByTimeAsc(stopsByOrderId.get(orderId) || []),
+      stops: sortByTimeAsc([...(stopsByOrderId.get(orderId) || []), ...(scheduledStopsByOrderId.get(orderId) || [])]),
       lowEffLogs: sortByTimeAsc(lowEffByOrderId.get(orderId) || []),
       ordem: {
         ...runtimeOrder,
@@ -295,6 +314,18 @@ export function mapStopsForUi(stops) {
     closed_by: stop.closed_by || stop.resumed_by || null,
     started_by: stop.started_by || stop.created_by || null,
     resumed_by: stop.resumed_by || stop.closed_by || null,
+  }));
+}
+
+export function mapScheduledStopsForUi(stops) {
+  return (stops || []).map((stop) => ({
+    ...stop,
+    id: stop.event_key || stop.id,
+    resumed_at: stop.ended_at || null,
+    ended_at: stop.ended_at || null,
+    started_by: stop.started_by || 'SISTEMA',
+    resumed_by: stop.ended_by || null,
+    is_scheduled: true,
   }));
 }
 

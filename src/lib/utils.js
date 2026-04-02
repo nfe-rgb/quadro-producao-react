@@ -45,6 +45,23 @@ export function getProductionStartedAt(ordem) {
   return ordem?.active_session_started_at || ordem?.restarted_at || ordem?.started_at || null
 }
 
+export function getOrderStopDisplay(ordem, paradas = []) {
+  if (!ordem) {
+    return { openStop: null, stopReason: '', stopStartedAt: null }
+  }
+
+  const orderId = String(ordem?.source_order_id || ordem?.id || '')
+  const openStop = Array.isArray(paradas)
+    ? paradas.find((parada) => String(parada?.order_id || '') === orderId && !parada?.resumed_at)
+    : null
+
+  return {
+    openStop,
+    stopReason: openStop?.reason || ordem?.reason || '',
+    stopStartedAt: openStop?.started_at || ordem?.scheduled_stop_started_at || ordem?.active_stop_started_at || null,
+  }
+}
+
 // Converte data/hora local digitada -> ISO UTC
 export function localDateTimeToISO(dateStr, timeStr) {
   const [Y, M, D] = String(dateStr).split('-').map(Number);

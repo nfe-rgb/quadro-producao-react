@@ -759,7 +759,7 @@ export default function Registro({ registroGrupos = [], openSet, toggleOpen, isA
                             rawId: log.id
                           });
                         }
-                        ;(gr.stops || []).forEach(st => { if (safe(st.started_at)) events.push({ id: `stop-${st.id}`, type: 'stop', title: 'Parada', when: st.started_at, end: safe(st.resumed_at) ? st.resumed_at : null, who: st.started_by || '-', reason: st.reason || '', notes: st.notes || '', rawId: st.id }) })
+                        ;(gr.stops || []).forEach(st => { if (safe(st.started_at)) events.push({ id: `stop-${st.id}`, type: 'stop', title: 'Parada', when: st.started_at, end: safe(st.resumed_at) ? st.resumed_at : null, who: st.started_by || '-', reason: st.reason || '', notes: st.notes || '', rawId: st.id, isScheduled: !!st.is_scheduled }) })
                         if (safe(o.finalized_at)) events.push({ id: `end-${o.id}`, type: 'end', title: 'Fim da produção', when: o.finalized_at, who: o.finalized_by || '-', orderId: o.source_order_id || o.id, sessionId })
                         if (!events.length) events.push({ id: `empty-${o.id}`, type: 'empty', title: 'Sem eventos', when: null })
                         events.sort((a, b) => (toTime(a.when) || 0) - (toTime(b.when) || 0))
@@ -849,7 +849,7 @@ export default function Registro({ registroGrupos = [], openSet, toggleOpen, isA
                                           <div className="tl-meta"><b>Operador:</b> {ev.who}</div>
                                           {ev.reason ? <div className="tl-meta"><b>Motivo:</b> {ev.reason}</div> : null}
                                           {ev.notes ? <div className="tl-notes">{ev.notes}</div> : null}
-                                          {isAdmin && (
+                                          {isAdmin && !ev.isScheduled && (
                                             <div className="flex" style={{ justifyContent: 'flex-end' }}>
                                               <button className="btn" onClick={() => {
                                                 setEditEv({ type: 'stop', id: ev.id, rawId: ev.rawId })

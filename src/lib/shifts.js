@@ -2,6 +2,7 @@ import { DateTime } from 'luxon'
 
 export const SHIFT_ZONE = 'America/Sao_Paulo'
 export const SHIFT_POLICY_CHANGE_DATE = '2026-03-30'
+export const SCHEDULED_STOP_REASON = 'PARADA PROGRAMADA'
 export const ACTIVE_SHIFT_KEYS = ['1', '2']
 export const ACTIVE_TURNOS = [
   { key: '1', label: 'Turno 1' },
@@ -138,6 +139,44 @@ export function getShiftWindowAt(dateInput = null, options = {}) {
 
 export function getTurnoAtual(dateInput = null, options = {}) {
   return getShiftWindowAt(dateInput, options)?.shiftKey || null
+}
+
+function getScheduledStopWindowsForDay(dateInput, { preserveLegacy = true } = {}) {
+  const base = toShiftDateTime(dateInput).startOf('day')
+  if (isLegacyPolicy(base, preserveLegacy)) return []
+
+  if (base.weekday >= 1 && base.weekday <= 5) {
+    return [{
+      reason: SCHEDULED_STOP_REASON,
+      start: base.set({ hour: 22, minute: 0, second: 0, millisecond: 0 }),
+      end: base.plus({ days: 1 }).set({ hour: 5, minute: 0, second: 0, millisecond: 0 }),
+    }]
+  }
+
+  if (base.weekday === 6) {
+    return [{
+      reason: SCHEDULED_STOP_REASON,
+      start: base.set({ hour: 13, minute: 0, second: 0, millisecond: 0 }),
+      end: base.plus({ days: 2 }).set({ hour: 5, minute: 0, second: 0, millisecond: 0 }),
+    }]
+  }
+
+  return []
+}
+
+export function getScheduledStopWindowAt(dateInput = null, options = {}) {
+  const dateTime = toShiftDateTime(dateInput)
+  const windows = [
+    ...getScheduledStopWindowsForDay(dateTime.minus({ days: 2 }), options),
+    ...getScheduledStopWindowsForDay(dateTime.minus({ days: 1 }), options),
+    ...getScheduledStopWindowsForDay(dateTime, options),
+  ]
+
+  return windows.find((window) => dateTime >= window.start && dateTime < window.end) || null
+}
+
+export function isScheduledStopActive(dateInput = null, options = {}) {
+  return !!getScheduledStopWindowAt(dateInput, options)
 }
 
 export function getShiftWindowsInRange(startInput, endInput, {

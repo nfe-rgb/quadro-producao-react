@@ -2,16 +2,20 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ensureAnonymousSession, SUPABASE_CACHE_SCOPE, supabase } from '../lib/supabaseClient'
 import { MAQUINAS, MOTIVOS_PARADA } from '../lib/constants'
 import { localDateTimeToISO } from '../lib/utils'
+import { getScheduledStopWindowAt, SCHEDULED_STOP_REASON } from '../lib/shifts'
 import {
   buildRegistroGroups,
   deriveRuntimeOrders,
   isMissingRelationError,
   mapLowEffLogsForUi,
   mapRuntimeOrder,
+  mapScheduledStopsForUi,
   mapStopsForUi,
 } from '../lib/productionRuntime'
 
 const RUNTIME_VIEW_STORAGE_KEY = `production_runtime_view_availability:${SUPABASE_CACHE_SCOPE}`
+const SCHEDULED_STOPS_TABLE_STORAGE_KEY = `scheduled_machine_stops_availability:${SUPABASE_CACHE_SCOPE}`
+const SCHEDULED_STOPS_TABLE = 'scheduled_machine_stops'
 
 function readCachedAvailability(storageKey) {
   if (typeof window === 'undefined') return 'unknown'
@@ -38,6 +42,7 @@ function writeCachedAvailability(storageKey, value) {
 
 let runtimeViewAvailability = readCachedAvailability(RUNTIME_VIEW_STORAGE_KEY)
 let sessionsTableAvailability = 'unknown'
+let scheduledStopsTableAvailability = readCachedAvailability(SCHEDULED_STOPS_TABLE_STORAGE_KEY)
 
 function countByOrderId(rows) {
   const counts = {}
@@ -73,15 +78,81 @@ function hasActiveSession(order) {
   return !!String(order?.active_session_id || '').trim()
 }
 
+function mergeScheduledStopRows(...collections) {
+  const map = new Map()
+  for (const collection of collections) {
+    for (const row of collection || []) {
+      const key = String(row?.event_key || row?.id || '')
+      if (!key) continue
+      map.set(key, row)
+    }
+  }
+  return Array.from(map.values())
+}
+
+function compareMachineOrderPriority(left, right) {
+  const leftPos = Number.isFinite(Number(left?.pos)) ? Number(left.pos) : 999999
+  const rightPos = Number.isFinite(Number(right?.pos)) ? Number(right.pos) : 999999
+  if (leftPos !== rightPos) return leftPos - rightPos
+
+  const leftCreatedAt = Date.parse(left?.created_at || '') || 0
+  const rightCreatedAt = Date.parse(right?.created_at || '') || 0
+  return leftCreatedAt - rightCreatedAt
+}
+
+function getScheduledStopValidationMessage() {
+  return 'Máquina em parada programada no horário do Brasil. A produção só pode operar de segunda a sexta entre 05:00 e 22:00, e no sábado entre 05:00 e 13:00.'
+}
+
+function applyPersistedScheduledStopsToOrders(orders, scheduledStops) {
+  const openScheduledStopsByOrderId = new Map()
+
+  for (const stop of scheduledStops || []) {
+    if (stop?.ended_at) continue
+    const orderKey = stop?.order_id != null ? String(stop.order_id).trim() : ''
+    if (!orderKey) continue
+
+    const existing = openScheduledStopsByOrderId.get(orderKey)
+    const existingStartedAt = Date.parse(existing?.started_at || '') || 0
+    const candidateStartedAt = Date.parse(stop?.started_at || '') || 0
+    if (!existing || candidateStartedAt >= existingStartedAt) {
+      openScheduledStopsByOrderId.set(orderKey, stop)
+    }
+  }
+
+  return (orders || []).map((order) => {
+    const orderKey = order?.source_order_id != null
+      ? String(order.source_order_id)
+      : (order?.id != null ? String(order.id) : '')
+    const scheduledStop = openScheduledStopsByOrderId.get(orderKey)
+    if (!scheduledStop || order?.finalized) return order
+
+    return {
+      ...order,
+      underlying_status: order?.underlying_status || order?.status || null,
+      underlying_reason: order?.underlying_reason || order?.reason || null,
+      status: 'PARADA',
+      reason: scheduledStop.reason || SCHEDULED_STOP_REASON,
+      scheduled_stop_active: true,
+      scheduled_stop_reason: scheduledStop.reason || SCHEDULED_STOP_REASON,
+      scheduled_stop_started_at: scheduledStop.started_at || null,
+      scheduled_stop_ends_at: scheduledStop.expected_end_at || scheduledStop.ended_at || null,
+    }
+  })
+}
+
 export default function useOrders() {
   const [ordens, setOrdens] = useState(() => loadOrdersFromCache())
   const [finalizadas, setFinalizadas] = useState([])
   const [paradas, setParadas] = useState([])
+  const [scheduledStops, setScheduledStops] = useState([])
   const [sessions, setSessions] = useState([])
   const [lowEffLogs, setLowEffLogs] = useState([])
+  const [scheduledStopsTableState, setScheduledStopsTableState] = useState(() => scheduledStopsTableAvailability)
   const runtimeFallbackWarnedRef = useRef(false)
   const runtimeErrorFallbackWarnedRef = useRef(false)
   const sessionsFallbackWarnedRef = useRef(false)
+  const scheduledStopsFallbackWarnedRef = useRef(false)
   const runtimeRefreshPromiseRef = useRef(null)
   const runtimeRefreshQueuedRef = useRef(false)
 
@@ -218,6 +289,23 @@ export default function useOrders() {
       }
     }
 
+    if (scheduledStopsTableAvailability === 'unknown') {
+      const scheduledProbeRes = await supabase
+        .from(SCHEDULED_STOPS_TABLE)
+        .select('event_key')
+        .limit(1)
+
+      if (isMissingRelationError(scheduledProbeRes.error, SCHEDULED_STOPS_TABLE)) {
+        scheduledStopsTableAvailability = 'missing'
+        writeCachedAvailability(SCHEDULED_STOPS_TABLE_STORAGE_KEY, 'missing')
+        setScheduledStopsTableState('missing')
+      } else if (!scheduledProbeRes.error) {
+        scheduledStopsTableAvailability = 'available'
+        writeCachedAvailability(SCHEDULED_STOPS_TABLE_STORAGE_KEY, 'available')
+        setScheduledStopsTableState('available')
+      }
+    }
+
     if (runtimeViewMissing) {
       if (!runtimeFallbackWarnedRef.current) {
         console.warn('View production_orders_runtime_v não encontrada no Supabase. Reconstruindo o runtime a partir de orders + sessões/eventos.')
@@ -265,7 +353,8 @@ export default function useOrders() {
       : [...runtimeOpenRows, ...runtimeFinalizedRows]
     const relevantIds = Array.from(new Set(relevantSourceRows.map((order) => order?.id).filter(Boolean)))
 
-    const [rawSessionsRes, stopsRes, lowEffRes] = await Promise.all([
+    const scheduledStopSelectFields = 'event_key, machine_id, order_id, reason, notes, started_at, expected_end_at, ended_at, started_by, ended_by, created_at, updated_at'
+    const [rawSessionsRes, stopsRes, lowEffRes, scheduledStopsByOrderRes, openScheduledStopsRes] = await Promise.all([
       sessionsTableAvailability !== 'missing' && relevantIds.length
         ? supabase
             .from('order_machine_sessions')
@@ -286,6 +375,21 @@ export default function useOrders() {
             .select('id, order_id, machine_id, started_at, ended_at, reason, notes')
             .in('order_id', relevantIds)
             .order('started_at', { ascending: false })
+        : Promise.resolve({ data: [], error: null }),
+      scheduledStopsTableAvailability === 'available' && relevantIds.length
+        ? supabase
+            .from(SCHEDULED_STOPS_TABLE)
+            .select(scheduledStopSelectFields)
+            .in('order_id', relevantIds.map((value) => String(value)))
+            .order('started_at', { ascending: false })
+        : Promise.resolve({ data: [], error: null }),
+      scheduledStopsTableAvailability === 'available'
+        ? supabase
+            .from(SCHEDULED_STOPS_TABLE)
+            .select(scheduledStopSelectFields)
+            .is('ended_at', null)
+            .order('started_at', { ascending: false })
+            .limit(100)
         : Promise.resolve({ data: [], error: null }),
     ])
 
@@ -312,6 +416,27 @@ export default function useOrders() {
     }
     if (lowEffRes.error) {
       console.warn('Falha ao carregar baixa eficiência normalizada:', lowEffRes.error)
+    }
+    if (isMissingRelationError(scheduledStopsByOrderRes.error, SCHEDULED_STOPS_TABLE)
+      || isMissingRelationError(openScheduledStopsRes.error, SCHEDULED_STOPS_TABLE)) {
+      scheduledStopsTableAvailability = 'missing'
+      writeCachedAvailability(SCHEDULED_STOPS_TABLE_STORAGE_KEY, 'missing')
+      setScheduledStopsTableState('missing')
+      if (!scheduledStopsFallbackWarnedRef.current) {
+        console.warn('Tabela scheduled_machine_stops não encontrada no Supabase. O histórico de parada programada ficará apenas em memória até a tabela ser criada.')
+        scheduledStopsFallbackWarnedRef.current = true
+      }
+    } else if (!scheduledStopsByOrderRes.error && !openScheduledStopsRes.error && scheduledStopsTableAvailability !== 'missing') {
+      scheduledStopsTableAvailability = 'available'
+      writeCachedAvailability(SCHEDULED_STOPS_TABLE_STORAGE_KEY, 'available')
+      setScheduledStopsTableState('available')
+    }
+
+    if (scheduledStopsByOrderRes.error && !isMissingRelationError(scheduledStopsByOrderRes.error, SCHEDULED_STOPS_TABLE)) {
+      console.warn('Falha ao carregar histórico persistido de parada programada:', scheduledStopsByOrderRes.error)
+    }
+    if (openScheduledStopsRes.error && !isMissingRelationError(openScheduledStopsRes.error, SCHEDULED_STOPS_TABLE)) {
+      console.warn('Falha ao carregar paradas programadas em aberto:', openScheduledStopsRes.error)
     }
 
     const runtimeOrders = shouldDeriveRuntime
@@ -351,6 +476,7 @@ export default function useOrders() {
     }
     setSessions(sessionsRes.data || [])
     setParadas(mapStopsForUi(stopsRes.data || []))
+    setScheduledStops(mapScheduledStopsForUi(mergeScheduledStopRows(scheduledStopsByOrderRes.data || [], openScheduledStopsRes.data || [])))
     setLowEffLogs(mapLowEffLogsForUi(lowEffRes.data || []))
   }, [fetchOrdersBaseSnapshot, fetchScanCounts])
 
@@ -402,6 +528,7 @@ export default function useOrders() {
     })
 
     const trackedTables = ['orders', 'order_machine_sessions', 'machine_stops', 'low_efficiency_logs']
+    if (scheduledStopsTableState === 'available') trackedTables.push(SCHEDULED_STOPS_TABLE)
     const channels = trackedTables.map((tableName) => (
       supabase
         .channel(`production-runtime-${tableName}`)
@@ -439,24 +566,23 @@ export default function useOrders() {
         console.warn('Falha ao remover canal de scans realtime:', error)
       }
     }
-  }, [fetchRuntimeSnapshot, scheduleRuntimeRefresh])
+  }, [fetchRuntimeSnapshot, scheduleRuntimeRefresh, scheduledStopsTableState])
 
   const ativosPorMaquina = useMemo(() => {
+    const ordensVisiveis = applyPersistedScheduledStopsToOrders(ordens, scheduledStops)
     const map = Object.fromEntries(MAQUINAS.map((machineId) => [machineId, []]))
-    ordens.forEach((order) => {
+    ordensVisiveis.forEach((order) => {
       if (!order?.finalized && map[order.machine_id]) {
         map[order.machine_id].push(order)
       }
     })
     for (const machineId of MAQUINAS) {
-      map[machineId] = [...map[machineId]].sort((left, right) => {
-        const leftPos = Number.isFinite(Number(left?.pos)) ? Number(left.pos) : 999999
-        const rightPos = Number.isFinite(Number(right?.pos)) ? Number(right.pos) : 999999
-        return leftPos - rightPos
-      })
+      map[machineId] = [...map[machineId]].sort(compareMachineOrderPriority)
     }
     return map
-  }, [ordens])
+  }, [ordens, scheduledStops])
+
+  const ordensVisiveis = useMemo(() => applyPersistedScheduledStopsToOrders(ordens, scheduledStops), [ordens, scheduledStops])
 
   const lastFinalizadoPorMaquina = useMemo(() => {
     const map = Object.fromEntries(MAQUINAS.map((machineId) => [machineId, null]))
@@ -469,7 +595,7 @@ export default function useOrders() {
     return map
   }, [finalizadas])
 
-  const registroGrupos = useMemo(() => buildRegistroGroups([...ordens, ...finalizadas], sessions, paradas, lowEffLogs), [ordens, finalizadas, sessions, paradas, lowEffLogs])
+  const registroGrupos = useMemo(() => buildRegistroGroups([...ordensVisiveis, ...finalizadas], sessions, paradas, lowEffLogs, scheduledStops), [ordensVisiveis, finalizadas, sessions, paradas, lowEffLogs, scheduledStops])
 
   async function criarOrdem(form, setForm, setTab) {
     if (!form.code.trim()) return false
@@ -621,6 +747,11 @@ export default function useOrders() {
       return false
     }
 
+    if (getScheduledStopWindowAt(localDateTimeToISO(data, hora))) {
+      alert(getScheduledStopValidationMessage())
+      return false
+    }
+
     await ensureAnonymousSession()
     const { error } = await supabase.rpc('production_start_order', {
       p_order_id: String(ordem.source_order_id || ordem.id),
@@ -691,6 +822,11 @@ export default function useOrders() {
       return false
     }
 
+    if (getScheduledStopWindowAt(localDateTimeToISO(data, hora))) {
+      alert(getScheduledStopValidationMessage())
+      return false
+    }
+
     if (!skipValidation && !hasActiveSession(ordem)) {
       alert('Esta ordem está sem sessão ativa. Regularize iniciando a produção novamente antes de retomar.')
       return false
@@ -716,6 +852,11 @@ export default function useOrders() {
   async function confirmarBaixaEf({ ordem, operador, data, hora, obs, skipValidation = false }) {
     if (!operador || !data || !hora) {
       alert('Preencha operador, data e hora.')
+      return false
+    }
+
+    if (getScheduledStopWindowAt(localDateTimeToISO(data, hora))) {
+      alert(getScheduledStopValidationMessage())
       return false
     }
 
@@ -770,6 +911,10 @@ export default function useOrders() {
     const atual = ordem.status
     const currentStatus = String(atual || '').toUpperCase()
     const activeSession = hasActiveSession(ordem)
+
+    if (!skipValidation && ordem?.scheduled_stop_active && targetStatus !== 'PARADA') {
+      return { action: 'alert', message: getScheduledStopValidationMessage() }
+    }
 
     if (targetStatus === 'AGUARDANDO' && currentStatus !== 'AGUARDANDO') {
       return { action: 'alert', message: 'Após iniciar a produção, não é permitido voltar para "Aguardando".' }
@@ -858,7 +1003,7 @@ export default function useOrders() {
   }
 
   return {
-    ordens,
+    ordens: ordensVisiveis,
     finalizadas,
     paradas,
     sessions,

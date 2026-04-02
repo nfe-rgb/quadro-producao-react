@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from "react";
 import Etiqueta from "../components/Etiqueta";
 import { MAQUINAS, STATUS } from "../lib/constants";
-import { fmtElapsedSince, getProductionStartedAt, statusClass } from "../lib/utils";
+import { fmtElapsedSince, getOrderStopDisplay, getProductionStartedAt, statusClass } from "../lib/utils";
 import "../styles/Barrademeta.css";
 import { DateTime } from "luxon";
 import { supabase } from "../lib/supabaseClient";
@@ -354,12 +354,10 @@ export default function Painel({
           const lista = source[m] ?? [];
           const ativa = lista[0] || null;
 
-          const openStop = ativa
-            ? paradas.find((p) => p.order_id === String(ativa.id) && !p.resumed_at)
-            : null;
+          const { openStop, stopReason, stopStartedAt } = getOrderStopDisplay(ativa, paradas)
 
-          const durText = openStop?.started_at
-            ? fmtElapsedSince(openStop.started_at, currentTimeMs)
+          const durText = stopStartedAt
+            ? fmtElapsedSince(stopStartedAt, currentTimeMs)
             : null;
 
           const produzindoText =
@@ -449,8 +447,8 @@ export default function Painel({
                       paradaNotes={openStop?.notes}
                     />
 
-                    {ativa?.status === "PARADA" && openStop?.reason && (
-                      <div className="stop-reason-below">{openStop.reason}</div>
+                    {ativa?.status === "PARADA" && stopReason && (
+                      <div className="stop-reason-below">{stopReason}</div>
                     )}
 
                     <div className="sep" />

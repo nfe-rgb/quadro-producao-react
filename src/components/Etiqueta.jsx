@@ -8,7 +8,7 @@ export default function Etiqueta({ o, variant = 'painel', saldoCaixas, lidasCaix
 
   const temObsLowEff = !!o.loweff_notes
   const interrompida = o.status === 'AGUARDANDO' && !!o.interrupted_at
-  const isWeekendStop = o.status === 'PARADA' && o.reason === 'FIM DE SEMANA'
+  const isProgrammedStop = o.status === 'PARADA' && ['FIM DE SEMANA', 'PARADA PROGRAMADA'].includes(o.reason)
   const fmtDate = (d) => (d ? new Date(d).toLocaleDateString('pt-BR') : '-')
 
   // classe para a pílula de saldo
@@ -22,7 +22,7 @@ export default function Etiqueta({ o, variant = 'painel', saldoCaixas, lidasCaix
   // ===== variante FILA =====
   if (variant === 'fila') {
     return (
-      <div className={`small etiqueta-fila-flex ${isWeekendStop ? 'etiqueta-weekend' : ''}`}>
+      <div className={`small etiqueta-fila-flex ${isProgrammedStop ? 'etiqueta-weekend' : ''}`}>
         <div className="etiqueta-fila-main">
           {interrompida && <div className="badge-interrompida">⚠️ Produção Interrompida</div>}
           {opCode && <div><b>O.P:</b> {opCode}</div>}
@@ -59,7 +59,7 @@ export default function Etiqueta({ o, variant = 'painel', saldoCaixas, lidasCaix
     // ===== variante pet01 =====
   if (variant === 'pet01') {
   return (
-    <div className={`small ${isWeekendStop ? 'etiqueta-weekend' : ''}`}>
+    <div className={`small ${isProgrammedStop ? 'etiqueta-weekend' : ''}`}>
       {interrompida && <div className="badge-interrompida">⚠️ Produção Interrompida</div>}
 
       {customer && <div><b>Cliente:</b> {customer}</div>}
@@ -99,7 +99,7 @@ export default function Etiqueta({ o, variant = 'painel', saldoCaixas, lidasCaix
   // ===== variante PAINEL =====
   return (
     <div
-      className={`small ${isWeekendStop ? 'etiqueta-weekend' : ''} ${compactPills ? 'compact-pills-layout' : ''}`}
+      className={`small ${isProgrammedStop ? 'etiqueta-weekend' : ''} ${compactPills ? 'compact-pills-layout' : ''}`}
       style={{ position: 'relative' }}
     >
       {interrompida && <div className="badge-interrompida">⚠️ Produção Interrompida</div>}

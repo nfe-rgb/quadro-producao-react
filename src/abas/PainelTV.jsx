@@ -1,14 +1,14 @@
 import React, { useEffect, useState } from "react";
 import Etiqueta from "../components/Etiqueta";
 import { MAQUINAS } from "../lib/constants";
-import { fmtElapsedSince, getProductionStartedAt, statusClass } from "../lib/utils";
+import { fmtElapsedSince, getOrderStopDisplay, getProductionStartedAt, statusClass } from "../lib/utils";
 import "../styles/PainelTV.css";
 
 function ItemResumo({
   title,
   ordem,
   machineId,
-  openStop,
+  stopReason,
   fallback = "Sem programação",
 }) {
   if (!ordem) {
@@ -36,12 +36,10 @@ function ItemResumo({
           lidasCaixas={["P1", "P2", "P3"].includes(machineId) ? lidas : undefined}
           saldoCaixas={["P1", "P2", "P3"].includes(machineId) ? saldo : undefined}
           compactPills={true}
-          paradaReason={openStop?.reason}
-          paradaNotes={openStop?.notes}
         />
 
-        {ordem?.status === "PARADA" && openStop?.reason && (
-          <div className="stop-reason-below">{openStop.reason}</div>
+        {ordem?.status === "PARADA" && stopReason && (
+          <div className="stop-reason-below">{stopReason}</div>
         )}
       </div>
     </div>
@@ -73,12 +71,10 @@ export default function PainelTV({
           const atual = lista[0] || null;
           const proximo = lista[1] || null;
 
-          const openStop = atual
-            ? paradas.find((p) => p.order_id === String(atual.id) && !p.resumed_at)
-            : null;
+          const { stopStartedAt, stopReason } = getOrderStopDisplay(atual, paradas)
 
-          const stopText = openStop
-            ? fmtElapsedSince(openStop.started_at, currentTimeMs)
+          const stopText = stopStartedAt
+            ? fmtElapsedSince(stopStartedAt, currentTimeMs)
             : null;
 
           const produzindoText =
@@ -117,13 +113,13 @@ export default function PainelTV({
                     title="Atual"
                     ordem={atual}
                     machineId={machineId}
-                    openStop={openStop}
+                    stopReason={stopReason}
                   />
                   <ItemResumo
                     title="Próximo"
                     ordem={proximo}
                     machineId={machineId}
-                    openStop={null}
+                    stopReason=""
                   />
                 </div>
               </div>
