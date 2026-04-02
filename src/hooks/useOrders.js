@@ -54,6 +54,11 @@ function countByOrderId(rows) {
   return counts
 }
 
+function normalizeOptionalOrderField(value) {
+  const normalized = String(value ?? '').trim()
+  return normalized ? normalized : null
+}
+
 const ORDERS_CACHE_KEY = `cached_production_orders_v1:${SUPABASE_CACHE_SCOPE}`;
 
 function saveOrdersToCache(orders) {
@@ -622,8 +627,8 @@ export default function useOrders() {
       product: form.product,
       color: form.color,
       qty: form.qty,
-      boxes: form.boxes,
-      standard: form.standard,
+      boxes: normalizeOptionalOrderField(form.boxes),
+      standard: normalizeOptionalOrderField(form.standard),
       due_date: form.due_date || null,
       notes: form.notes,
       status: 'AGUARDANDO',
@@ -670,8 +675,8 @@ export default function useOrders() {
       product: ordemParcial.product,
       color: ordemParcial.color,
       qty: ordemParcial.qty,
-      boxes: ordemParcial.boxes,
-      standard: ordemParcial.standard,
+      boxes: normalizeOptionalOrderField(ordemParcial.boxes),
+      standard: normalizeOptionalOrderField(ordemParcial.standard),
       due_date: ordemParcial.due_date || null,
       notes: ordemParcial.notes,
       pos: ordemParcial.pos ?? null,
