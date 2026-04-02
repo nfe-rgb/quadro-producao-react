@@ -13,9 +13,11 @@ export default function NovaOrdem({ form, setForm, criarOrdem, setTab }) {
   const [pickedItem, setPickedItem] = useState(null)
   const [openList, setOpenList] = useState(false)
   const [checkingItemCode, setCheckingItemCode] = useState(false)
+  const [creatingOrder, setCreatingOrder] = useState(false)
   const [missingItemModal, setMissingItemModal] = useState({ open: false, code: '' })
   const debRef = useRef(null)
   const listRef = useRef(null)
+  const creatingOrderRef = useRef(false)
 
   // mantém qProd sincronizado quando a tela monta
   useEffect(() => { setQProd(form.product || '') }, []) // ao montar
@@ -102,21 +104,36 @@ export default function NovaOrdem({ form, setForm, criarOrdem, setTab }) {
     }))
   }
 
+  async function submitCreateOrder(nextForm) {
+    if (creatingOrderRef.current) return false
+
+    creatingOrderRef.current = true
+    setCreatingOrder(true)
+    try {
+      return (await criarOrdem(nextForm, setForm, setTab)) !== false
+    } finally {
+      creatingOrderRef.current = false
+      setCreatingOrder(false)
+    }
+  }
+
   async function handleCreateOrder() {
+    if (creatingOrderRef.current) return
+
     const term = String(qProd || '').trim()
     if (!term) {
-      criarOrdem(form, setForm, setTab)
+      await submitCreateOrder(form)
       return
     }
 
     if (pickedItem && isExactProductMatch(term, pickedItem)) {
-      criarOrdem(form, setForm, setTab)
+      await submitCreateOrder(form)
       return
     }
 
     const codeGuess = term.split('-')[0]?.trim()
     if (!codeGuess) {
-      criarOrdem(form, setForm, setTab)
+      await submitCreateOrder(form)
       return
     }
 
@@ -151,7 +168,7 @@ export default function NovaOrdem({ form, setForm, criarOrdem, setTab }) {
       setPickedItem(data)
       setQProd(nextProduct)
       setForm(nextForm)
-      criarOrdem(nextForm, setForm, setTab)
+      await submitCreateOrder(nextForm)
     } finally {
       setCheckingItemCode(false)
     }
@@ -294,8 +311,8 @@ export default function NovaOrdem({ form, setForm, criarOrdem, setTab }) {
         )}
 
         <div className="sep"></div>
-        <button className="btn primary" onClick={handleCreateOrder} disabled={checkingItemCode}>
-          {checkingItemCode ? 'Validando item…' : 'Adicionar'}
+        <button className="btn primary" onClick={handleCreateOrder} disabled={checkingItemCode || creatingOrder}>
+          {creatingOrder ? 'Criando...' : checkingItemCode ? 'Validando item…' : 'Adicionar'}
         </button>
       </div>
 

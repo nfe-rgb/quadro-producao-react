@@ -1,16 +1,8 @@
 import React, { useEffect, useState } from "react";
 import Etiqueta from "../components/Etiqueta";
 import { MAQUINAS } from "../lib/constants";
-import { statusClass } from "../lib/utils";
+import { fmtElapsedSince, getProductionStartedAt, statusClass } from "../lib/utils";
 import "../styles/PainelTV.css";
-
-function formatHHMMSS(totalSeconds) {
-  const s = Math.max(0, Math.floor(totalSeconds || 0));
-  const hh = String(Math.floor(s / 3600)).padStart(2, "0");
-  const mm = String(Math.floor((s % 3600) / 60)).padStart(2, "0");
-  const ss = String(s % 60).padStart(2, "0");
-  return `${hh}:${mm}:${ss}`;
-}
 
 function ItemResumo({
   title,
@@ -86,34 +78,25 @@ export default function PainelTV({
             : null;
 
           const stopText = openStop
-            ? (() => {
-                const total = Math.max(
-                  0,
-                  Math.floor((currentTimeMs - new Date(openStop.started_at).getTime()) / 1000)
-                );
-                return formatHHMMSS(total);
-              })()
+            ? fmtElapsedSince(openStop.started_at, currentTimeMs)
             : null;
+
+          const produzindoText =
+            atual?.status === "PRODUZINDO"
+              ? fmtElapsedSince(getProductionStartedAt(atual), currentTimeMs)
+              : null;
 
           const semProgText = !atual
             ? (() => {
                 const lastFinISO = lastFinalizadoPorMaquina?.[machineId] || null;
                 if (!lastFinISO) return null;
-                const total = Math.max(
-                  0,
-                  Math.floor((currentTimeMs - new Date(lastFinISO).getTime()) / 1000)
-                );
-                return formatHHMMSS(total);
+                return fmtElapsedSince(lastFinISO, currentTimeMs);
               })()
             : null;
 
           const lowEffText =
             atual?.status === "BAIXA_EFICIENCIA" && atual?.loweff_started_at
-              ? (() => {
-                  const secs =
-                    (currentTimeMs - new Date(atual.loweff_started_at).getTime()) / 1000;
-                  return formatHHMMSS(secs);
-                })()
+              ? fmtElapsedSince(atual.loweff_started_at, currentTimeMs)
               : null;
 
           return (
@@ -122,6 +105,7 @@ export default function PainelTV({
                 <div className="tv-machine-name">{machineId}</div>
                 <div className="tv-header-timers">
                   {stopText && <span className="parada-timer">{stopText}</span>}
+                  {produzindoText && <span className="produzindo-timer">{produzindoText}</span>}
                   {lowEffText && <span className="loweff-timer">{lowEffText}</span>}
                   {semProgText && <span className="semprog-timer">{semProgText}</span>}
                 </div>

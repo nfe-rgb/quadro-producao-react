@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ensureAnonymousSession, supabase } from "../lib/supabaseClient";
 import Etiqueta from "../components/Etiqueta";
 import FichaTecnicaModal from "../components/FichaTecnicaModal";
-import { getTurnoAtual, statusClass } from "../lib/utils";
+import { fmtElapsedSince, getProductionStartedAt, getTurnoAtual, statusClass } from "../lib/utils";
 import { getShiftWindowAt } from "../lib/shifts";
 import { DateTime } from "luxon";
 import "../styles/Pet01.css";
@@ -30,6 +30,7 @@ export default function Pet04({
   const [refugoForm, setRefugoForm] = useState({ operador: "", turno: "", quantidade: "", motivo: "",});
 
   const [showRefugo, setShowRefugo] = useState(false);
+  const [refugoSaving, setRefugoSaving] = useState(false);
   const [shiftScrap, setShiftScrap] = useState({ good: 0, scrap: 0, pct: 0, loading: true, shiftKey: "" });
 
   // responsável do turno (P4)
@@ -47,6 +48,7 @@ export default function Pet04({
   // listener de scanner: buffer e timestamps
   const scanBufferRef = useRef("");
   const lastKeyTimeRef = useRef(0);
+  const refugoSavingRef = useRef(false);
 
   // Atualiza ativa/proximo sempre que ativos mudam (somente P4)
   useEffect(() => {
@@ -102,6 +104,13 @@ export default function Pet04({
     const mm = String(Math.floor((diff % 3600) / 60)).padStart(2, "0");
     const ss = String(diff % 60).padStart(2, "0");
     return `${hh}:${mm}:${ss}`;
+  }, [ativa, tick]);
+
+  const tempoProduzindo = useMemo(() => {
+    if (!ativa) return null;
+    if (ativa.status !== "PRODUZINDO") return null;
+    const _ = tick;
+    return fmtElapsedSince(getProductionStartedAt(ativa));
   }, [ativa, tick]);
 
   const tempoSemProg = useMemo(() => {
@@ -582,6 +591,9 @@ if (typeof window !== "undefined") {
       <div className={`pet01-card ${pet01StatusClass(ativa?.status)}`}>
         <div className="pet01-card-header">
           <div className="left">
+            {tempoProduzindo && (
+              <span className="rotas-produzindo-timer">{tempoProduzindo}</span>
+            )}
             {ativa?.status === "PARADA" && tempoParada && (
               <span className="rotas-parada-timer">{tempoParada}</span>
             )}
@@ -709,6 +721,7 @@ if (typeof window !== "undefined") {
       <form
         onSubmit={async (e) => {
           e.preventDefault();
+          if (refugoSavingRef.current) return;
           if (!ativa) {
             showToast("Nenhuma ordem ativa.", "err");
             return;
@@ -725,40 +738,45 @@ if (typeof window !== "undefined") {
             return;
           }
 
-          // calcula aqui o instante em São Paulo e converte para UTC para gravar
-          await ensureAnonymousSession();
-          const nowBr = DateTime.now().setZone('America/Sao_Paulo');
-          const turnoAtual = getTurnoAtual(nowBr);
-          const createdAtUtcIso = nowBr.toUTC().toISO();
+          refugoSavingRef.current = true;
+          setRefugoSaving(true);
+          try {
+            await ensureAnonymousSession();
+            const nowBr = DateTime.now().setZone('America/Sao_Paulo');
+            const turnoAtual = getTurnoAtual(nowBr);
+            const createdAtUtcIso = nowBr.toUTC().toISO();
 
-          const turnoCalc = String(turnoAtual || shiftInfo?.shiftKey || '');
+            const turnoCalc = String(turnoAtual || shiftInfo?.shiftKey || '');
 
-          // payload final compatível com scrap_logs
-        const payload = {
-    created_at: createdAtUtcIso,           // grava o UTC correspondente ao horário BR
-    machine_id: ativa.machine_id,
-    shift: turnoCalc,
-    operator: operador.trim(),
-    order_id: ativa.id,
-    op_code: String(ativa.code),
-    qty: Number(quantidade),
-    reason: motivo,
-  };
+            const payload = {
+              created_at: createdAtUtcIso,
+              machine_id: ativa.machine_id,
+              shift: turnoCalc,
+              operator: operador.trim(),
+              order_id: ativa.id,
+              op_code: String(ativa.code),
+              qty: Number(quantidade),
+              reason: motivo,
+            };
 
-   console.log("Payload Refugo:", payload);
+            console.log("Payload Refugo:", payload);
 
-   const { error } = await supabase.from("scrap_logs").insert([payload]);
+            const { error } = await supabase.from("scrap_logs").insert([payload]);
 
-       if (error) {
-            console.error("Erro insert scrap_logs:", error);
-            showToast("Erro ao registrar refugo: " + error.message, "err");
-          return;
-         } 
+            if (error) {
+              console.error("Erro insert scrap_logs:", error);
+              showToast("Erro ao registrar refugo: " + error.message, "err");
+              return;
+            }
 
-           await fetchRefugoTurno();
-           setShowRefugo(false);
-           setRefugoForm({ operador: "", quantidade: "", motivo: REFUGO_MOTIVOS[0] });
-           showToast("Refugo registrado.", "ok");
+            setShowRefugo(false);
+            setRefugoForm({ operador: "", quantidade: "", motivo: REFUGO_MOTIVOS[0] });
+            showToast("Refugo registrado.", "ok");
+            void fetchRefugoTurno();
+          } finally {
+            refugoSavingRef.current = false;
+            setRefugoSaving(false);
+          }
        }}
       >
 
@@ -766,6 +784,7 @@ if (typeof window !== "undefined") {
         <input
           className="input"
           value={refugoForm.operador}
+          disabled={refugoSaving}
           onChange={(e) =>
             setRefugoForm((f) => ({ ...f, operador: e.target.value }))
           }
@@ -778,6 +797,7 @@ if (typeof window !== "undefined") {
           type="number"
           min="1"
           value={refugoForm.quantidade}
+          disabled={refugoSaving}
           onChange={(e) =>
             setRefugoForm((f) => ({ ...f, quantidade: e.target.value }))
           }
@@ -787,6 +807,7 @@ if (typeof window !== "undefined") {
         <select
           className="input"
           value={refugoForm.motivo}
+          disabled={refugoSaving}
           onChange={(e) =>
             setRefugoForm((f) => ({ ...f, motivo: e.target.value }))
           }
@@ -802,12 +823,13 @@ if (typeof window !== "undefined") {
           <button
             type="button"
             className="gray"
+            disabled={refugoSaving}
             onClick={() => setShowRefugo(false)}
           >
             Cancelar
           </button>
-          <button type="submit" className="orange">
-            Registrar
+          <button type="submit" className="orange" disabled={refugoSaving}>
+            {refugoSaving ? "Registrando..." : "Registrar"}
           </button>
         </div>
       </form>

@@ -1,5 +1,5 @@
 // src/components/GlobalModals.jsx
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import Modal from '../components/Modal'
 import { MAQUINAS, MOTIVOS_PARADA, REFUGO_MOTIVOS, TURNOS } from '../lib/constants'
 import { DateTime } from 'luxon'
@@ -36,6 +36,26 @@ export default function GlobalModals({
   const [manualOrderOptions, setManualOrderOptions] = useState([])
   const [manualOrderOptionsLoading, setManualOrderOptionsLoading] = useState(false)
   const [manualSaving, setManualSaving] = useState(false)
+  const [actionSaving, setActionSaving] = useState(null)
+  const manualSavingRef = useRef(false)
+  const actionSavingRef = useRef(false)
+
+  async function runModalAction(actionKey, callback) {
+    if (actionSavingRef.current) return false
+
+    actionSavingRef.current = true
+    setActionSaving(actionKey)
+    try {
+      const result = await callback()
+      return result !== false
+    } catch (error) {
+      console.warn(`Falha ao confirmar modal ${actionKey}:`, error)
+      return false
+    } finally {
+      actionSavingRef.current = false
+      setActionSaving(null)
+    }
+  }
 
   // Normaliza data/hora ao abrir cada modal, apenas na primeira renderização
   useEffect(() => {
@@ -153,6 +173,8 @@ export default function GlobalModals({
   }, [manualProductionModalOpen, manualForm.machine])
 
   async function handleManualProductionSubmit() {
+    if (manualSavingRef.current) return
+
     const payload = {
       date: manualForm.date,
       machine: manualForm.machine,
@@ -174,6 +196,7 @@ export default function GlobalModals({
       return
     }
 
+    manualSavingRef.current = true
     setManualSaving(true)
     try {
       const { data: orderRows, error: orderError } = await supabase
@@ -248,6 +271,7 @@ export default function GlobalModals({
       console.warn('Falha ao registrar apontamento manual:', error)
       alert('Falha ao registrar apontamento manual.')
     } finally {
+      manualSavingRef.current = false
       setManualSaving(false)
     }
   }
@@ -255,7 +279,7 @@ export default function GlobalModals({
   return (
     <>
       {/* Editar */}
-      <Modal open={!!editando} onClose={()=>setEditando(null)} title={editando ? `Editar O.P ${editando.code}` : ''}>
+      <Modal open={!!editando} onClose={()=>{ if (!actionSavingRef.current) setEditando(null) }} title={editando ? `Editar O.P ${editando.code}` : ''} closeOnBackdrop={!actionSaving}>
         {editando && (
           <div className="grid">
             <div className="grid2">
@@ -272,18 +296,21 @@ export default function GlobalModals({
             </div>
             <div className="sep"></div>
             <div className="flex" style={{justifyContent:'flex-end'}}>
-              <button className="btn ghost" onClick={()=>setEditando(null)}>Cancelar</button>
+              <button className="btn ghost" onClick={()=>setEditando(null)} disabled={!!actionSaving}>Cancelar</button>
               <button className="btn primary" onClick={async ()=>{
-                if (typeof onUpdateOrder === 'function') await onUpdateOrder(editando)
-                setEditando(null)
-              }}>Salvar</button>
+                const ok = await runModalAction('edit', async () => {
+                  if (typeof onUpdateOrder !== 'function') return true
+                  return await onUpdateOrder(editando)
+                })
+                if (ok) setEditando(null)
+              }} disabled={!!actionSaving}>{actionSaving === 'edit' ? 'Salvando...' : 'Salvar'}</button>
             </div>
           </div>
         )}
       </Modal>
 
       {/* Finalizar */}
-      <Modal open={!!finalizando} onClose={()=>setFinalizando(null)} title={finalizando ? `Finalizar O.P ${finalizando.code}` : ''}>
+      <Modal open={!!finalizando} onClose={()=>{ if (!actionSavingRef.current) setFinalizando(null) }} title={finalizando ? `Finalizar O.P ${finalizando.code}` : ''} closeOnBackdrop={!actionSaving}>
         {finalizando && (
           <div className="grid">
             <div><div className="label">Finalizado por *</div><input className="input" value={confirmData.por} onChange={e=>setConfirmData(v=>({...v, por:e.target.value}))} placeholder="Nome do operador"/></div>
@@ -293,19 +320,22 @@ export default function GlobalModals({
             </div>
             <div className="sep"></div>
             <div className="flex" style={{justifyContent:'flex-end'}}>
-              <button className="btn ghost" onClick={()=>setFinalizando(null)}>Cancelar</button>
+              <button className="btn ghost" onClick={()=>setFinalizando(null)} disabled={!!actionSaving}>Cancelar</button>
               <button className="btn primary" onClick={async ()=>{
                 if(!confirmData.por || !confirmData.data || !confirmData.hora) return;
-                if (typeof onFinalize === 'function') await onFinalize(finalizando, confirmData)
-                setFinalizando(null)
-              }}>Confirmar</button>
+                const ok = await runModalAction('finalize', async () => {
+                  if (typeof onFinalize !== 'function') return true
+                  return await onFinalize(finalizando, confirmData)
+                })
+                if (ok) setFinalizando(null)
+              }} disabled={!!actionSaving}>{actionSaving === 'finalize' ? 'Confirmando...' : 'Confirmar'}</button>
             </div>
           </div>
         )}
       </Modal>
 
       {/* Início Produção */}
-      <Modal open={!!startModal} onClose={()=>setStartModal(null)} title={startModal ? `Iniciar Produção • ${startModal.ordem.machine_id} • O.P ${startModal.ordem.code}` : ''}>
+      <Modal open={!!startModal} onClose={()=>{ if (!actionSavingRef.current) setStartModal(null) }} title={startModal ? `Iniciar Produção • ${startModal.ordem.machine_id} • O.P ${startModal.ordem.code}` : ''} closeOnBackdrop={!actionSaving}>
         {startModal && (
           <div className="grid">
             <div><div className="label">Operador *</div><input className="input" value={startModal.operador} onChange={e=>setStartModal(v=>({...v, operador:e.target.value}))} placeholder="Nome do operador"/></div>
@@ -315,18 +345,21 @@ export default function GlobalModals({
             </div>
             <div className="sep"></div>
             <div className="flex" style={{justifyContent:'flex-end', gap:8}}>
-              <button className="btn ghost" onClick={()=>setStartModal(null)}>Cancelar</button>
+              <button className="btn ghost" onClick={()=>setStartModal(null)} disabled={!!actionSaving}>Cancelar</button>
               <button className="btn primary" onClick={async ()=>{
-                if (typeof onConfirmStart === 'function') await onConfirmStart(startModal)
-                setStartModal(null)
-              }}>Iniciar</button>
+                const ok = await runModalAction('start', async () => {
+                  if (typeof onConfirmStart !== 'function') return true
+                  return await onConfirmStart(startModal)
+                })
+                if (ok) setStartModal(null)
+              }} disabled={!!actionSaving}>{actionSaving === 'start' ? 'Iniciando...' : 'Iniciar'}</button>
             </div>
           </div>
         )}
       </Modal>
 
       {/* Parada */}
-      <Modal open={!!stopModal} onClose={()=>setStopModal(null)} title={stopModal ? `Parar máquina • ${stopModal.ordem.machine_id} • O.P ${stopModal.ordem.code}` : ''}>
+      <Modal open={!!stopModal} onClose={()=>{ if (!actionSavingRef.current) setStopModal(null) }} title={stopModal ? `Parar máquina • ${stopModal.ordem.machine_id} • O.P ${stopModal.ordem.code}` : ''} closeOnBackdrop={!actionSaving}>
         {stopModal && (
           <div className="grid">
             <div><div className="label">Operador *</div><input className="input" value={stopModal.operador} onChange={e=>setStopModal(v=>({...v, operador:e.target.value}))} placeholder="Nome do operador"/></div>
@@ -346,23 +379,26 @@ export default function GlobalModals({
             </div>
             <div className="sep"></div>
             <div className="flex" style={{justifyContent:'flex-end', gap:8}}>
-              <button className="btn ghost" onClick={()=>setStopModal(null)}>Cancelar</button>
+              <button className="btn ghost" onClick={()=>setStopModal(null)} disabled={!!actionSaving}>Cancelar</button>
               <button className="btn primary" onClick={async ()=>{
                 if (!String(stopModal.motivo || '').trim()) {
                   alert('Selecione o motivo da parada.')
                   return
                 }
                 const normalized = { ...stopModal, data: safeDate(stopModal.data), hora: safeTime(stopModal.hora) }
-                if (typeof onConfirmStop === 'function') await onConfirmStop(normalized)
-                setStopModal(null)
-              }}>Confirmar Parada</button>
+                const ok = await runModalAction('stop', async () => {
+                  if (typeof onConfirmStop !== 'function') return true
+                  return await onConfirmStop(normalized)
+                })
+                if (ok) setStopModal(null)
+              }} disabled={!!actionSaving}>{actionSaving === 'stop' ? 'Confirmando...' : 'Confirmar Parada'}</button>
             </div>
           </div>
         )}
       </Modal>
 
       {/* Retomada (de PARADA) */}
-      <Modal open={!!resumeModal} onClose={()=>setResumeModal(null)} title={resumeModal ? `Retomar produção • ${resumeModal.ordem.machine_id} • O.P ${resumeModal.ordem.code}` : ''}>
+      <Modal open={!!resumeModal} onClose={()=>{ if (!actionSavingRef.current) setResumeModal(null) }} title={resumeModal ? `Retomar produção • ${resumeModal.ordem.machine_id} • O.P ${resumeModal.ordem.code}` : ''} closeOnBackdrop={!actionSaving}>
         {resumeModal && (
           <div className="grid">
             <div><div className="label">Operador *</div><input className="input" value={resumeModal.operador} onChange={e=>setResumeModal(v=>({...v, operador:e.target.value}))} placeholder="Nome do operador"/></div>
@@ -372,18 +408,21 @@ export default function GlobalModals({
             </div>
             <div className="sep"></div>
             <div className="flex" style={{justifyContent:'flex-end', gap:8}}>
-              <button className="btn ghost" onClick={()=>setResumeModal(null)}>Cancelar</button>
+              <button className="btn ghost" onClick={()=>setResumeModal(null)} disabled={!!actionSaving}>Cancelar</button>
               <button className="btn primary" onClick={async ()=>{
-                if (typeof onConfirmResume === 'function') await onConfirmResume(resumeModal)
-                setResumeModal(null)
-              }}>Confirmar Retomada</button>
+                const ok = await runModalAction('resume', async () => {
+                  if (typeof onConfirmResume !== 'function') return true
+                  return await onConfirmResume(resumeModal)
+                })
+                if (ok) setResumeModal(null)
+              }} disabled={!!actionSaving}>{actionSaving === 'resume' ? 'Confirmando...' : 'Confirmar Retomada'}</button>
             </div>
           </div>
         )}
       </Modal>
 
       {/* Baixa Eficiência — INÍCIO */}
-      <Modal open={!!lowEffModal} onClose={()=>setLowEffModal(null)} title={lowEffModal ? `Baixa eficiência • ${lowEffModal.ordem.machine_id} • O.P ${lowEffModal.ordem.code}` : ''}>
+      <Modal open={!!lowEffModal} onClose={()=>{ if (!actionSavingRef.current) setLowEffModal(null) }} title={lowEffModal ? `Baixa eficiência • ${lowEffModal.ordem.machine_id} • O.P ${lowEffModal.ordem.code}` : ''} closeOnBackdrop={!actionSaving}>
         {lowEffModal && (
           <div className="grid">
             <div>
@@ -400,18 +439,21 @@ export default function GlobalModals({
             </div>
             <div className="sep"></div>
             <div className="flex" style={{justifyContent:'flex-end', gap:8}}>
-              <button className="btn ghost" onClick={()=>setLowEffModal(null)}>Cancelar</button>
+              <button className="btn ghost" onClick={()=>setLowEffModal(null)} disabled={!!actionSaving}>Cancelar</button>
               <button className="btn primary" onClick={async ()=>{
-                if (typeof onConfirmLowEffStart === 'function') await onConfirmLowEffStart(lowEffModal)
-                setLowEffModal(null)
-              }}>Confirmar</button>
+                const ok = await runModalAction('low-eff-start', async () => {
+                  if (typeof onConfirmLowEffStart !== 'function') return true
+                  return await onConfirmLowEffStart(lowEffModal)
+                })
+                if (ok) setLowEffModal(null)
+              }} disabled={!!actionSaving}>{actionSaving === 'low-eff-start' ? 'Confirmando...' : 'Confirmar'}</button>
             </div>
           </div>
         )}
       </Modal>
 
       {/* Encerrar Baixa Eficiência */}
-      <Modal open={!!lowEffEndModal} onClose={()=>setLowEffEndModal(null)} title={lowEffEndModal ? `Encerrar baixa eficiência • ${lowEffEndModal.ordem.machine_id} • O.P ${lowEffEndModal.ordem.code}` : ''}>
+      <Modal open={!!lowEffEndModal} onClose={()=>{ if (!actionSavingRef.current) setLowEffEndModal(null) }} title={lowEffEndModal ? `Encerrar baixa eficiência • ${lowEffEndModal.ordem.machine_id} • O.P ${lowEffEndModal.ordem.code}` : ''} closeOnBackdrop={!actionSaving}>
         {lowEffEndModal && (
           <div className="grid">
             <div className="grid2">
@@ -421,17 +463,20 @@ export default function GlobalModals({
             <div className="muted" style={{marginTop:6}}>As observações de baixa eficiência serão limpas ao confirmar.</div>
             <div className="sep"></div>
             <div className="flex" style={{justifyContent:'flex-end', gap:8}}>
-              <button className="btn ghost" onClick={()=>setLowEffEndModal(null)}>Cancelar</button>
+              <button className="btn ghost" onClick={()=>setLowEffEndModal(null)} disabled={!!actionSaving}>Cancelar</button>
               <button className="btn primary" onClick={async ()=>{
-                if (typeof onConfirmLowEffEnd === 'function') await onConfirmLowEffEnd(lowEffEndModal)
-                setLowEffEndModal(null)
-              }}>Confirmar</button>
+                const ok = await runModalAction('low-eff-end', async () => {
+                  if (typeof onConfirmLowEffEnd !== 'function') return true
+                  return await onConfirmLowEffEnd(lowEffEndModal)
+                })
+                if (ok) setLowEffEndModal(null)
+              }} disabled={!!actionSaving}>{actionSaving === 'low-eff-end' ? 'Confirmando...' : 'Confirmar'}</button>
             </div>
           </div>
         )}
       </Modal>
 
-      <Modal open={!!manualProductionModalOpen} onClose={() => setManualProductionModalOpen(false)} title="Apontar Produção Manual">
+      <Modal open={!!manualProductionModalOpen} onClose={() => { if (!manualSavingRef.current) setManualProductionModalOpen(false) }} title="Apontar Produção Manual" closeOnBackdrop={!manualSaving}>
         <div className="grid2" style={{ gap: 12 }}>
           <label className="label">
             Data

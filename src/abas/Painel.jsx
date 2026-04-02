@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from "react";
 import Etiqueta from "../components/Etiqueta";
 import { MAQUINAS, STATUS } from "../lib/constants";
-import { statusClass, jaIniciou } from "../lib/utils";
+import { fmtElapsedSince, getProductionStartedAt, statusClass } from "../lib/utils";
 import "../styles/Barrademeta.css";
 import { DateTime } from "luxon";
 import { supabase } from "../lib/supabaseClient";
@@ -21,15 +21,6 @@ function extractItemCodeFromOrderProduct(product) {
   if (!product) return null;
   const t = String(product);
   return t.split("-")[0]?.trim() || null;
-}
-
-// Helper para formatar HH:MM:SS
-function formatHHMMSS(totalSeconds) {
-  const s = Math.max(0, Math.floor(totalSeconds || 0));
-  const hh = String(Math.floor(s / 3600)).padStart(2, "0");
-  const mm = String(Math.floor((s % 3600) / 60)).padStart(2, "0");
-  const ss = String(s % 60).padStart(2, "0");
-  return `${hh}:${mm}:${ss}`;
 }
 
 export default function Painel({
@@ -367,22 +358,20 @@ export default function Painel({
             ? paradas.find((p) => p.order_id === String(ativa.id) && !p.resumed_at)
             : null;
 
-          const sinceMs = openStop ? new Date(openStop.started_at).getTime() : null;
-
-          const durText = sinceMs
-            ? (() => {
-                const total = Math.max(0, Math.floor((currentTimeMs - sinceMs) / 1000));
-                return formatHHMMSS(total);
-              })()
+          const durText = openStop?.started_at
+            ? fmtElapsedSince(openStop.started_at, currentTimeMs)
             : null;
+
+          const produzindoText =
+            ativa?.status === "PRODUZINDO"
+              ? fmtElapsedSince(getProductionStartedAt(ativa), currentTimeMs)
+              : null;
 
           // Timer de baixa eficiência usando started_at do log aberto
           const lowEffText =
             ativa?.status === "BAIXA_EFICIENCIA" && ativa?.loweff_started_at
               ? (() => {
-                  const secs =
-                    (currentTimeMs - new Date(ativa.loweff_started_at).getTime()) / 1000;
-                  return formatHHMMSS(secs);
+                  return fmtElapsedSince(ativa.loweff_started_at, currentTimeMs);
                 })()
               : null;
 
@@ -392,9 +381,7 @@ export default function Painel({
           if (!ativa || ativa.status === "AGUARDANDO") {
             const lastFinISO = lastFinalizadoPorMaquina?.[m] || null;
             if (lastFinISO) {
-              const since = new Date(lastFinISO).getTime();
-              const total = Math.max(0, Math.floor((currentTimeMs - since) / 1000));
-              semProgText = formatHHMMSS(total);
+              semProgText = fmtElapsedSince(lastFinISO, currentTimeMs);
             }
           }
 
@@ -424,6 +411,10 @@ export default function Painel({
 
                   {ativa?.status === "PARADA" && durText && (
                     <span className="parada-timer">{durText}</span>
+                  )}
+
+                  {produzindoText && (
+                    <span className="produzindo-timer">{produzindoText}</span>
                   )}
 
                   {lowEffText && (

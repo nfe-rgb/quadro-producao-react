@@ -93,5 +93,6 @@
   .fila .card{ min-width: 220px; }
 
   /* cronômetro no painel menor */
+  .produzindo-timer{ font-size: 13px; }
   .parada-timer{ font-size: 13px; }
 }

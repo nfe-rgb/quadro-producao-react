@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ensureAnonymousSession, SUPABASE_CACHE_SCOPE, supabase } from '../lib/supabaseClient'
 import { MAQUINAS, MOTIVOS_PARADA } from '../lib/constants'
-import { localDateTimeToISO, jaIniciou } from '../lib/utils'
+import { localDateTimeToISO } from '../lib/utils'
 import {
   buildRegistroGroups,
   deriveRuntimeOrders,
@@ -54,7 +54,9 @@ const ORDERS_CACHE_KEY = `cached_production_orders_v1:${SUPABASE_CACHE_SCOPE}`;
 function saveOrdersToCache(orders) {
   try {
     localStorage.setItem(ORDERS_CACHE_KEY, JSON.stringify(orders));
-  } catch {}
+  } catch {
+    return
+  }
 }
 
 function loadOrdersFromCache() {
@@ -80,6 +82,8 @@ export default function useOrders() {
   const runtimeFallbackWarnedRef = useRef(false)
   const runtimeErrorFallbackWarnedRef = useRef(false)
   const sessionsFallbackWarnedRef = useRef(false)
+  const runtimeRefreshPromiseRef = useRef(null)
+  const runtimeRefreshQueuedRef = useRef(false)
 
   // Reduzido para buscar apenas o campo necessário
   const fetchScanCounts = useCallback(async (orderIds) => {
@@ -231,11 +235,17 @@ export default function useOrders() {
       console.warn('Falha ao carregar ordens finalizadas do runtime:', finalizedRes.error)
     }
 
-    const baseSnapshot = await fetchOrdersBaseSnapshot()
-    const baseOpenRows = baseSnapshot?.openRes?.data || []
-    const baseFinalizedRows = baseSnapshot?.finalizedRes?.data || []
     const runtimeOpenRows = openRes?.data || []
     const runtimeFinalizedRows = finalizedRes?.data || []
+    let baseSnapshot = null
+    let baseOpenRows = []
+    let baseFinalizedRows = []
+
+    if (shouldDeriveRuntime || (!runtimeViewMissing && !runtimeViewErrored && runtimeOpenRows.length === 0)) {
+      baseSnapshot = await fetchOrdersBaseSnapshot()
+      baseOpenRows = baseSnapshot?.openRes?.data || []
+      baseFinalizedRows = baseSnapshot?.finalizedRes?.data || []
+    }
 
     const runtimeLooksIncomplete = !runtimeViewMissing
       && !runtimeViewErrored
@@ -344,6 +354,28 @@ export default function useOrders() {
     setLowEffLogs(mapLowEffLogsForUi(lowEffRes.data || []))
   }, [fetchOrdersBaseSnapshot, fetchScanCounts])
 
+  const scheduleRuntimeRefresh = useCallback(() => {
+    if (runtimeRefreshPromiseRef.current) {
+      runtimeRefreshQueuedRef.current = true
+      return runtimeRefreshPromiseRef.current
+    }
+
+    const refreshPromise = fetchRuntimeSnapshot()
+      .catch((error) => {
+        console.warn('Falha ao atualizar runtime em segundo plano:', error)
+      })
+      .finally(() => {
+        runtimeRefreshPromiseRef.current = null
+        if (runtimeRefreshQueuedRef.current) {
+          runtimeRefreshQueuedRef.current = false
+          scheduleRuntimeRefresh()
+        }
+      })
+
+    runtimeRefreshPromiseRef.current = refreshPromise
+    return refreshPromise
+  }, [fetchRuntimeSnapshot])
+
   async function fetchOrdensAbertas() {
     await fetchRuntimeSnapshot()
   }
@@ -374,7 +406,7 @@ export default function useOrders() {
       supabase
         .channel(`production-runtime-${tableName}`)
         .on('postgres_changes', { event: '*', schema: 'public', table: tableName }, () => {
-          fetchRuntimeSnapshot()
+          scheduleRuntimeRefresh()
         })
         .subscribe()
     ))
@@ -407,7 +439,7 @@ export default function useOrders() {
         console.warn('Falha ao remover canal de scans realtime:', error)
       }
     }
-  }, [fetchRuntimeSnapshot])
+  }, [fetchRuntimeSnapshot, scheduleRuntimeRefresh])
 
   const ativosPorMaquina = useMemo(() => {
     const map = Object.fromEntries(MAQUINAS.map((machineId) => [machineId, []]))
@@ -440,7 +472,7 @@ export default function useOrders() {
   const registroGrupos = useMemo(() => buildRegistroGroups([...ordens, ...finalizadas], sessions, paradas, lowEffLogs), [ordens, finalizadas, sessions, paradas, lowEffLogs])
 
   async function criarOrdem(form, setForm, setTab) {
-    if (!form.code.trim()) return
+    if (!form.code.trim()) return false
 
     const { data: last, error: lastError } = await supabase
       .from('orders')
@@ -453,7 +485,7 @@ export default function useOrders() {
 
     if (lastError) {
       alert('Erro ao obter posição: ' + lastError.message)
-      return
+      return false
     }
 
     const nextPos = (last?.pos ?? -1) + 1
@@ -476,18 +508,19 @@ export default function useOrders() {
     const { error } = await supabase.from('orders').insert([novo])
     if (error) {
       alert('Erro ao criar ordem: ' + error.message)
-      return
+      return false
     }
 
-    await fetchRuntimeSnapshot()
     setForm({ code: '', customer: '', product: '', color: '', qty: '', boxes: '', standard: '', due_date: '', notes: '', machine_id: 'P1' })
     setTab('painel')
+    void scheduleRuntimeRefresh()
+    return true
   }
 
   async function atualizar(ordemParcial) {
     const before = ordens.find((order) => String(order.id) === String(ordemParcial.id))
       || finalizadas.find((order) => String(order.id) === String(ordemParcial.id))
-    if (!before) return
+    if (!before) return false
 
     if (before.machine_id !== ordemParcial.machine_id) {
       const moveRes = await supabase.rpc('production_move_order_machine', {
@@ -500,7 +533,7 @@ export default function useOrders() {
 
       if (moveRes.error) {
         alert('Erro ao mover ordem de máquina: ' + moveRes.error.message)
-        return
+        return false
       }
     }
 
@@ -521,10 +554,11 @@ export default function useOrders() {
     const { error } = await supabase.from('orders').update(payload).eq('id', ordemParcial.id)
     if (error) {
       alert('Erro ao atualizar: ' + error.message)
-      return
+      return false
     }
 
-    await fetchRuntimeSnapshot()
+    void scheduleRuntimeRefresh()
+    return true
   }
 
   async function finalizar(ordem, payload) {
@@ -538,10 +572,11 @@ export default function useOrders() {
 
     if (error) {
       alert('Erro ao finalizar: ' + error.message)
-      return
+      return false
     }
 
-    await fetchRuntimeSnapshot()
+    void scheduleRuntimeRefresh()
+    return true
   }
 
   async function enviarParaFila(ordemAtiva, opts) {
@@ -556,7 +591,7 @@ export default function useOrders() {
 
     if (!activeOrder || !promotedOrder) {
       alert('Não há itens suficientes na fila para promover.')
-      return
+      return false
     }
 
     const effectiveAt = opts?.data && opts?.hora
@@ -573,16 +608,17 @@ export default function useOrders() {
 
     if (error) {
       alert('Erro ao enviar ordem para a fila: ' + error.message)
-      return
+      return false
     }
 
-    await fetchRuntimeSnapshot()
+    void scheduleRuntimeRefresh()
+    return true
   }
 
   async function confirmarInicio({ ordem, operador, data, hora }) {
     if (!operador || !data || !hora) {
       alert('Preencha operador, data e hora.')
-      return
+      return false
     }
 
     await ensureAnonymousSession()
@@ -595,10 +631,11 @@ export default function useOrders() {
 
     if (error) {
       alert('Erro ao iniciar: ' + error.message)
-      return
+      return false
     }
 
-    await fetchRuntimeSnapshot()
+    void scheduleRuntimeRefresh()
+    return true
   }
 
   async function validarSobreposicaoParada({ machineId }) {
@@ -612,22 +649,22 @@ export default function useOrders() {
   async function confirmarParada({ ordem, operador, motivo, obs, data, hora, skipValidation = false }) {
     if (!operador || !data || !hora) {
       alert('Preencha operador, data e hora.')
-      return
+      return false
     }
     if (!String(motivo || '').trim()) {
       alert('Selecione o motivo da parada.')
-      return
+      return false
     }
 
     if (!skipValidation && !hasActiveSession(ordem)) {
       alert('Esta ordem está sem sessão ativa. Regularize iniciando a produção novamente antes de registrar a parada.')
-      return
+      return false
     }
 
     const overlapMsg = skipValidation ? null : await validarSobreposicaoParada({ machineId: ordem.machine_id })
     if (overlapMsg) {
       alert(overlapMsg)
-      return
+      return false
     }
 
     await ensureAnonymousSession()
@@ -641,21 +678,22 @@ export default function useOrders() {
 
     if (error) {
       alert('Erro ao registrar parada: ' + error.message)
-      return
+      return false
     }
 
-    await fetchRuntimeSnapshot()
+    void scheduleRuntimeRefresh()
+    return true
   }
 
   async function confirmarRetomada({ ordem, operador, data, hora, targetStatus, skipValidation = false }) {
     if (!operador || !data || !hora) {
       alert('Preencha operador, data e hora.')
-      return
+      return false
     }
 
     if (!skipValidation && !hasActiveSession(ordem)) {
       alert('Esta ordem está sem sessão ativa. Regularize iniciando a produção novamente antes de retomar.')
-      return
+      return false
     }
 
     await ensureAnonymousSession()
@@ -668,21 +706,22 @@ export default function useOrders() {
 
     if (error) {
       alert('Erro ao retomar produção: ' + error.message)
-      return
+      return false
     }
 
-    await fetchRuntimeSnapshot()
+    void scheduleRuntimeRefresh()
+    return true
   }
 
   async function confirmarBaixaEf({ ordem, operador, data, hora, obs, skipValidation = false }) {
     if (!operador || !data || !hora) {
       alert('Preencha operador, data e hora.')
-      return
+      return false
     }
 
     if (!skipValidation && !hasActiveSession(ordem)) {
       alert('Esta ordem está sem sessão ativa. Regularize iniciando a produção novamente antes de registrar baixa eficiência.')
-      return
+      return false
     }
 
     await ensureAnonymousSession()
@@ -696,16 +735,17 @@ export default function useOrders() {
 
     if (error) {
       alert('Erro ao registrar baixa eficiência: ' + error.message)
-      return
+      return false
     }
 
-    await fetchRuntimeSnapshot()
+    void scheduleRuntimeRefresh()
+    return true
   }
 
   async function confirmarEncerrarBaixaEf({ ordem, targetStatus, data, hora }) {
     if (!data || !hora) {
       alert('Preencha data e hora.')
-      return
+      return false
     }
 
     await ensureAnonymousSession()
@@ -718,10 +758,11 @@ export default function useOrders() {
 
     if (error) {
       alert('Erro ao encerrar baixa eficiência: ' + error.message)
-      return
+      return false
     }
 
-    await fetchRuntimeSnapshot()
+    void scheduleRuntimeRefresh()
+    return true
   }
 
   const onStatusChange = async (ordem, targetStatus, options = {}) => {

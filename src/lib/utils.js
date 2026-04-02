@@ -26,6 +26,25 @@ export function fmtDateTime(ts) {
   } catch { return ts }
 }
 
+export function formatHHMMSS(totalSeconds) {
+  const sec = Math.max(0, Math.floor(totalSeconds || 0))
+  const h = String(Math.floor(sec / 3600)).padStart(2, '0')
+  const m = String(Math.floor((sec % 3600) / 60)).padStart(2, '0')
+  const s = String(sec % 60).padStart(2, '0')
+  return `${h}:${m}:${s}`
+}
+
+export function fmtElapsedSince(startIso, currentTimeMs = Date.now()) {
+  if (!startIso) return null
+  const startMs = new Date(startIso).getTime()
+  if (!Number.isFinite(startMs)) return null
+  return formatHHMMSS(Math.floor((currentTimeMs - startMs) / 1000))
+}
+
+export function getProductionStartedAt(ordem) {
+  return ordem?.active_session_started_at || ordem?.restarted_at || ordem?.started_at || null
+}
+
 // Converte data/hora local digitada -> ISO UTC
 export function localDateTimeToISO(dateStr, timeStr) {
   const [Y, M, D] = String(dateStr).split('-').map(Number);
@@ -45,8 +64,5 @@ export function jaIniciou(ordem) { return Boolean(ordem?.started_at) }
 export function fmtDuracao(startIso, endIso){
   if(!startIso || !endIso) return '-'
   const sec = Math.max(0, Math.floor((new Date(endIso) - new Date(startIso))/1000))
-  const h = String(Math.floor(sec/3600)).padStart(2,'0')
-  const m = String(Math.floor((sec%3600)/60)).padStart(2,'0')
-  const s = String(sec%60).padStart(2,'0')
-  return `${h}:${m}:${s}`
+  return formatHHMMSS(sec)
 }

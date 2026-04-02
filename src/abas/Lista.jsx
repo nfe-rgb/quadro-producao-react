@@ -1,12 +1,12 @@
 // src/abas/Lista.jsx
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { DndContext, DragOverlay, closestCenter } from '@dnd-kit/core'
 import { SortableContext, horizontalListSortingStrategy } from '@dnd-kit/sortable'
 import FilaSortableItem from '../components/FilaSortableItem'
 import Etiqueta from '../components/Etiqueta'
 import Modal from '../components/Modal'
 import { MAQUINAS, STATUS } from '../lib/constants'
-import { statusClass, jaIniciou } from '../lib/utils'
+import { statusClass } from '../lib/utils'
 import { supabase } from '../lib/supabaseClient.js' // ✅ ESM correto
 import { DateTime } from 'luxon';
 
@@ -26,6 +26,8 @@ export default function Lista({
 
   // 🔶 Modal de confirmação "Enviar para fila / interromper"
   const [confirmInt, setConfirmInt] = useState(null)
+  const [confirmIntSaving, setConfirmIntSaving] = useState(false)
+  const confirmIntSavingRef = useRef(false)
   // confirmInt = { ordem, operador, data, hora }
 
   const toNumber = (value) => {
@@ -111,11 +113,18 @@ export default function Lista({
   }
 
   const confirmarInterromper = async () => {
+    if (confirmIntSavingRef.current) return
+
     const { ordem, operador, data, hora } = confirmInt || {}
     if (!operador || !data || !hora) { alert('Preencha operador, data e hora.'); return }
+
+    confirmIntSavingRef.current = true
+    setConfirmIntSaving(true)
     try {
       // 🔁 chama a função do App já com operador/data/hora
-      await enviarParaFila(ordem, { operador, data, hora })
+      const ok = await enviarParaFila(ordem, { operador, data, hora })
+      if (!ok) return
+
       setConfirmInt(null)
       if (typeof refreshOrdens === 'function') {
         setTimeout(() => refreshOrdens(), 400)
@@ -123,6 +132,9 @@ export default function Lista({
     } catch (e) {
       console.error(e)
       alert('Falha ao interromper/mandar para fila.')
+    } finally {
+      confirmIntSavingRef.current = false
+      setConfirmIntSaving(false)
     }
   }
 
@@ -211,8 +223,8 @@ export default function Lista({
                     <Etiqueta
                       o={ativa}
                       variant="painel"
-                      lidasCaixas={["P1","P2","P3"].includes(m) ? lidas : undefined}
-                      saldoCaixas={["P1","P2","P3"].includes(m) ? saldo : undefined}
+                      lidasCaixas={["P1","P2","P3","P4"].includes(m) ? lidas : undefined}
+                      saldoCaixas={["P1","P2","P3","P4"].includes(m) ? saldo : undefined}
                     />
                     {previsaoFim && (
                       <div className="small" style={{ marginTop: 8 }}>
@@ -268,7 +280,7 @@ export default function Lista({
                                 data: nowBr.toISODate(), 
                                 hora: nowBr.toFormat("HH:mm"),
                               })
-                            }}>{Boolean(ativa && String(ativa.status || '').toUpperCase() !== 'AGUARDANDO' && !ativa.active_session_id) ? 'Regularizar Produção' : 'Iniciar Produção'}</button>
+                            }}>{ativa && String(ativa.status || '').toUpperCase() !== 'AGUARDANDO' && !ativa.active_session_id ? 'Regularizar Produção' : 'Iniciar Produção'}</button>
                             {isAdmin && (
                               <button className="btn" onClick={() => setEditando(ativa)}>Editar</button>
                             )}
@@ -370,30 +382,34 @@ export default function Lista({
       {/* 🔶 Modal de confirmação de interrupção */}
       <Modal
         open={!!confirmInt}
-        onClose={() => setConfirmInt(null)}
+        onClose={() => { if (!confirmIntSavingRef.current) setConfirmInt(null) }}
         title={confirmInt ? `Tem certeza que deseja interromper a produção?` : ''}
+        closeOnBackdrop={!confirmIntSaving}
       >
         {confirmInt && (
           <div className="grid">
             <div><div className="label">Operador *</div>
               <input className="input" value={confirmInt.operador}
+                     disabled={confirmIntSaving}
                      onChange={e=>setConfirmInt(v=>({...v, operador:e.target.value}))}
                      placeholder="Nome do operador"/>
             </div>
             <div className="grid2">
               <div><div className="label">Data *</div>
                 <input type="date" className="input" value={confirmInt.data}
+                       disabled={confirmIntSaving}
                        onChange={e=>setConfirmInt(v=>({...v, data:e.target.value}))}/>
               </div>
               <div><div className="label">Hora *</div>
                 <input type="time" className="input" value={confirmInt.hora}
+                       disabled={confirmIntSaving}
                        onChange={e=>setConfirmInt(v=>({...v, hora:e.target.value}))}/>
               </div>
             </div>
             <div className="sep"></div>
             <div className="flex" style={{justifyContent:'flex-end', gap:8}}>
-              <button className="btn ghost" onClick={()=>setConfirmInt(null)}>Cancelar</button>
-              <button className="btn primary" onClick={confirmarInterromper}>Confirmar</button>
+              <button className="btn ghost" onClick={()=>setConfirmInt(null)} disabled={confirmIntSaving}>Cancelar</button>
+              <button className="btn primary" onClick={confirmarInterromper} disabled={confirmIntSaving}>{confirmIntSaving ? 'Confirmando...' : 'Confirmar'}</button>
             </div>
           </div>
         )}

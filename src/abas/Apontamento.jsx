@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo, useCallback } from 'react';
+import { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import { DateTime } from 'luxon';
 import { supabase } from '../lib/supabaseClient';
 import { MAQUINAS, REFUGO_MOTIVOS, TURNOS } from '../lib/constants';
@@ -40,6 +40,8 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false }) {
     goodQty: '',
     scrapEntries: [{ qty: '', reason: '' }],
   });
+  const [manualSaving, setManualSaving] = useState(false);
+  const manualSavingRef = useRef(false);
 
   // Helpers locais para fatiar paradas por turno (clipping por turno)
   function getTurnoIntervalsDiaLocal(date) {
@@ -1034,7 +1036,7 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false }) {
             </div>
           </div>
         {/* Modal de Apontamento Manual */}
-        <Modal open={manualOpen} onClose={() => setManualOpen(false)} title="Apontar Produção Manual">
+        <Modal open={manualOpen} onClose={() => { if (!manualSavingRef.current) setManualOpen(false); }} title="Apontar Produção Manual" closeOnBackdrop={!manualSaving}>
           <div className="grid2" style={{ gap: 12 }}>
             <label className="label">
               Data
@@ -1157,10 +1159,12 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false }) {
           </div>
 
           <div className="flex" style={{ justifyContent: 'flex-end', gap: 8, marginTop: 12 }}>
-            <button className="btn" onClick={() => setManualOpen(false)}>Cancelar</button>
+            <button className="btn" onClick={() => setManualOpen(false)} disabled={manualSaving}>Cancelar</button>
             <button
               className="btn"
               onClick={async () => {
+                if (manualSavingRef.current) return;
+
                 const payload = {
                   date: manualForm.date,
                   machine: manualForm.machine,
@@ -1171,6 +1175,8 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false }) {
                     .map((e) => ({ qty: Number(e.qty || 0), reason: (e.reason || '').trim() }))
                     .filter((e) => e.qty > 0 && e.reason.length > 0),
                 };
+                manualSavingRef.current = true;
+                setManualSaving(true);
                 try {
                   if (!payload.date || !payload.machine || !payload.turno || !payload.osCode) {
                     showToast('Preencha Data, Máquina, Turno e O.S.', 'err');
@@ -1253,16 +1259,19 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false }) {
                     goodQty: '',
                     scrapEntries: [{ qty: '', reason: '' }],
                   });
-                  // reconsulta para refletir números sem F5
-                  await refetchData();
                   showToast('Apontamento registrado.', 'ok');
+                  void refetchData();
                 } catch (err) {
                   console.warn('Falha ao registrar apontamento manual', err);
                   showToast('Falha ao registrar apontamento.', 'err');
+                } finally {
+                  manualSavingRef.current = false;
+                  setManualSaving(false);
                 }
               }}
+              disabled={manualSaving}
             >
-              Registrar
+              {manualSaving ? 'Registrando...' : 'Registrar'}
             </button>
           </div>
         </Modal>

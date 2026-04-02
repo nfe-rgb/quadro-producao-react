@@ -24,7 +24,7 @@ import useOrders from './hooks/useOrders'
 import useAuthAdmin from './hooks/useAuthAdmin'
 import GlobalModals from './components/GlobalModals'
 import { DateTime } from 'luxon';
-import { supabase } from './lib/supabaseClient'
+import { ensureAnonymousSession, supabase } from './lib/supabaseClient'
 
 
 export default function App(){
@@ -52,6 +52,12 @@ export default function App(){
   const [tick, setTick] = useState(0)
   // ATENÇÃO: Este polling global roda a cada 1s. Para produção, aumente para 10s ou mais se possível para reduzir consumo de saída.
   useEffect(()=>{ const id=setInterval(()=>setTick(t=>t+1),10000); return ()=>clearInterval(id) },[])
+
+  useEffect(() => {
+    ensureAnonymousSession().catch((error) => {
+      console.warn('Falha ao pré-aquecer sessão do Supabase:', error)
+    })
+  }, [])
 
   const [openSet, setOpenSet] = useState(()=>new Set())
   function toggleOpen(id){ setOpenSet(prev=>{ const n=new Set(prev); if(n.has(id)) n.delete(id); else n.add(id); return n }) }
