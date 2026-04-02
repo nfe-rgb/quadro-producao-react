@@ -365,14 +365,14 @@ export default function useOrders() {
       relevantIds.length
         ? supabase
             .from('machine_stops')
-            .select('id, order_id, machine_id, started_at, resumed_at, reason, notes')
+            .select('id, order_id, machine_id, session_id, started_at, resumed_at, reason, notes')
             .in('order_id', relevantIds)
             .order('started_at', { ascending: false })
         : Promise.resolve({ data: [], error: null }),
       relevantIds.length
         ? supabase
             .from('low_efficiency_logs')
-            .select('id, order_id, machine_id, started_at, ended_at, reason, notes')
+            .select('id, order_id, machine_id, session_id, started_at, ended_at, reason, notes')
             .in('order_id', relevantIds)
             .order('started_at', { ascending: false })
         : Promise.resolve({ data: [], error: null }),

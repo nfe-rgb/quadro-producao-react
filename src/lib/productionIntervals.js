@@ -102,7 +102,8 @@ export function mapRecordsToIntervals(records, {
   return records
     .map((record) => {
       const startMs = toTimestamp(record?.[startKey]);
-      const endMs = toTimestamp(record?.[endKey]) ?? endFallback;
+      const endKeys = Array.isArray(endKey) ? endKey : [endKey];
+      const endMs = endKeys.reduce((resolved, key) => resolved ?? toTimestamp(record?.[key]), null) ?? endFallback;
       if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) return null;
       return clampInterval(startMs, endMs, rangeStartMs, rangeEndMs);
     })
@@ -171,7 +172,7 @@ export function calculateMachinePeriodMetrics({
       groups.flatMap((group) => mapRecordsToIntervals(group?.stops || [], {
         rangeStartMs,
         rangeEndMs,
-        endKey: 'ended_at',
+        endKey: ['ended_at', 'resumed_at', 'stopped_at'],
         fallbackEndMs: clampNowMs,
       }))
     );

@@ -570,32 +570,25 @@ export default function RastreioResumoPeriodo() {
         const stopInsideSession = intersectIntervals(mergedStopIntervals, sessionIntervals)
         const lowEffInsideSession = intersectIntervals(mergedLowEffIntervals, sessionIntervals)
         const effectiveStopIntervals = subtractIntervals(stopInsideSession, lowEffInsideSession)
-        const effectiveLowEffIntervals = subtractIntervals(lowEffInsideSession, stopInsideSession)
-        const runtimeIntervals = subtractIntervals(
-          sessionIntervals,
-          mergeIntervals([...effectiveStopIntervals, ...effectiveLowEffIntervals])
-        )
+        const runtimeIntervals = subtractIntervals(sessionIntervals, effectiveStopIntervals)
         idealPieces += (sumIntervals(runtimeIntervals) / 1000 / 60 / 60) * piecesPerHour
       }
 
       const actualPieces = goodPieces + scrapPieces
       const loadedMs = sumIntervals(loadedIntervals)
-      const stopIntervals = subtractIntervals(
-        intersectIntervals(mergedStopIntervals, loadedIntervals),
-        intersectIntervals(mergedLowEffIntervals, loadedIntervals)
-      )
+      const stopIntervals = intersectIntervals(mergedStopIntervals, loadedIntervals)
       const lowEffIntervals = subtractIntervals(
         intersectIntervals(mergedLowEffIntervals, loadedIntervals),
-        intersectIntervals(mergedStopIntervals, loadedIntervals)
+        stopIntervals
       )
       const stopMs = sumIntervals(stopIntervals)
       const lowEffMs = sumIntervals(lowEffIntervals)
-      const productiveIntervals = subtractIntervals(loadedIntervals, mergeIntervals([...stopIntervals, ...lowEffIntervals]))
+      const productiveIntervals = subtractIntervals(loadedIntervals, stopIntervals)
       const runtimeMs = sumIntervals(productiveIntervals)
       const firstProductionAt = productiveIntervals.length
         ? new Date(productiveIntervals[0][0]).toISOString()
         : (loadedIntervals.length ? new Date(loadedIntervals[0][0]).toISOString() : null)
-      const availability = loadedMs > 0 ? Math.max(0, (loadedMs - stopMs - lowEffMs) / loadedMs) : null
+      const availability = loadedMs > 0 ? Math.max(0, (loadedMs - stopMs) / loadedMs) : null
       const performance = idealPieces > 0 ? Math.max(0, actualPieces / idealPieces) : null
       const quality = actualPieces > 0 ? Math.max(0, goodPieces / actualPieces) : 1
       const oee = availability != null && performance != null
