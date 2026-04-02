@@ -15,6 +15,7 @@ export default function NovaOrdem({ form, setForm, criarOrdem, setTab }) {
   const [checkingItemCode, setCheckingItemCode] = useState(false)
   const [creatingOrder, setCreatingOrder] = useState(false)
   const [missingItemModal, setMissingItemModal] = useState({ open: false, code: '' })
+  const [duplicateOrderModal, setDuplicateOrderModal] = useState({ open: false, code: '', matches: [], pendingForm: null, busy: false })
   const debRef = useRef(null)
   const listRef = useRef(null)
   const creatingOrderRef = useRef(false)
@@ -117,23 +118,77 @@ export default function NovaOrdem({ form, setForm, criarOrdem, setTab }) {
     }
   }
 
+  function closeDuplicateOrderModal() {
+    if (duplicateOrderModal.busy) return
+    setDuplicateOrderModal({ open: false, code: '', matches: [], pendingForm: null, busy: false })
+  }
+
+  async function confirmDuplicateOrderCreation() {
+    const pendingForm = duplicateOrderModal.pendingForm
+    if (!pendingForm || creatingOrderRef.current) return
+
+    setDuplicateOrderModal(prev => ({ ...prev, busy: true }))
+    const created = await submitCreateOrder(pendingForm)
+    if (created) {
+      setDuplicateOrderModal({ open: false, code: '', matches: [], pendingForm: null, busy: false })
+      return
+    }
+
+    setDuplicateOrderModal(prev => ({ ...prev, busy: false }))
+  }
+
+  async function validateDuplicateOrder(nextForm) {
+    const normalizedCode = String(nextForm?.code || '').trim()
+    if (!normalizedCode) return false
+
+    const { data, error } = await supabase
+      .from('orders')
+      .select('id, code, machine_id, status, finalized, created_at')
+      .eq('code', normalizedCode)
+      .order('created_at', { ascending: false })
+      .limit(5)
+
+    if (error) {
+      alert('Não foi possível validar o número da O.P.: ' + error.message)
+      return false
+    }
+
+    if (!data?.length) {
+      return await submitCreateOrder(nextForm)
+    }
+
+    setDuplicateOrderModal({
+      open: true,
+      code: normalizedCode,
+      matches: data,
+      pendingForm: nextForm,
+      busy: false,
+    })
+    return false
+  }
+
   async function handleCreateOrder() {
     if (creatingOrderRef.current) return
 
+    const baseForm = {
+      ...form,
+      code: String(form.code || '').trim(),
+    }
+
     const term = String(qProd || '').trim()
     if (!term) {
-      await submitCreateOrder(form)
+      await validateDuplicateOrder(baseForm)
       return
     }
 
     if (pickedItem && isExactProductMatch(term, pickedItem)) {
-      await submitCreateOrder(form)
+      await validateDuplicateOrder(baseForm)
       return
     }
 
     const codeGuess = term.split('-')[0]?.trim()
     if (!codeGuess) {
-      await submitCreateOrder(form)
+      await validateDuplicateOrder(baseForm)
       return
     }
 
@@ -160,7 +215,7 @@ export default function NovaOrdem({ form, setForm, criarOrdem, setTab }) {
         ? form.color
         : (data.color || '')
       const nextForm = {
-        ...form,
+        ...baseForm,
         product: nextProduct,
         color: nextColor,
       }
@@ -168,7 +223,7 @@ export default function NovaOrdem({ form, setForm, criarOrdem, setTab }) {
       setPickedItem(data)
       setQProd(nextProduct)
       setForm(nextForm)
-      await submitCreateOrder(nextForm)
+      await validateDuplicateOrder(nextForm)
     } finally {
       setCheckingItemCode(false)
     }
@@ -335,8 +390,56 @@ export default function NovaOrdem({ form, setForm, criarOrdem, setTab }) {
           </div>
         </div>
       </Modal>
+
+      <Modal
+        open={duplicateOrderModal.open}
+        onClose={closeDuplicateOrderModal}
+        title="O.P. já cadastrada"
+        closeOnBackdrop={!duplicateOrderModal.busy}
+      >
+        <div style={{ display: 'grid', gap: 12 }}>
+          <p style={{ margin: 0 }}>
+            Já existe uma O.P. com o número <b>{duplicateOrderModal.code || '-'}</b> registrado.
+          </p>
+          <p style={{ margin: 0 }}>
+            Deseja realmente gerar outra ordem com este mesmo número?
+          </p>
+
+          {!!duplicateOrderModal.matches.length && (
+            <div style={{ display: 'grid', gap: 8 }}>
+              {duplicateOrderModal.matches.map((match) => {
+                const statusLabel = match.finalized ? 'FINALIZADA' : (match.status || 'SEM STATUS')
+                return (
+                  <div key={match.id} style={duplicateRow}>
+                    <strong>{match.machine_id || 'SEM MÁQUINA'}</strong>
+                    <span>{statusLabel}</span>
+                    <span>{formatOrderCreatedAt(match.created_at)}</span>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+            <button className="btn" onClick={closeDuplicateOrderModal} disabled={duplicateOrderModal.busy}>
+              Cancelar
+            </button>
+            <button className="btn primary" onClick={confirmDuplicateOrderCreation} disabled={duplicateOrderModal.busy}>
+              {duplicateOrderModal.busy ? 'Gerando...' : 'Gerar mesmo assim'}
+            </button>
+          </div>
+        </div>
+      </Modal>
     </div>
   )
+}
+
+function formatOrderCreatedAt(value) {
+  if (!value) return 'Sem data'
+
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) return 'Sem data'
+  return parsed.toLocaleString('pt-BR')
 }
 
 /* ===== estilos locais da dropdown/pílulas ===== */
@@ -355,4 +458,14 @@ const pill = {
   borderRadius: 999,
   fontSize: 12,
   background: '#fafafa',
+}
+const duplicateRow = {
+  display: 'grid',
+  gridTemplateColumns: 'minmax(90px, 1fr) minmax(120px, 1fr) minmax(150px, 1.2fr)',
+  gap: 8,
+  padding: '10px 12px',
+  border: '1px solid #e7e7e7',
+  borderRadius: 10,
+  background: '#fafafa',
+  alignItems: 'center',
 }
