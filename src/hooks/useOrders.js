@@ -109,11 +109,27 @@ function getScheduledStopValidationMessage() {
   return 'Máquina em parada programada no horário do Brasil. A produção só pode operar de segunda a sexta entre 05:00 e 22:00, e no sábado entre 05:00 e 13:00.'
 }
 
+function isScheduledStopRowActiveNow(stop, nowIso = new Date().toISOString()) {
+  if (!stop || stop?.ended_at) return false
+
+  const nowMs = Date.parse(nowIso)
+  if (!Number.isFinite(nowMs)) return false
+
+  const startedAtMs = Date.parse(stop?.started_at || '')
+  const expectedEndAtMs = Date.parse(stop?.expected_end_at || '')
+
+  if (Number.isFinite(startedAtMs) && startedAtMs > nowMs) return false
+  if (Number.isFinite(expectedEndAtMs) && expectedEndAtMs <= nowMs) return false
+
+  return !!getScheduledStopWindowAt(nowIso)
+}
+
 function applyPersistedScheduledStopsToOrders(orders, scheduledStops) {
   const openScheduledStopsByOrderId = new Map()
+  const nowIso = new Date().toISOString()
 
   for (const stop of scheduledStops || []) {
-    if (stop?.ended_at) continue
+    if (!isScheduledStopRowActiveNow(stop, nowIso)) continue
     const orderKey = stop?.order_id != null ? String(stop.order_id).trim() : ''
     if (!orderKey) continue
 

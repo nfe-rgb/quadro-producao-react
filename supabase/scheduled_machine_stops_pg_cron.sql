@@ -5,7 +5,8 @@
 -- 1. abrir as paradas programadas automaticamente no horario exato;
 -- 2. fechar as paradas no horario exato;
 -- 3. vincular a parada apenas a ordem que estava no painel no momento da abertura;
--- 4. nao criar parada fantasma quando a maquina estiver sem programacao.
+-- 4. nao criar parada fantasma quando a maquina estiver sem programacao;
+-- 5. fechar paradas vencidas mesmo que o job exato atrase ou falhe.
 
 begin;
 
@@ -99,6 +100,20 @@ is 'Abre paradas programadas apenas para as ordens que estavam no painel no inst
 comment on function public.close_due_scheduled_machine_stops(timestamptz)
 is 'Fecha paradas programadas cujo horario previsto de retorno ja foi atingido.';
 
+create or replace function public.sync_scheduled_machine_stops(p_now timestamptz default timezone('utc', now()))
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  perform public.close_due_scheduled_machine_stops(coalesce(p_now, timezone('utc', now())));
+end;
+$$;
+
+comment on function public.sync_scheduled_machine_stops(timestamptz)
+is 'Job de seguranca para encerrar paradas programadas vencidas caso o cron exato nao execute no horario esperado.';
+
 do $$
 declare
   v_job_name text;
@@ -126,8 +141,14 @@ end
 $$;
 
 select cron.schedule(
+  'scheduled_machine_stops_sync_every_minute',
+  '* * * * *',
+  $$select public.sync_scheduled_machine_stops();$$
+);
+
+select cron.schedule(
   'scheduled_machine_stops_open_weekday_night',
-  '0 22 * * 1-5',
+  '0 1 * * 2-6',
   $$
   select public.open_scheduled_machine_stops_snapshot(
     timezone('America/Sao_Paulo', timezone('utc', now()))::date + time '22:00' at time zone 'America/Sao_Paulo',
@@ -139,13 +160,13 @@ select cron.schedule(
 
 select cron.schedule(
   'scheduled_machine_stops_close_weekday_night',
-  '0 5 * * 2-6',
+  '0 8 * * 2-6',
   $$select public.close_due_scheduled_machine_stops();$$
 );
 
 select cron.schedule(
   'scheduled_machine_stops_open_saturday',
-  '0 13 * * 6',
+  '0 16 * * 6',
   $$
   select public.open_scheduled_machine_stops_snapshot(
     timezone('America/Sao_Paulo', timezone('utc', now()))::date + time '13:00' at time zone 'America/Sao_Paulo',
@@ -157,9 +178,11 @@ select cron.schedule(
 
 select cron.schedule(
   'scheduled_machine_stops_close_monday',
-  '0 5 * * 1',
+  '0 8 * * 1',
   $$select public.close_due_scheduled_machine_stops();$$
 );
+
+select public.close_due_scheduled_machine_stops();
 
 commit;
 
@@ -174,3 +197,4 @@ commit;
 -- Consultas uteis:
 -- select * from public.scheduled_machine_stops order by started_at desc, machine_id;
 -- select jobid, jobname, schedule, command from cron.job where jobname like 'scheduled_machine_stops_%';
+-- select jobid, job_pid, status, return_message, start_time, end_time from cron.job_run_details order by start_time desc limit 20;
