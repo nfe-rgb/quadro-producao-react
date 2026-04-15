@@ -94,25 +94,76 @@ begin
 end;
 $$;
 
-comment on function public.open_scheduled_machine_stops_snapshot(timestamptz, timestamptz, text)
-is 'Abre paradas programadas apenas para as ordens que estavam no painel no instante exato da abertura.';
-
-comment on function public.close_due_scheduled_machine_stops(timestamptz)
-is 'Fecha paradas programadas cujo horario previsto de retorno ja foi atingido.';
-
 create or replace function public.sync_scheduled_machine_stops(p_now timestamptz default timezone('utc', now()))
 returns void
 language plpgsql
 security definer
 set search_path = public
 as $$
+declare
+  v_now timestamptz := coalesce(p_now, timezone('utc', now()));
+  v_now_br timestamp := timezone('America/Sao_Paulo', v_now);
+  v_today_br date := v_now_br::date;
+  v_candidate_date date;
+  v_window_start timestamptz;
+  v_window_end timestamptz;
+  v_weekday integer;
+  v_saturday date;
 begin
-  perform public.close_due_scheduled_machine_stops(coalesce(p_now, timezone('utc', now())));
+  perform public.close_due_scheduled_machine_stops(v_now);
+
+  for v_candidate_date in
+    select generate_series(v_today_br - 1, v_today_br, interval '1 day')::date
+  loop
+    v_weekday := extract(isodow from v_candidate_date);
+
+    if v_weekday between 1 and 5 then
+      v_window_start := (v_candidate_date + time '22:00') at time zone 'America/Sao_Paulo';
+      v_window_end := ((v_candidate_date + 1) + time '05:00') at time zone 'America/Sao_Paulo';
+
+      if v_now >= v_window_start and v_now < v_window_end then
+        perform public.open_scheduled_machine_stops_snapshot(
+          v_window_start,
+          v_window_end,
+          'Parada programada automática via pg_cron - noturna'
+        );
+      end if;
+    end if;
+  end loop;
+
+  v_weekday := extract(isodow from v_today_br);
+  v_saturday := case
+    when v_weekday = 6 then v_today_br
+    when v_weekday = 7 then v_today_br - 1
+    when v_weekday = 1 then v_today_br - 2
+    else null
+  end;
+
+  if v_saturday is not null then
+    v_window_start := (v_saturday + time '13:00') at time zone 'America/Sao_Paulo';
+    v_window_end := ((v_saturday + 2) + time '05:00') at time zone 'America/Sao_Paulo';
+
+    if v_now >= v_window_start and v_now < v_window_end then
+      perform public.open_scheduled_machine_stops_snapshot(
+        v_window_start,
+        v_window_end,
+        'Parada programada automática via pg_cron - fim de semana'
+      );
+    end if;
+  end if;
+
+  perform public.close_due_scheduled_machine_stops(v_now);
 end;
 $$;
 
+comment on function public.open_scheduled_machine_stops_snapshot(timestamptz, timestamptz, text)
+is 'Abre paradas programadas apenas para as ordens que estavam no painel no instante exato da abertura.';
+
+comment on function public.close_due_scheduled_machine_stops(timestamptz)
+is 'Fecha paradas programadas cujo horario previsto de retorno ja foi atingido.';
+
 comment on function public.sync_scheduled_machine_stops(timestamptz)
-is 'Job de seguranca para encerrar paradas programadas vencidas caso o cron exato nao execute no horario esperado.';
+is 'Sincroniza abertura e fechamento de paradas programadas usando o horario de Sao Paulo e corrige execucoes perdidas do cron.';
 
 do $$
 declare
@@ -146,6 +197,7 @@ select cron.schedule(
   $$select public.sync_scheduled_machine_stops();$$
 );
 
+-- Os schedules abaixo usam UTC/GMT, que e o padrao do pg_cron quando cron.timezone nao foi alterado.
 select cron.schedule(
   'scheduled_machine_stops_open_weekday_night',
   '0 1 * * 2-6',

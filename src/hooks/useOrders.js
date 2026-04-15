@@ -95,7 +95,23 @@ function mergeScheduledStopRows(...collections) {
   return Array.from(map.values())
 }
 
+function isPinnedToPanel(order) {
+  const status = String(order?.status || '').trim().toUpperCase()
+  const underlyingStatus = String(order?.underlying_status || '').trim().toUpperCase()
+
+  return Boolean(
+    (status && status !== 'AGUARDANDO')
+    || (underlyingStatus && underlyingStatus !== 'AGUARDANDO')
+    || String(order?.active_session_id || '').trim()
+    || order?.scheduled_stop_active
+  )
+}
+
 function compareMachineOrderPriority(left, right) {
+  const leftPinned = isPinnedToPanel(left) ? 1 : 0
+  const rightPinned = isPinnedToPanel(right) ? 1 : 0
+  if (leftPinned !== rightPinned) return rightPinned - leftPinned
+
   const leftPos = Number.isFinite(Number(left?.pos)) ? Number(left.pos) : 999999
   const rightPos = Number.isFinite(Number(right?.pos)) ? Number(right.pos) : 999999
   if (leftPos !== rightPos) return leftPos - rightPos
@@ -727,11 +743,7 @@ export default function useOrders() {
   }
 
   async function enviarParaFila(ordemAtiva, opts) {
-    const machineList = [...(ativosPorMaquina[ordemAtiva.machine_id] || [])].sort((left, right) => {
-      const leftPos = Number.isFinite(Number(left?.pos)) ? Number(left.pos) : 999999
-      const rightPos = Number.isFinite(Number(right?.pos)) ? Number(right.pos) : 999999
-      return leftPos - rightPos
-    })
+    const machineList = [...(ativosPorMaquina[ordemAtiva.machine_id] || [])].sort(compareMachineOrderPriority)
 
     const activeOrder = machineList[0]
     const promotedOrder = machineList[1]
