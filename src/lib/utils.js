@@ -9,10 +9,11 @@ export function getTurnoAtual(dateInput = null) {
 
 // src/lib/utils.js
 export function statusClass(s){
-  if(s==='AGUARDANDO') return 'card gray'
-  if(s==='PRODUZINDO') return 'card green'
-  if(s==='BAIXA_EFICIENCIA') return 'card yellow'
-  if(s==='PARADA') return 'card red'
+  const status = String(s || '').trim().toUpperCase()
+  if(status === 'AGUARDANDO') return 'card gray'
+  if(status === 'PRODUZINDO') return 'card green'
+  if(status === 'BAIXA_EFICIENCIA') return 'card yellow'
+  if(status === 'PARADA') return 'card red'
   return 'card'
 }
 

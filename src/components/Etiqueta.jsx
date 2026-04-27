@@ -9,6 +9,7 @@ export default function Etiqueta({ o, variant = 'painel', saldoCaixas, lidasCaix
   const temObsLowEff = !!o.loweff_notes
   const interrompida = o.status === 'AGUARDANDO' && !!o.interrupted_at
   const isProgrammedStop = o.status === 'PARADA' && ['FIM DE SEMANA', 'PARADA PROGRAMADA'].includes(o.reason)
+  const weekendClass = isProgrammedStop && variant !== 'painel' ? 'etiqueta-weekend' : ''
   const fmtDate = (d) => (d ? new Date(d).toLocaleDateString('pt-BR') : '-')
   const fmtThousands = (v) => {
     if (v === null || v === undefined || v === '') return v
@@ -106,7 +107,7 @@ export default function Etiqueta({ o, variant = 'painel', saldoCaixas, lidasCaix
   // ===== variante PAINEL =====
   return (
     <div
-      className={`small ${isProgrammedStop ? 'etiqueta-weekend' : ''} ${compactPills ? 'compact-pills-layout' : ''}`}
+      className={`small ${weekendClass} ${compactPills ? 'compact-pills-layout' : ''}`}
       style={{ position: 'relative' }}
     >
       {interrompida && <div className="badge-interrompida">⚠️ Produção Interrompida</div>}
