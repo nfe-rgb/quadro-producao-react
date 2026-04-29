@@ -552,15 +552,12 @@ export default function useOrders() {
   }
 
   useEffect(() => {
-    // Tenta buscar do Supabase, se falhar, carrega do cache
-    fetchRuntimeSnapshot().then(() => {
-      // Se não vier nada do Supabase, mantém o cache
-      if (ordens.length === 0) {
-        const cached = loadOrdersFromCache();
-        if (cached.length > 0) setOrdens(cached)
-      }
-    }).catch(() => {
-      const cached = loadOrdersFromCache();
+    const cached = loadOrdersFromCache();
+    if (cached.length > 0) {
+      setOrdens(cached)
+    }
+
+    fetchRuntimeSnapshot().catch(() => {
       if (cached.length > 0) setOrdens(cached)
     })
 
