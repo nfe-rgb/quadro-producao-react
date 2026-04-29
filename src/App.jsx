@@ -50,8 +50,9 @@ export default function App(){
   const [manualProductionModalOpen, setManualProductionModalOpen] = useState(false)
 
   const [tick, setTick] = useState(0)
-  // ATENÇÃO: Este polling global roda a cada 1s. Para produção, aumente para 10s ou mais se possível para reduzir consumo de saída.
-  useEffect(()=>{ const id=setInterval(()=>setTick(t=>t+1),10000); return ()=>clearInterval(id) },[])
+  // ATENÇÃO: Este polling global roda a cada 1s para manter cronômetros em tempo real.
+  // Para reduzir carga, pode ser alterado para 10s em cenários de menor necessidade de atualização de UI.
+  useEffect(()=>{ const id=setInterval(()=>setTick(t=>t+1),1000); return ()=>clearInterval(id) },[])
 
   useEffect(() => {
     ensureAnonymousSession().catch((error) => {
@@ -351,7 +352,7 @@ export default function App(){
     )
   }
   if (location && location.pathname === '/pet-01') {
-    const ativosP1 = ordens.filter(o => o.machine_id === 'P1' && !o.finalized).sort((a,b)=>(a.pos??999)-(b.pos??999))
+    const ativosP1 = ativosPorMaquina['P1'] || []
     return (
       <>
         <Pet01
@@ -416,7 +417,7 @@ export default function App(){
   }
 
     if (location && location.pathname === '/pet-02') {
-    const ativosP2 = ordens.filter(o => o.machine_id === 'P2' && !o.finalized).sort((a,b)=>(a.pos??999)-(b.pos??999))
+    const ativosP2 = ativosPorMaquina['P2'] || []
     return (
       <>
         <Pet02
@@ -455,7 +456,7 @@ export default function App(){
   }
 
     if (location && location.pathname === '/pet-03') {
-    const ativosP3 = ordens.filter(o => o.machine_id === 'P3' && !o.finalized).sort((a,b)=>(a.pos??999)-(b.pos??999))
+    const ativosP3 = ativosPorMaquina['P3'] || []
     return (
       <>
         <Pet03
@@ -494,7 +495,7 @@ export default function App(){
   }
 
       if (location && location.pathname === '/pet-04') {
-    const ativosP4 = ordens.filter(o => o.machine_id === 'P4' && !o.finalized).sort((a,b)=>(a.pos??999)-(b.pos??999))
+    const ativosP4 = ativosPorMaquina['P4'] || []
     return (
       <>
         <Pet04

@@ -1,4 +1,4 @@
-// src/pages/Pet01.jsx
+// src/pages/Pet02.jsx
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ensureAnonymousSession, supabase } from "../lib/supabaseClient";
 import Etiqueta from "../components/Etiqueta";
@@ -33,7 +33,6 @@ export default function Pet02({
   const [refugoSaving, setRefugoSaving] = useState(false);
   const [responsavelSaving, setResponsavelSaving] = useState(false);
   const [shiftScrap, setShiftScrap] = useState({ good: 0, scrap: 0, pct: 0, loading: true, shiftKey: "" });
-
   // responsável do turno (P2)
   const [responsavelTurno, setResponsavelTurno] = useState("");
   const [responsavelModalOpen, setResponsavelModalOpen] = useState(false);
@@ -55,8 +54,8 @@ export default function Pet02({
   // Atualiza ativa/proximo sempre que ativos mudam (somente P2)
   useEffect(() => {
     if (!ativosP2) return;
-    setAtiva(ativosP2[0] || null);
-    setProximo(ativosP2[1] || null);
+    setAtiva(ativosP2[0] ? { ...ativosP2[0] } : null);
+    setProximo(ativosP2[1] ? { ...ativosP2[1] } : null);
   }, [ativosP2]);
 
   // carrega scans existentes da ordem ativa
@@ -295,6 +294,46 @@ export default function Pet02({
     const id = setInterval(fetchRefugoTurno, 45000);
     return () => clearInterval(id);
   }, [fetchRefugoTurno]);
+
+  // Polling para atualizar a ordem ativa em tempo real
+  useEffect(() => {
+    if (!ativa?.id) return;
+
+    async function fetchActiveOrder() {
+      try {
+        const { data, error } = await supabase
+          .from('orders')
+          .select('*')
+          .eq('id', ativa.id)
+          .single();
+
+        if (error) {
+          console.warn('Erro ao buscar ordem ativa:', error);
+          return;
+        }
+
+        if (data) {
+          // Atualiza apenas campos relevantes para tempo real
+          setAtiva((prev) => {
+            if (!prev) return prev;
+            const updated = { ...prev };
+            if (prev.status !== data.status) updated.status = data.status;
+            if (prev.active_session_id !== data.active_session_id) updated.active_session_id = data.active_session_id;
+            if (prev.loweff_started_at !== data.loweff_started_at) updated.loweff_started_at = data.loweff_started_at;
+            if (prev.interrupted_at !== data.interrupted_at) updated.interrupted_at = data.interrupted_at;
+            // Retorna updated apenas se houve mudança
+            return Object.keys(updated).some(key => updated[key] !== prev[key]) ? updated : prev;
+          });
+        }
+      } catch (err) {
+        console.warn('Falha ao atualizar ordem ativa:', err);
+      }
+    }
+
+    fetchActiveOrder();
+    const id = setInterval(fetchActiveOrder, 2000); // Atualiza a cada 2 segundos
+    return () => clearInterval(id);
+  }, [ativa?.id]);
 
   async function salvarResponsavelTurno() {
     if (responsavelSavingRef.current) return;
@@ -640,7 +679,7 @@ if (typeof window !== "undefined") {
         <div className={statusClass(ativa?.status)}>
           <Etiqueta o={ativa} variant="pet01" saldoCaixas={saldo} lidasCaixas={lidas} />
                             {ativa?.status === "PARADA" && stopReason && (
-                  <div className="stop-reason-below-p1">{stopReason}</div>
+                  <div className="stop-reason-below-P2">{stopReason}</div>
                   )}
         </div>
                   
@@ -648,14 +687,21 @@ if (typeof window !== "undefined") {
 
         <div className="pet01-field" style={{ marginTop: 10 }}>
           <label style={{ minWidth: 90 }}>Situação</label>
-          <select value={ativa?.status || "AGUARDANDO"} onChange={(e) => handleStatusChange(e.target.value)}>
+          <select
+            value={ativa?.status || "AGUARDANDO"}
+            onChange={(e) => handleStatusChange(e.target.value)}
+            disabled={String(ativa?.status || "").toUpperCase() === "AGUARDANDO"}
+          >
+            {String(ativa?.status || "").toUpperCase() === "AGUARDANDO" && (
+              <option value="AGUARDANDO">Aguardando</option>
+            )}
             <option value="PRODUZINDO">Produzindo</option>
             <option value="BAIXA_EFICIENCIA">Baixa Eficiência</option>
             <option value="PARADA">Parada</option>
           </select>
 
           <div style={{ marginLeft: 12 }}>
-            {ativa?.status === "AGUARDANDO" && (
+            {String(ativa?.status || "").toUpperCase() === "AGUARDANDO" && (
           <button
               className="btn small primary"
                 onClick={() => {
@@ -693,7 +739,7 @@ if (typeof window !== "undefined") {
     <div className="pet01-modal">
       <h3>Responsável do Turno</h3>
       <p style={{ marginTop: 4, color: '#444' }}>
-        Informe o operador responsável da P2 para o Turno {shiftInfo?.shiftKey || ""}.
+        Informe o operador responsável da P2 para o Turno {shiftInfo?.shiftKey || ""}. Este passo é obrigatório no início do turno.
       </p>
 
       <label style={{ marginTop: 12 }}>Operador *</label>
