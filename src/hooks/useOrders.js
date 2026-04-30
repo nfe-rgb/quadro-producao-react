@@ -59,6 +59,30 @@ function normalizeOptionalOrderField(value) {
   return normalized ? normalized : null
 }
 
+function extractProductCode(product) {
+  if (!product) return ''
+  return String(product).split('-')[0].trim()
+}
+
+async function fetchOrderItemCavities(product) {
+  const productCode = extractProductCode(product)
+  if (!productCode) return 1
+
+  const { data, error } = await supabase
+    .from('items')
+    .select('cavities')
+    .ilike('code', productCode)
+    .maybeSingle()
+
+  if (error) {
+    console.warn('Falha ao buscar cavidades do item para baixa eficiência:', error)
+    return 1
+  }
+
+  const cavities = Number(data?.cavities || 0)
+  return Number.isFinite(cavities) && cavities > 0 ? cavities : 1
+}
+
 const ORDERS_CACHE_KEY = `cached_production_orders_v1:${SUPABASE_CACHE_SCOPE}`;
 
 function saveOrdersToCache(orders) {
@@ -879,9 +903,15 @@ export default function useOrders() {
     return true
   }
 
-  async function confirmarBaixaEf({ ordem, operador, data, hora, obs, skipValidation = false }) {
+  async function confirmarBaixaEf({ ordem, operador, data, hora, cavitiesOpen, skipValidation = false }) {
     if (!operador || !data || !hora) {
       alert('Preencha operador, data e hora.')
+      return false
+    }
+
+    const cavities = Number(cavitiesOpen || 0)
+    if (!Number.isFinite(cavities) || cavities <= 0) {
+      alert('Informe a quantidade de cavidades abertas para baixa eficiência.')
       return false
     }
 
@@ -895,13 +925,15 @@ export default function useOrders() {
       return false
     }
 
+    const noteText = `Cavidades abertas: ${Number.isFinite(cavities) && cavities > 0 ? cavities : 0}`
+
     await ensureAnonymousSession()
     const { error } = await supabase.rpc('production_enter_low_efficiency_v3', {
       p_order_id: String(ordem.source_order_id || ordem.id),
       p_started_at: localDateTimeToISO(data, hora),
       p_actor: operador,
       p_reason: null,
-      p_notes: obs || null,
+      p_notes: noteText,
     })
 
     if (error) {
@@ -959,12 +991,14 @@ export default function useOrders() {
 
     if (targetStatus === 'BAIXA_EFICIENCIA' && atual !== 'BAIXA_EFICIENCIA') {
       const now = new Date()
+      const defaultCavities = await fetchOrderItemCavities(ordem?.product)
       return {
         action: 'openLowEffModal',
         payload: {
           ordem,
           operador: '',
-          obs: '',
+          cavitiesOpen: defaultCavities,
+          defaultCavities,
           data: now.toISOString().slice(0, 10),
           hora: now.toTimeString().slice(0, 5),
         },

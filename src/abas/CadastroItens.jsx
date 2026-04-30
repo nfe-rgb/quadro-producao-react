@@ -317,6 +317,8 @@ export default function CadastroItens() {
     unidade: '',
     cliente: '',
     estoque_minimo: '',
+    padrao: '',
+    embalagem: '',
   })
   const [formErr, setFormErr] = useState(null)
   const [imageFile, setImageFile] = useState(null)
@@ -336,6 +338,8 @@ export default function CadastroItens() {
       unidade: '',
       cliente: '',
       estoque_minimo: '',
+      padrao: '',
+      embalagem: '',
     })
     setImageFile(null)
     setRemoveProductImage(false)
@@ -374,6 +378,8 @@ export default function CadastroItens() {
       color: cleanText(item.color),
       cycle_seconds: String(item.cycle_seconds ?? ''),
       cavities: String(item.cavities ?? ''),
+      padrao: String(item.padrao ?? ''),
+      embalagem: String(item.embalagem ?? ''),
       part_weight_g: String(item.part_weight_g ?? ''),
       unit_value: String(item.unit_value ?? ''),
       resin: cleanText(item.resin),
@@ -446,6 +452,8 @@ export default function CadastroItens() {
           color: cleanText(form.color) || INSUMO_TECH_DEFAULTS.color,
           cycle_seconds: toPosFloat(form.cycle_seconds) ?? INSUMO_TECH_DEFAULTS.cycle_seconds,
           cavities: toPosInt(form.cavities) ?? INSUMO_TECH_DEFAULTS.cavities,
+          padrao: toNonNegFloat(form.padrao),
+          embalagem: cleanText(form.embalagem),
           part_weight_g: toPosFloat(form.part_weight_g) ?? INSUMO_TECH_DEFAULTS.part_weight_g,
           unit_value: toNonNegFloat(form.unit_value) ?? INSUMO_TECH_DEFAULTS.unit_value,
           resin: cleanText(form.resin) || INSUMO_TECH_DEFAULTS.resin,
@@ -457,6 +465,8 @@ export default function CadastroItens() {
           color: cleanText(form.color),
           cycle_seconds: toPosFloat(form.cycle_seconds),
           cavities: toPosInt(form.cavities),
+          padrao: toNonNegFloat(form.padrao),
+          embalagem: cleanText(form.embalagem),
           part_weight_g: toPosFloat(form.part_weight_g),
           unit_value: toPosFloat(form.unit_value),
           resin: cleanText(form.resin),
@@ -921,9 +931,15 @@ export default function CadastroItens() {
                   </div>
 
                   <div style={grid3}>
+                    <Field label="Padrão por embalagem" name="padrao" value={form.padrao} onChange={onChange} inputMode="decimal" placeholder="Ex.: 100" />
+                    <Field label="Embalagem" name="embalagem" value={form.embalagem} onChange={onChange} placeholder="Ex.: Caixa / Saco Modelo A" />
                     <Field label="Peso da peça (g)*" name="part_weight_g" value={form.part_weight_g} onChange={onChange} inputMode="decimal" placeholder="Ex.: 8.7" />
+                  </div>
+
+                  <div style={grid3}>
                     <Field label="Valor unitário (R$)*" name="unit_value" value={form.unit_value} onChange={onChange} inputMode="decimal" placeholder="Ex.: 0.32" />
                     <Field label="Resina utilizada" name="resin" value={form.resin} onChange={onChange} placeholder="Ex.: PP / PEAD / ABS…" />
+                    <div />
                   </div>
                 </>
               )}

@@ -27,6 +27,7 @@ const SHIFT_OPTIONS = [
   { value: 'all', label: 'Todos os turnos' },
   { value: '1', label: 'Turno 1' },
   { value: '2', label: 'Turno 2' },
+  { value: '3', label: 'Turno 3' },
 ]
 
 const DATE_PRESET_OPTIONS = [

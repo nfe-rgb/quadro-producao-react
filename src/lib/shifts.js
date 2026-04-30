@@ -3,10 +3,11 @@ import { DateTime } from 'luxon'
 export const SHIFT_ZONE = 'America/Sao_Paulo'
 export const SHIFT_POLICY_CHANGE_DATE = '2026-03-30'
 export const SCHEDULED_STOP_REASON = 'PARADA PROGRAMADA'
-export const ACTIVE_SHIFT_KEYS = ['1', '2']
+export const ACTIVE_SHIFT_KEYS = ['1', '2', '3']
 export const ACTIVE_TURNOS = [
   { key: '1', label: 'Turno 1' },
   { key: '2', label: 'Turno 2' },
+  { key: '3', label: 'Turno 3' },
 ]
 
 const LEGACY_WEEKDAY_SHIFTS = [
@@ -27,11 +28,16 @@ const LEGACY_SUNDAY_SHIFTS = [
 const CURRENT_WEEKDAY_SHIFTS = [
   { shiftKey: '1', label: 'Turno 1', startHour: 5, startMinute: 0, endHour: 13, endMinute: 30 },
   { shiftKey: '2', label: 'Turno 2', startHour: 13, startMinute: 30, endHour: 22, endMinute: 0 },
+  { shiftKey: '3', label: 'Turno 3', startHour: 22, startMinute: 0, endHour: 5, endMinute: 0 },
 ]
 
 const CURRENT_SATURDAY_SHIFTS = [
   { shiftKey: '1', label: 'Turno 1', startHour: 5, startMinute: 0, endHour: 9, endMinute: 0 },
   { shiftKey: '2', label: 'Turno 2', startHour: 9, startMinute: 0, endHour: 13, endMinute: 0 },
+]
+
+const CURRENT_SUNDAY_SHIFTS = [
+  { shiftKey: '3', label: 'Turno 3', startHour: 23, startMinute: 0, endHour: 5, endMinute: 0 },
 ]
 
 function toShiftDateTime(dateInput = null) {
@@ -84,6 +90,7 @@ function getShiftDefinitions(dateInput, { preserveLegacy = true } = {}) {
 
   if (weekday >= 1 && weekday <= 5) return CURRENT_WEEKDAY_SHIFTS
   if (weekday === 6) return CURRENT_SATURDAY_SHIFTS
+  if (weekday === 0) return CURRENT_SUNDAY_SHIFTS
   return []
 }
 
@@ -145,22 +152,7 @@ function getScheduledStopWindowsForDay(dateInput, { preserveLegacy = true } = {}
   const base = toShiftDateTime(dateInput).startOf('day')
   if (isLegacyPolicy(base, preserveLegacy)) return []
 
-  if (base.weekday >= 1 && base.weekday <= 5) {
-    return [{
-      reason: SCHEDULED_STOP_REASON,
-      start: base.set({ hour: 22, minute: 0, second: 0, millisecond: 0 }),
-      end: base.plus({ days: 1 }).set({ hour: 5, minute: 0, second: 0, millisecond: 0 }),
-    }]
-  }
-
-  if (base.weekday === 6) {
-    return [{
-      reason: SCHEDULED_STOP_REASON,
-      start: base.set({ hour: 13, minute: 0, second: 0, millisecond: 0 }),
-      end: base.plus({ days: 2 }).set({ hour: 5, minute: 0, second: 0, millisecond: 0 }),
-    }]
-  }
-
+  // A partir da política atual não há parada programada das 22:00 às 05:00.
   return []
 }
 

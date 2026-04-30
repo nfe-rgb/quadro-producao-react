@@ -11,6 +11,7 @@ export default function FilaSortableItem({
   highlightInterrompida = false,
   canReorder = true,
   canEdit = true,
+  separationStatus = 'none', // 'none', 'partial', 'complete'
 }) {
   const sortable = useSortable({ id: ordem.id })
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = sortable
@@ -22,7 +23,7 @@ export default function FilaSortableItem({
   }
 
   // 🔶 aplica classe condicional para amarelar o card
-  const className = `card fila-item ${highlightInterrompida ? 'fila-interrompida' : ''}`
+  const className = `card fila-item ${highlightInterrompida ? 'fila-interrompida' : ''} ${separationStatus === 'partial' ? 'fila-separacao-parcial' : separationStatus === 'complete' ? 'fila-separacao-completa' : ''}`
 
   return (
     <div ref={setNodeRef} style={style} className={className}>

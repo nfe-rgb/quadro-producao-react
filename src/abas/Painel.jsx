@@ -37,6 +37,7 @@ export default function Painel({
   const META_MENSAL = 770000;
   const [producaoMesAtual, setProducaoMesAtual] = useState(0);
   const [currentTimeMs, setCurrentTimeMs] = useState(() => Date.now());
+  const [itemTechByCode, setItemTechByCode] = useState({});
 
   const metaMensalPercent =
     META_MENSAL > 0 ? (producaoMesAtual / META_MENSAL) * 100 : 0;
@@ -170,6 +171,56 @@ export default function Painel({
       clearInterval(intervalId);
     };
   }, []);
+
+  useEffect(() => {
+    let active = true;
+
+    async function fetchItemTech() {
+      const codes = new Set();
+      MAQUINAS.forEach((machineId) => {
+        const queue = ativosPorMaquina?.[machineId] || [];
+        [queue[0], queue[1]].forEach((ordem) => {
+          const raw = ordem?.product;
+          if (!raw) return;
+          const code = extractItemCodeFromOrderProduct(raw);
+          if (code) codes.add(code);
+        });
+      });
+
+      const codeList = Array.from(codes);
+      if (codeList.length === 0) {
+        if (active) setItemTechByCode({});
+        return;
+      }
+
+      const { data, error } = await supabase
+        .from("items")
+        .select("code,cycle_seconds,cavities")
+        .in("code", codeList);
+
+      if (!active) return;
+      if (error) {
+        console.warn("Painel: falha ao carregar ciclo/cavidades dos itens:", error);
+        return;
+      }
+
+      const mapped = (data || []).reduce((acc, item) => {
+        const code = String(item?.code || "").trim();
+        if (!code) return acc;
+        acc[code] = {
+          cycleSeconds: Number(item?.cycle_seconds || 0),
+          cavities: Number(item?.cavities || 0),
+        };
+        return acc;
+      }, {});
+      setItemTechByCode(mapped);
+    }
+
+    fetchItemTech();
+    return () => {
+      active = false;
+    };
+  }, [ativosPorMaquina]);
 
   // localAtivos é o estado usado para render e será atualizado via realtime
   const [localAtivos, setLocalAtivos] = useState(ativosPorMaquina || {});
@@ -384,6 +435,10 @@ export default function Painel({
           }
 
           const opCode = ativa?.code || ativa?.o?.code || ativa?.op_code || "";
+          const itemCode = extractItemCodeFromOrderProduct(ativa?.product);
+          const itemTech = itemCode ? itemTechByCode[itemCode] || {} : {};
+          const cycleSeconds = Number(itemTech?.cycleSeconds || 0);
+          const cavities = Number(itemTech?.cavities || 0);
           const precisaRegularizarSessao = Boolean(
             ativa && String(ativa.status || '').toUpperCase() !== 'AGUARDANDO' && !ativa.active_session_id
           );
@@ -515,6 +570,17 @@ export default function Painel({
                             Finalizar
                           </button>
                         )}
+                      </div>
+                    </div>
+
+                    <div className="grid2" style={{ marginTop: 12 }}>
+                      <div>
+                        <div className="label">Ciclo</div>
+                        <div className="small">{cycleSeconds > 0 ? `${cycleSeconds} s` : '—'}</div>
+                      </div>
+                      <div>
+                        <div className="label">Cavidades</div>
+                        <div className="small">{cavities > 0 ? cavities : '—'}</div>
                       </div>
                     </div>
                   </div>

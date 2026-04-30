@@ -101,6 +101,8 @@ export default function GlobalModals({
         ...v,
         data: now.toFormat('yyyy-LL-dd'),
         hora: now.toFormat('HH:mm'),
+        cavitiesOpen: v?.cavitiesOpen ?? v?.defaultCavities ?? 1,
+        defaultCavities: v?.defaultCavities ?? (Number.isFinite(Number(v?.cavitiesOpen)) && Number(v?.cavitiesOpen) > 0 ? Number(v?.cavitiesOpen) : 1),
         __initApplied: true,
       }));
     }
@@ -434,8 +436,30 @@ export default function GlobalModals({
               <div><div className="label">Hora *</div><input type="time" className="input" value={lowEffModal.hora} onChange={e=>setLowEffModal(v=>({...v, hora:e.target.value}))}/></div>
             </div>
             <div>
-              <div className="label">Observação</div>
-              <textarea className="textarea" rows={3} value={lowEffModal.obs} onChange={e=>setLowEffModal(v=>({...v, obs:e.target.value}))} placeholder="Descreva o motivo da baixa eficiência, se desejar..." />
+              <div className="label">Cavidades abertas</div>
+              <input
+                type="number"
+                min={1}
+                max={lowEffModal?.defaultCavities || undefined}
+                className="input"
+                value={lowEffModal.cavitiesOpen ?? ''}
+                onChange={(e) => {
+                  const value = Number(e.target.value)
+                  setLowEffModal(v => ({
+                    ...v,
+                    cavitiesOpen: Number.isFinite(value) && value > 0 ? value : '',
+                  }))
+                }}
+                placeholder="Informe quantas cavidades estão abertas"
+              />
+              {lowEffModal?.defaultCavities ? (
+                <div className="small muted" style={{ marginTop: 6 }}>
+                  Padrão do item: {lowEffModal.defaultCavities} cavidade{lowEffModal.defaultCavities === 1 ? '' : 's'}
+                </div>
+              ) : null}
+              <div className="small muted" style={{ marginTop: 6 }}>
+                Diminuir as cavidades abertas coloca a ordem em baixa eficiência e aumenta o tempo de produção.
+              </div>
             </div>
             <div className="sep"></div>
             <div className="flex" style={{justifyContent:'flex-end', gap:8}}>

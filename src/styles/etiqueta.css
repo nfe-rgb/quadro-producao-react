@@ -32,6 +32,18 @@
   border: 1px solid rgba(255, 193, 7, 0.6);
   box-shadow: 0 0 0 2px rgba(255, 215, 96, 0.15) inset;
 }
+/* Item da FILA com separação parcial */
+.fila-item.fila-separacao-parcial {
+  background: linear-gradient(180deg, #fff3cd 0%, #fff9e6 100%);
+  border: 1px solid rgba(255, 193, 7, 0.6);
+  box-shadow: 0 0 0 2px rgba(255, 215, 96, 0.15) inset;
+}
+/* Item da FILA com separação completa */
+.fila-item.fila-separacao-completa {
+  background: linear-gradient(180deg, #d4edda 0%, #f0f9f0 100%);
+  border: 1px solid rgba(40, 167, 69, 0.6);
+  box-shadow: 0 0 0 2px rgba(144, 238, 144, 0.15) inset;
+}
 .stop-reason-below {
   text-align: center;
   line-height: 1.35;
