@@ -769,13 +769,19 @@ export default function Gestao({ registroGrupos = [], openSet, toggleOpen, isAdm
   }, [availableMachines, filteredGroupsForMetrics])
 
   const occupancyMetrics = useMemo(() => {
+    const workWindows = getShiftWindowsInRange(range.start, range.end, {
+      shiftKeys: shiftFilter !== 'all' ? [shiftFilter] : ACTIVE_SHIFT_KEYS,
+      setupMinutes: 0,
+    })
+
     return calculateMachinePeriodMetrics({
       groupsByMachine,
       filterStart: range.start.toJSDate(),
       filterEnd: range.end.toJSDate(),
       machines: availableMachines,
+      workWindows,
     })
-  }, [availableMachines, groupsByMachine, range.end, range.start])
+  }, [availableMachines, groupsByMachine, range.end, range.start, shiftFilter])
 
   const orderRecords = useMemo(() => {
     return orderGroupsInRange.map((group) => {
@@ -990,9 +996,14 @@ export default function Gestao({ registroGrupos = [], openSet, toggleOpen, isAdm
 
   const allRecords = useMemo(() => {
     return [...orderRecords, ...productionRecords, ...scrapRecords, ...stopRecords, ...lowEffRecords]
-      .filter((record) => record.timestamp)
+      .filter((record) => {
+        if (!record.timestamp) return false
+        const timestampMs = new Date(record.timestamp).getTime()
+        if (!Number.isFinite(timestampMs)) return false
+        return timestampMs >= range.startMs && timestampMs <= range.endMs
+      })
       .sort((left, right) => new Date(right.timestamp).getTime() - new Date(left.timestamp).getTime())
-  }, [lowEffRecords, orderRecords, productionRecords, scrapRecords, stopRecords])
+  }, [lowEffRecords, orderRecords, productionRecords, scrapRecords, stopRecords, range.startMs, range.endMs])
 
   const recordsByScope = useMemo(() => {
     return allRecords.filter((record) => {
@@ -1199,14 +1210,59 @@ export default function Gestao({ registroGrupos = [], openSet, toggleOpen, isAdm
 
   const stopReasonSummary = useMemo(() => {
     const totals = {}
-    for (const record of stopRecords) {
-      if (sectorFilter !== 'all' && record.sector !== sectorFilter) continue
-      if (machineFilter !== 'all' && record.machineId !== machineFilter) continue
-      if (shiftFilter !== 'all' && record.shift !== shiftFilter) continue
-      totals[record.status] = totals[record.status] || { hours: 0, count: 0 }
-      totals[record.status].hours += toNumber(record.quantity)
-      totals[record.status].count += 1
+    const plannedIntervals = getShiftWindowsInRange(range.start, range.end, {
+      shiftKeys: shiftFilter !== 'all' ? [shiftFilter] : ACTIVE_SHIFT_KEYS,
+      setupMinutes: 0,
+    })
+
+    for (const machineId of availableMachines) {
+      const machineGroups = Array.isArray(groupsByMachine?.[machineId]) ? groupsByMachine[machineId] : []
+      if (!machineGroups.length) continue
+
+      const sessionIntervals = mergeIntervals(
+        machineGroups.flatMap((group) => {
+          const sessions = Array.isArray(group?.sessions) && group.sessions.length
+            ? group.sessions
+            : group?.session
+              ? [group.session]
+              : group?.ordem?.started_at
+                ? [{ started_at: group.ordem.started_at, ended_at: group.ordem.finalized_at || group.ordem.interrupted_at || null }]
+                : []
+
+          return mapRecordsToIntervals(sessions, {
+            rangeStartMs: range.startMs,
+            rangeEndMs: range.endMs,
+            fallbackEndMs: range.endMs,
+          })
+        })
+      )
+
+      const loadedIntervals = intersectIntervals(plannedIntervals, sessionIntervals)
+      if (!loadedIntervals.length) continue
+
+      for (const group of machineGroups) {
+        for (const stop of group?.stops || []) {
+          if (!isCountedStopReason(stop?.reason)) continue
+
+          const stopIntervals = mergeIntervals(mapRecordsToIntervals([stop], {
+            rangeStartMs: range.startMs,
+            rangeEndMs: range.endMs,
+            endKey: ['ended_at', 'resumed_at', 'stopped_at'],
+            fallbackEndMs: range.endMs,
+          }))
+
+          const stopInsideLoaded = intersectIntervals(stopIntervals, loadedIntervals)
+          const stopHours = sumIntervals(stopInsideLoaded) / 1000 / 60 / 60
+          if (stopHours <= 0) continue
+
+          const reason = text(stop?.reason) || 'Parada'
+          totals[reason] = totals[reason] || { hours: 0, count: 0 }
+          totals[reason].hours += stopHours
+          totals[reason].count += 1
+        }
+      }
     }
+
     return Object.entries(totals)
       .map(([reason, totalsByReason]) => ({
         reason,
@@ -1215,7 +1271,7 @@ export default function Gestao({ registroGrupos = [], openSet, toggleOpen, isAdm
       }))
       .sort((left, right) => right.hours - left.hours)
       .slice(0, 6)
-  }, [machineFilter, sectorFilter, shiftFilter, stopRecords])
+  }, [availableMachines, groupsByMachine, range.end, range.endMs, range.start, range.startMs, shiftFilter])
 
   const stopReasonChartRows = useMemo(() => {
     return stopReasonSummary.map((row) => ({

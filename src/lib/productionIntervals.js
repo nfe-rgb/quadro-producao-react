@@ -115,6 +115,7 @@ export function calculateMachinePeriodMetrics({
   filterStart,
   filterEnd,
   machines,
+  workWindows,
   nowMs = Date.now(),
 }) {
   if (!filterStart || !filterEnd) {
@@ -135,7 +136,9 @@ export function calculateMachinePeriodMetrics({
   const rangeStartMs = filterStart.getTime();
   const rangeEndMs = filterEnd.getTime();
   const clampNowMs = Math.min(nowMs, rangeEndMs);
-  const rangeWindow = [[rangeStartMs, rangeEndMs]];
+  const rangeWindow = Array.isArray(workWindows) && workWindows.length
+    ? mergeIntervals(workWindows)
+    : [[rangeStartMs, rangeEndMs]];
 
   const machineParadaMs = {};
   const machineLowEffMs = {};
@@ -150,40 +153,49 @@ export function calculateMachinePeriodMetrics({
   for (const machineId of machines) {
     const groups = Array.isArray(groupsByMachine?.[machineId]) ? groupsByMachine[machineId] : [];
 
-    const sessionIntervals = mergeIntervals(
-      groups.flatMap((group) => {
-        const sessions = Array.isArray(group?.sessions) && group.sessions.length
-          ? group.sessions
-          : group?.session
-            ? [group.session]
-            : group?.ordem?.started_at
-              ? [{ started_at: group.ordem.started_at, ended_at: group.ordem.finalized_at || group.ordem.interrupted_at || null }]
-              : [];
+    const sessionIntervals = intersectIntervals(
+      mergeIntervals(
+        groups.flatMap((group) => {
+          const sessions = Array.isArray(group?.sessions) && group.sessions.length
+            ? group.sessions
+            : group?.session
+              ? [group.session]
+              : group?.ordem?.started_at
+                ? [{ started_at: group.ordem.started_at, ended_at: group.ordem.finalized_at || group.ordem.interrupted_at || null }]
+                : [];
 
-        return mapRecordsToIntervals(sessions, {
+          return mapRecordsToIntervals(sessions, {
+            rangeStartMs,
+            rangeEndMs,
+            fallbackEndMs: clampNowMs,
+          });
+        })
+      ),
+      rangeWindow,
+    );
+
+    const stopIntervals = intersectIntervals(
+      mergeIntervals(
+        groups.flatMap((group) => mapRecordsToIntervals(group?.stops || [], {
           rangeStartMs,
           rangeEndMs,
+          endKey: ['ended_at', 'resumed_at', 'stopped_at'],
           fallbackEndMs: clampNowMs,
-        });
-      })
+        }))
+      ),
+      rangeWindow,
     );
 
-    const stopIntervals = mergeIntervals(
-      groups.flatMap((group) => mapRecordsToIntervals(group?.stops || [], {
-        rangeStartMs,
-        rangeEndMs,
-        endKey: ['ended_at', 'resumed_at', 'stopped_at'],
-        fallbackEndMs: clampNowMs,
-      }))
-    );
-
-    const lowEffIntervals = mergeIntervals(
-      groups.flatMap((group) => mapRecordsToIntervals(group?.lowEffLogs || [], {
-        rangeStartMs,
-        rangeEndMs,
-        endKey: 'ended_at',
-        fallbackEndMs: clampNowMs,
-      }))
+    const lowEffIntervals = intersectIntervals(
+      mergeIntervals(
+        groups.flatMap((group) => mapRecordsToIntervals(group?.lowEffLogs || [], {
+          rangeStartMs,
+          rangeEndMs,
+          endKey: 'ended_at',
+          fallbackEndMs: clampNowMs,
+        }))
+      ),
+      rangeWindow,
     );
 
     const stopInsideSessions = intersectIntervals(stopIntervals, sessionIntervals);
@@ -210,7 +222,8 @@ export function calculateMachinePeriodMetrics({
     totalSemProgMs += semProgMs;
   }
 
-  const totalDisponivelH = ((rangeEndMs - rangeStartMs) * machines.length) / 1000 / 60 / 60;
+  const availableMsPerMachine = sumIntervals(rangeWindow);
+  const totalDisponivelH = (availableMsPerMachine * machines.length) / 1000 / 60 / 60;
 
   return {
     totalProdH: totalProdMs / 1000 / 60 / 60,
