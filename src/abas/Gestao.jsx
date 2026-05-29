@@ -773,19 +773,27 @@ export default function Gestao({ registroGrupos = [], openSet, toggleOpen, isAdm
   }, [availableMachines, filteredGroupsForMetrics])
 
   const occupancyMetrics = useMemo(() => {
-    const workWindows = getShiftWindowsInRange(range.start, range.end, {
+    const zone = 'America/Sao_Paulo'
+    const effectiveStart = selectedDay !== 'all'
+      ? DateTime.fromISO(selectedDay, { zone }).startOf('day')
+      : range.start
+    const effectiveEnd = selectedDay !== 'all'
+      ? DateTime.fromISO(selectedDay, { zone }).endOf('day')
+      : range.end
+
+    const workWindows = getShiftWindowsInRange(effectiveStart, effectiveEnd, {
       shiftKeys: shiftFilter !== 'all' ? [shiftFilter] : ACTIVE_SHIFT_KEYS,
       setupMinutes: 0,
     })
 
     return calculateMachinePeriodMetrics({
       groupsByMachine,
-      filterStart: range.start.toJSDate(),
-      filterEnd: range.end.toJSDate(),
+      filterStart: effectiveStart.toJSDate(),
+      filterEnd: effectiveEnd.toJSDate(),
       machines: availableMachines,
       workWindows,
     })
-  }, [availableMachines, groupsByMachine, range.end, range.start, shiftFilter])
+  }, [availableMachines, groupsByMachine, range.end, range.start, shiftFilter, selectedDay])
 
   const orderRecords = useMemo(() => {
     return orderGroupsInRange.map((group) => {
