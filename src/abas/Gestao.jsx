@@ -242,11 +242,15 @@ function buildBarPercent(value, max) {
 
 function extractIsoDatePrefix(value) {
   const raw = text(value)
-  const match = raw.match(/^(\d{4}-\d{2}-\d{2})/)
+  const match = raw.match(/^(\d{4}-\d{2}-\d{2})$/)
   return match ? match[1] : null
 }
 
 function getRecordDayKey(timestamp) {
+  if (timestamp instanceof Date) {
+    return DateTime.fromJSDate(timestamp, { zone: 'America/Sao_Paulo' }).toISODate()
+  }
+
   const rawDate = extractIsoDatePrefix(timestamp)
   if (rawDate) return rawDate
 
