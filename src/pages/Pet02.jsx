@@ -677,7 +677,7 @@ if (typeof window !== "undefined") {
         </div>
 
         <div className={statusClass(ativa?.status)}>
-          <Etiqueta o={ativa} variant="pet01" saldoCaixas={saldo} lidasCaixas={lidas} />
+          <Etiqueta o={ativa} variant="pet01" saldoCaixas={saldo} lidasCaixas={lidas} lidasPecas={ativa?.apontadas_pieces} />
                             {ativa?.status === "PARADA" && stopReason && (
                   <div className="stop-reason-below-P2">{stopReason}</div>
                   )}

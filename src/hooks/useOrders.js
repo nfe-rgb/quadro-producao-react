@@ -44,14 +44,69 @@ let runtimeViewAvailability = readCachedAvailability(RUNTIME_VIEW_STORAGE_KEY)
 let sessionsTableAvailability = 'unknown'
 let scheduledStopsTableAvailability = readCachedAvailability(SCHEDULED_STOPS_TABLE_STORAGE_KEY)
 
-function countByOrderId(rows) {
-  const counts = {}
+function mergeRowsById(rows) {
+  const byId = new Map()
+  const withoutId = []
+
   for (const row of rows || []) {
-    const key = row?.order_id != null ? String(row.order_id) : null
-    if (!key) continue
-    counts[key] = (counts[key] || 0) + 1
+    const rowId = normalizeOptionalOrderField(row?.id)
+    if (rowId) {
+      byId.set(rowId, row)
+    } else {
+      withoutId.push(row)
+    }
   }
-  return counts
+
+  return [...byId.values(), ...withoutId]
+}
+
+function buildProductionTotalsByOrder(orders, rows, valueField) {
+  const totals = {}
+  const ordersByCode = new Map()
+  const ordersById = new Map()
+
+  for (const order of orders || []) {
+    const id = normalizeOptionalOrderField(order?.source_order_id ?? order?.id ?? order?.order_id)
+    const code = normalizeOptionalOrderField(order?.code ?? order?.op_code)
+    if (!id) continue
+
+    totals[id] = totals[id] || 0
+    if (code) {
+      const codeMatches = ordersByCode.get(code) || []
+      codeMatches.push(id)
+      ordersByCode.set(code, codeMatches)
+    }
+    ordersById.set(id, id)
+  }
+
+  for (const row of rows || []) {
+    const rowCode = normalizeOptionalOrderField(row?.op_code ?? row?.order_code ?? row?.code)
+    const rowOrderId = normalizeOptionalOrderField(row?.order_id)
+    const matchingOrderIds = new Set()
+
+    if (rowCode && ordersByCode.has(rowCode)) {
+      for (const id of ordersByCode.get(rowCode)) matchingOrderIds.add(id)
+    }
+    if (rowOrderId && ordersById.has(rowOrderId)) {
+      matchingOrderIds.add(rowOrderId)
+    }
+    if (matchingOrderIds.size === 0) continue
+
+    const value = valueField ? Number(row?.[valueField] ?? 0) : 1
+    if (!Number.isFinite(value) || value <= 0) continue
+
+    for (const id of matchingOrderIds) {
+      totals[id] = (totals[id] || 0) + value
+    }
+  }
+
+  return totals
+}
+
+function parsePiecesPerBox(val) {
+  if (val == null) return 0
+  const digits = String(val).replace(/[^0-9]/g, '')
+  return digits ? Number(digits) : 0
 }
 
 function normalizeOptionalOrderField(value) {
@@ -217,21 +272,59 @@ export default function useOrders() {
   const runtimeRefreshPromiseRef = useRef(null)
   const runtimeRefreshQueuedRef = useRef(false)
 
-  // Reduzido para buscar apenas o campo necessário
-  const fetchScanCounts = useCallback(async (orderIds) => {
-    if (!Array.isArray(orderIds) || orderIds.length === 0) return {}
+  const fetchScanCounts = useCallback(async (orders) => {
+    if (!Array.isArray(orders) || orders.length === 0) return { scanCounts: {}, scanPieces: {}, manualCounts: {} }
 
-    const { data, error } = await supabase
-      .from('production_scans')
-      .select('order_id')
-      .in('order_id', orderIds)
+    const orderIds = Array.from(new Set(
+      orders.map((order) => normalizeOptionalOrderField(order?.source_order_id ?? order?.id ?? order?.order_id)).filter(Boolean)
+    ))
+    const orderCodes = Array.from(new Set(
+      orders.map((order) => normalizeOptionalOrderField(order?.code ?? order?.op_code)).filter(Boolean)
+    ))
 
-    if (error) {
-      console.warn('Falha ao buscar contagem de scans:', error)
-      return {}
+    const emptyRes = { data: [], error: null }
+    const [scansByIdRes, scansByCodeRes, manualByIdRes, manualByCodeRes] = await Promise.all([
+      orderIds.length
+        ? supabase
+            .from('production_scans')
+            .select('id, order_id, op_code, code, scanned_box, qty_pieces')
+            .in('order_id', orderIds)
+        : Promise.resolve(emptyRes),
+      orderCodes.length
+        ? supabase
+            .from('production_scans')
+            .select('id, order_id, op_code, code, scanned_box, qty_pieces')
+            .in('op_code', orderCodes)
+        : Promise.resolve(emptyRes),
+      orderIds.length
+        ? supabase
+            .from('injection_production_entries')
+            .select('id, order_id, order_code, good_qty')
+            .in('order_id', orderIds)
+        : Promise.resolve(emptyRes),
+      orderCodes.length
+        ? supabase
+            .from('injection_production_entries')
+            .select('id, order_id, order_code, good_qty')
+            .in('order_code', orderCodes)
+        : Promise.resolve(emptyRes),
+    ])
+
+    for (const res of [scansByIdRes, scansByCodeRes]) {
+      if (res.error) console.warn('Falha ao buscar contagem de scans:', res.error)
+    }
+    for (const res of [manualByIdRes, manualByCodeRes]) {
+      if (res.error) console.warn('Falha ao buscar entradas manuais de produção:', res.error)
     }
 
-    return countByOrderId(data)
+    const scanRows = mergeRowsById([...(scansByIdRes.data || []), ...(scansByCodeRes.data || [])])
+    const manualRows = mergeRowsById([...(manualByIdRes.data || []), ...(manualByCodeRes.data || [])])
+
+    return {
+      scanCounts: buildProductionTotalsByOrder(orders, scanRows),
+      scanPieces: buildProductionTotalsByOrder(orders, scanRows, 'qty_pieces'),
+      manualCounts: buildProductionTotalsByOrder(orders, manualRows, 'good_qty'),
+    }
   }, [])
 
   // Reduzido: selecione apenas os campos realmente usados na UI
@@ -509,17 +602,45 @@ export default function useOrders() {
     const finalizedOrders = shouldDeriveRuntime
       ? runtimeOrders.filter((order) => !!order?.finalized)
       : runtimeFinalizedRows.map(mapRuntimeOrder)
-    const scanCounts = await fetchScanCounts(openOrders.map((order) => order.id))
 
-    const normalizedOpenOrders = openOrders.map((order) => ({
-      ...order,
-      scanned_count: Number(scanCounts[String(order.id)] || 0),
-    }))
+    const allOrders = [...openOrders, ...finalizedOrders]
+    const productionCounts = await fetchScanCounts(allOrders)
 
-    const normalizedFinalizedOrders = finalizedOrders.map((order) => ({
-      ...order,
-      scanned_count: Number(order.scanned_count || 0),
-    }))
+    const normalizedOpenOrders = openOrders.map((order) => {
+      const orderKey = String(order.source_order_id || order.id)
+      const scannedCount = Number(productionCounts.scanCounts[orderKey] || 0)
+      const scanPieces = Number(productionCounts.scanPieces[orderKey] || 0)
+      const manualPieces = Number(productionCounts.manualCounts[orderKey] || 0)
+      const piecesPerBox = parsePiecesPerBox(order.standard)
+      const scannedPieces = scanPieces > 0 ? scanPieces : (piecesPerBox > 0 ? scannedCount * piecesPerBox : 0)
+      const apontadasPecas = (manualPieces > 0 || scannedPieces > 0) ? manualPieces + scannedPieces : undefined
+
+      return {
+        ...order,
+        scanned_count: scannedCount,
+        manual_pieces: manualPieces,
+        scanned_pieces: scannedPieces,
+        apontadas_pieces: apontadasPecas,
+      }
+    })
+
+    const normalizedFinalizedOrders = finalizedOrders.map((order) => {
+      const orderKey = String(order.source_order_id || order.id)
+      const scannedCount = Number(productionCounts.scanCounts[orderKey] || Number(order.scanned_count || 0))
+      const scanPieces = Number(productionCounts.scanPieces[orderKey] || 0)
+      const manualPieces = Number(productionCounts.manualCounts[orderKey] || 0)
+      const piecesPerBox = parsePiecesPerBox(order.standard)
+      const scannedPieces = scanPieces > 0 ? scanPieces : (piecesPerBox > 0 ? scannedCount * piecesPerBox : 0)
+      const apontadasPecas = (manualPieces > 0 || scannedPieces > 0) ? manualPieces + scannedPieces : undefined
+
+      return {
+        ...order,
+        scanned_count: scannedCount,
+        manual_pieces: manualPieces,
+        scanned_pieces: scannedPieces,
+        apontadas_pieces: apontadasPecas,
+      }
+    })
 
     const canPersistOpenOrders = shouldDeriveRuntime
       ? !baseSnapshot?.openRes?.error
@@ -585,7 +706,7 @@ export default function useOrders() {
       if (cached.length > 0) setOrdens(cached)
     })
 
-    const trackedTables = ['orders', 'order_machine_sessions', 'machine_stops', 'low_efficiency_logs']
+    const trackedTables = ['orders', 'order_machine_sessions', 'machine_stops', 'low_efficiency_logs', 'injection_production_entries']
     if (scheduledStopsTableState === 'available') trackedTables.push(SCHEDULED_STOPS_TABLE)
     const channels = trackedTables.map((tableName) => (
       supabase
@@ -600,13 +721,37 @@ export default function useOrders() {
       .channel('production-runtime-scans')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'production_scans' }, (payload) => {
         const orderId = payload?.new?.order_id != null ? String(payload.new.order_id) : null
-        if (!orderId) return
+        const opCode = normalizeOptionalOrderField(payload?.new?.op_code ?? payload?.new?.code)
+        if (!orderId && !opCode) return
 
-        setOrdens((previous) => previous.map((order) => (
-          String(order.id) === orderId
-            ? { ...order, scanned_count: Number(order.scanned_count || 0) + 1 }
-            : order
-        )))
+        const queuedQtyPieces = Number(payload?.new?.qty_pieces ?? 0)
+
+        setOrdens((previous) => previous.map((order) => {
+          const sameId = orderId && String(order.source_order_id || order.id) === orderId
+          const sameCode = opCode && normalizeOptionalOrderField(order.code ?? order.op_code) === opCode
+          if (!sameId && !sameCode) return order
+
+          const currentScannedCount = Number(order.scanned_count || 0)
+          const currentScannedPieces = Number(order.scanned_pieces || 0)
+          const currentManualPieces = Number(order.manual_pieces || 0)
+          const piecesPerBox = parsePiecesPerBox(order.standard)
+          const addedPieces = queuedQtyPieces > 0
+            ? queuedQtyPieces
+            : piecesPerBox > 0
+              ? piecesPerBox
+              : 0
+          const updatedScannedPieces = currentScannedPieces + addedPieces
+          const updatedApontadasPieces = (currentManualPieces > 0 || updatedScannedPieces > 0)
+            ? currentManualPieces + updatedScannedPieces
+            : undefined
+
+          return {
+            ...order,
+            scanned_count: currentScannedCount + 1,
+            scanned_pieces: updatedScannedPieces,
+            apontadas_pieces: updatedApontadasPieces,
+          }
+        }))
       })
       .subscribe()
 

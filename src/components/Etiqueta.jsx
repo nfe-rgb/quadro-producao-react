@@ -1,6 +1,6 @@
 // src/components/Etiqueta.jsx
 
-export default function Etiqueta({ o, variant = 'painel', saldoCaixas, lidasCaixas, compactPills = false }) {
+export default function Etiqueta({ o, variant = 'painel', lidasCaixas, lidasPecas, compactPills = false }) {
   if (!o) return null
 
   const opCode = o.code || o.op_code || o.o?.code || o.ordem?.code
@@ -19,13 +19,48 @@ export default function Etiqueta({ o, variant = 'painel', saldoCaixas, lidasCaix
     return Number.isFinite(parsed) ? parsed.toLocaleString('pt-BR') : v
   }
 
-  // classe para a pílula de saldo
-  const saldoClass = (() => {
-    if (typeof saldoCaixas !== 'number') return ''
-    if (saldoCaixas === 0) return 'ok'     // concluído
-    if (saldoCaixas <= 3) return 'warn'    // reta final
-    return ''                              // neutro
-  })()
+  const parseNumber = (v) => {
+    if (typeof v === 'number' && Number.isFinite(v)) return v
+    if (v === null || v === undefined || v === '') return NaN
+    const parsed = Number(String(v).replace(/\./g, '').replace(',', '.'))
+    return Number.isFinite(parsed) ? parsed : NaN
+  }
+
+  const parsePiecesPerBox = (val) => {
+    if (val == null) return 0
+    const digits = String(val).replace(/[^0-9]/g, '')
+    return digits ? Number(digits) : 0
+  }
+
+  const totalQty = parseNumber(o.qty)
+  const piecesPerBox = parsePiecesPerBox(o.standard)
+  const effectiveLidasCaixas = typeof lidasCaixas === 'number'
+    ? lidasCaixas
+    : Number.isFinite(Number(o?.scanned_count || 0))
+      ? Number(o.scanned_count || 0)
+      : undefined
+  const effectiveLidasPecas = typeof lidasPecas === 'number' && Number.isFinite(lidasPecas) && lidasPecas > 0
+    ? lidasPecas
+    : Number.isFinite(Number(o?.apontadas_pieces || 0)) && Number(o.apontadas_pieces || 0) > 0
+      ? Number(o.apontadas_pieces)
+      : undefined
+  const lidasPiecesFromBoxes = (typeof effectiveLidasCaixas === 'number' && piecesPerBox > 0)
+    ? effectiveLidasCaixas * piecesPerBox
+    : undefined
+  const lidasPieces = effectiveLidasPecas != null
+    ? effectiveLidasPecas
+    : lidasPiecesFromBoxes
+
+  const numericLidasPieces = (typeof lidasPieces === 'number' && Number.isFinite(lidasPieces))
+    ? Math.max(0, lidasPieces)
+    : 0
+  const hasProgress = totalQty > 0
+  const progressPercent = hasProgress
+    ? Math.round(Math.min(100, Math.max(0, (numericLidasPieces / totalQty) * 100)))
+    : 0
+  const displayLidas = hasProgress
+    ? numericLidasPieces
+    : typeof lidasCaixas === 'number' ? lidasCaixas : undefined
 
   // ===== variante FILA =====
   if (variant === 'fila') {
@@ -37,29 +72,31 @@ export default function Etiqueta({ o, variant = 'painel', saldoCaixas, lidasCaix
           {customer && <div><b>Cliente:</b> {customer}</div>}
           {o.product && <div><b>Produto:</b> {o.product}</div>}
           {o.color && <div><b>Cor:</b> {o.color}</div>}
-          {o.qty && <div><b>Qtd:</b> {fmtThousands(o.qty)}</div>}
+          {o.qty && (
+            <div className="etiqueta-qty">
+              <b>Qtd:</b>{' '}
+              {displayLidas != null
+                ? `${fmtThousands(displayLidas)}/${fmtThousands(o.qty)}`
+                : fmtThousands(o.qty)}
+            </div>
+          )}
+          {hasProgress && (
+            <div className="etiqueta-progress">
+              <div className="etiqueta-progress-track">
+                <div
+                  className="etiqueta-progress-fill"
+                  style={{ width: `${progressPercent}%` }}
+                />
+              </div>
+              <small>{progressPercent}%</small>
+            </div>
+          )}
           {o.boxes && <div><b>Volumes:</b> {o.boxes}</div>}
           {o.standard && <div><b>Padrão:</b> {fmtThousands(o.standard)}</div>}
           {o.due_date && <div><b>Prazo:</b> {fmtDate(o.due_date)}</div>}
           {temObsLowEff && <div><b>Baixa Eficiência:</b> {o.loweff_notes}</div>}
           {o.notes && <div className="muted">{o.notes}</div>}
         </div>
-        {(typeof lidasCaixas === 'number' || typeof saldoCaixas === 'number') && (
-          <div className="etiqueta-fila-side">
-            {typeof lidasCaixas === 'number' && (
-              <div className="etiqueta-fila-lidas">
-                <span style={{fontWeight:'bold',fontSize:'1.2em'}}>Lidas:</span><br/>
-                <span style={{fontWeight:'bold',fontSize:'2em'}}>{lidasCaixas}</span>
-              </div>
-            )}
-            {typeof saldoCaixas === 'number' && (
-              <div className={`etiqueta-fila-saldo ${saldoClass}`} style={{marginTop:12}}>
-                <span style={{fontWeight:'bold',fontSize:'1.2em'}}>Saldo:</span><br/>
-                <span style={{fontWeight:'bold',fontSize:'2em'}}>{saldoCaixas}</span>
-              </div>
-            )}
-          </div>
-        )}
       </div>
     )
   }
@@ -73,25 +110,29 @@ export default function Etiqueta({ o, variant = 'painel', saldoCaixas, lidasCaix
       {customer && <div><b>Cliente:</b> {customer}</div>}
       {o.product && <div><b>Produto:</b> {o.product}</div>}
       {o.color && <div><b>Cor:</b> {o.color}</div>}
-      {o.qty && <div><b>Qtd:</b> {fmtThousands(o.qty)}</div>}
+      {o.qty && (
+        <div className="etiqueta-qty">
+          <b>Qtd:</b>{' '}
+          {displayLidas != null
+            ? `${fmtThousands(displayLidas)}/${fmtThousands(o.qty)}`
+            : fmtThousands(o.qty)}
+        </div>
+      )}
+      {hasProgress && (
+        <div className="etiqueta-progress">
+          <div className="etiqueta-progress-track">
+            <div
+              className="etiqueta-progress-fill"
+              style={{ width: `${progressPercent}%` }}
+            />
+          </div>
+          <small>{progressPercent}%</small>
+        </div>
+      )}
 
       {o.boxes && (
         <>
           <div><b>Volumes:</b> {o.boxes}</div>
-          {(typeof lidasCaixas === 'number' || typeof saldoCaixas === 'number') && (
-            <div className="pet-pill-row">
-              {typeof lidasCaixas === 'number' && (
-                <span className="pet-pill" title="Caixas já bipadas">
-                  Apontadas: <b>{lidasCaixas}</b>
-                </span>
-              )}
-              {typeof saldoCaixas === 'number' && (
-                <span className={`pet-pill ${saldoClass}`} title={`Faltam ${saldoCaixas} caixas`}>
-                  Saldo: <b>{saldoCaixas}</b>
-                </span>
-              )}
-            </div>
-          )}
         </>
       )}
 
@@ -115,25 +156,29 @@ export default function Etiqueta({ o, variant = 'painel', saldoCaixas, lidasCaix
       {customer && <div><b>Cliente:</b> {customer}</div>}
       {o.product && <div><b>Produto:</b> {o.product}</div>}
       {o.color && <div><b>Cor:</b> {o.color}</div>}
-      {o.qty && <div><b>Qtd:</b> {fmtThousands(o.qty)}</div>}
+      {o.qty && (
+        <div className="etiqueta-qty">
+          <b>Qtd:</b>{' '}
+          {displayLidas != null
+            ? `${fmtThousands(displayLidas)}/${fmtThousands(o.qty)}`
+            : fmtThousands(o.qty)}
+        </div>
+      )}
+      {hasProgress && (
+        <div className="etiqueta-progress">
+          <div className="etiqueta-progress-track">
+            <div
+              className="etiqueta-progress-fill"
+              style={{ width: `${progressPercent}%` }}
+            />
+          </div>
+          <small>{progressPercent}%</small>
+        </div>
+      )}
 
       {o.boxes && (
         <>
           <div><b>Volumes:</b> {o.boxes}</div>
-          {(typeof lidasCaixas === 'number' || typeof saldoCaixas === 'number') && (
-            <div className={`pill-row ${compactPills ? 'compact-inside' : ''}`}>
-              {typeof lidasCaixas === 'number' && (
-                <span className={`pill ${compactPills ? 'compact-pill' : ''}`} title="Caixas já bipadas">
-                  Apontadas: <b>{lidasCaixas}</b>
-                </span>
-              )}
-              {typeof saldoCaixas === 'number' && (
-                <span className={`pill ${saldoClass} ${compactPills ? 'compact-pill' : ''}`} title={`Faltam ${saldoCaixas} caixas`}>
-                  Saldo: <b>{saldoCaixas}</b>
-                </span>
-              )}
-            </div>
-          )}
         </>
       )}
 

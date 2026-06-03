@@ -831,8 +831,9 @@ export default function Lista({
                     <Etiqueta
                       o={ativa}
                       variant="painel"
-                      lidasCaixas={["P1","P2","P3","P4"].includes(m) ? lidas : undefined}
-                      saldoCaixas={["P1","P2","P3","P4"].includes(m) ? saldo : undefined}
+                      lidasCaixas={lidas}
+                      lidasPecas={ativa?.apontadas_pieces}
+                      saldoCaixas={saldo}
                     />
                     {previsaoFim && (
                       <div className="small" style={{ marginTop: 8 }}>

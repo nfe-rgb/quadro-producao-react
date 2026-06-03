@@ -820,40 +820,6 @@ export default function Estoque({ readOnly = false, allowedClient = '', enablePr
       .filter(Boolean)
   }, [finishedScans, allItemsByCode, allowedClientNormalized, finishedInventoryClientFilter])
 
-  const finishedOutputRows = useMemo(() => {
-    const selectedClientNormalized = allowedClientNormalized
-      ? ''
-      : normalizeClientValue(finishedInventoryClientFilter)
-
-    return (finishedOutputs || [])
-      .map((row) => {
-        const sourceItem = allItemsByCode[normalize(row?.itemCode)]
-        const client = normalize(row?.client || sourceItem?.cliente || sourceItem?.client)
-
-        if (allowedClientNormalized && !matchesAllowedClient(client, allowedClientNormalized)) return null
-        if (selectedClientNormalized && !matchesAllowedClient(client, selectedClientNormalized)) return null
-
-        return {
-          ...row,
-          product: normalize(row?.product) || normalize(sourceItem?.description) || '-',
-          imageUrl: normalize(sourceItem?.image_url),
-          client: client || '-',
-        }
-      })
-      .filter(Boolean)
-  }, [finishedOutputs, allItemsByCode, allowedClientNormalized, finishedInventoryClientFilter])
-
-  const finishedOutputByCode = useMemo(() => {
-    const map = {}
-    ;(finishedOutputRows || []).forEach((row) => {
-      const code = normalize(row?.itemCode)
-      const quantity = Number(row?.quantity)
-      if (!code || !Number.isFinite(quantity) || quantity <= 0) return
-      map[code] = (map[code] || 0) + quantity
-    })
-    return map
-  }, [finishedOutputRows])
-
   const finishedInventoryRows = useMemo(() => {
     const grouped = new Map()
 
@@ -1092,13 +1058,6 @@ export default function Estoque({ readOnly = false, allowedClient = '', enablePr
       }
       return next
     })
-  }
-
-  function openManualInventoryModal() {
-    setManualInventoryError('')
-    setManualInventoryDate(nowIsoDate())
-    setManualInventoryQtyByCode({})
-    setManualInventoryModalOpen(true)
   }
 
   function closeManualInventoryModal() {
@@ -1618,6 +1577,7 @@ export default function Estoque({ readOnly = false, allowedClient = '', enablePr
           })
         }
       } catch {
+        // Mantem a importacao mesmo se a resolucao auxiliar de OP falhar.
       }
     }
 

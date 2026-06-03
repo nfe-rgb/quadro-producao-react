@@ -23,6 +23,32 @@ function extractItemCodeFromOrderProduct(product) {
   return t.split("-")[0]?.trim() || null;
 }
 
+function mergeRowsById(rows) {
+  const byId = new Map();
+  const withoutId = [];
+
+  for (const row of rows || []) {
+    const rowId = row?.id != null ? String(row.id).trim() : "";
+    if (rowId) byId.set(rowId, row);
+    else withoutId.push(row);
+  }
+
+  return [...byId.values(), ...withoutId];
+}
+
+function normalizeOptionalValue(value) {
+  const normalized = String(value ?? "").trim();
+  return normalized || null;
+}
+
+function getOrderRecordId(order) {
+  return normalizeOptionalValue(order?.source_order_id ?? order?.id ?? order?.order_id);
+}
+
+function getOrderRecordCode(order) {
+  return normalizeOptionalValue(order?.code ?? order?.op_code ?? order?.o?.code ?? order?.ordem?.code);
+}
+
 export default function Painel({
   ativosPorMaquina,
   paradas,
@@ -243,7 +269,27 @@ export default function Painel({
               String(p?.op_code) === String(inItem?.op_code)
           );
           if (match && typeof match.scanned_count !== "undefined") {
-            return { ...inItem, scanned_count: match.scanned_count };
+            const incomingScannedCount = Number(inItem.scanned_count || 0);
+            const previousScannedCount = Number(match.scanned_count || 0);
+            const incomingScannedPieces = Number(inItem.scanned_pieces || 0);
+            const previousScannedPieces = Number(match.scanned_pieces || 0);
+            const incomingManualPieces = Number(inItem.manual_pieces || 0);
+            const previousManualPieces = Number(match.manual_pieces || 0);
+
+            const mergedItem = {
+              ...inItem,
+              scanned_count: Math.max(incomingScannedCount, previousScannedCount),
+              scanned_pieces: Math.max(incomingScannedPieces, previousScannedPieces),
+              manual_pieces: Math.max(incomingManualPieces, previousManualPieces),
+            };
+            return {
+              ...mergedItem,
+              apontadas_pieces: Math.max(
+                Number(inItem.apontadas_pieces || 0),
+                Number(match.apontadas_pieces || 0),
+                Number(computeApontadasPieces(mergedItem) || 0)
+              ) || undefined,
+            };
           }
           // normalize scanned_count to number (0 if missing)
           return {
@@ -263,11 +309,165 @@ export default function Painel({
     });
   }, [ativosPorMaquina]);
 
+  useEffect(() => {
+    let active = true;
+
+    async function fetchVisibleProductionTotals() {
+      const targetsMap = new Map();
+
+      for (const machineId of MAQUINAS) {
+        const item = (ativosPorMaquina?.[machineId] || [])[0];
+        if (!item) continue;
+
+        const id = getOrderRecordId(item);
+        const code = getOrderRecordCode(item);
+        if (!id && !code) continue;
+
+        targetsMap.set(`${id || ""}|${code || ""}`, { id, code });
+      }
+
+      const targets = Array.from(targetsMap.values());
+      if (targets.length === 0) return;
+
+      const orderIds = Array.from(new Set(targets.map((target) => target.id).filter(Boolean)));
+      const opCodes = Array.from(new Set(targets.map((target) => target.code).filter(Boolean)));
+      const emptyRes = { data: [], error: null };
+
+      try {
+        const [scansByIdRes, scansByCodeRes, manualByIdRes, manualByCodeRes] = await Promise.all([
+          orderIds.length
+            ? supabase
+                .from("production_scans")
+                .select("id, order_id, op_code, qty_pieces")
+                .in("order_id", orderIds)
+            : Promise.resolve(emptyRes),
+          opCodes.length
+            ? supabase
+                .from("production_scans")
+                .select("id, order_id, op_code, qty_pieces")
+                .in("op_code", opCodes)
+            : Promise.resolve(emptyRes),
+          orderIds.length
+            ? supabase
+                .from("injection_production_entries")
+                .select("id, order_id, order_code, good_qty")
+                .in("order_id", orderIds)
+            : Promise.resolve(emptyRes),
+          opCodes.length
+            ? supabase
+                .from("injection_production_entries")
+                .select("id, order_id, order_code, good_qty")
+                .in("order_code", opCodes)
+            : Promise.resolve(emptyRes),
+        ]);
+
+        const scanErr = scansByIdRes.error || scansByCodeRes.error;
+        const manualErr = manualByIdRes.error || manualByCodeRes.error;
+        if (scanErr) console.warn("Painel: falha ao carregar bipagens visiveis:", scanErr);
+        if (manualErr) console.warn("Painel: falha ao carregar apontamentos visiveis:", manualErr);
+        if (scanErr && manualErr) return;
+
+        const totals = new Map();
+        const ensureTotal = (key) => {
+          if (!totals.has(key)) {
+            totals.set(key, { scannedCount: 0, scannedPieces: 0, manualPieces: 0 });
+          }
+          return totals.get(key);
+        };
+        const matchingTargetKeys = (row) => {
+          const rowOrderId = normalizeOptionalValue(row?.order_id);
+          const rowCode = normalizeOptionalValue(row?.op_code ?? row?.order_code);
+          const keys = new Set();
+
+          for (const [key, target] of targetsMap.entries()) {
+            if ((rowOrderId && target.id === rowOrderId) || (rowCode && target.code === rowCode)) {
+              keys.add(key);
+            }
+          }
+
+          return keys;
+        };
+
+        const scanRows = mergeRowsById([...(scansByIdRes.data || []), ...(scansByCodeRes.data || [])]);
+        for (const row of scanRows) {
+          for (const key of matchingTargetKeys(row)) {
+            const total = ensureTotal(key);
+            const qtyPieces = Number(row?.qty_pieces || 0);
+            total.scannedCount += 1;
+            if (Number.isFinite(qtyPieces) && qtyPieces > 0) total.scannedPieces += qtyPieces;
+          }
+        }
+
+        const manualRows = mergeRowsById([...(manualByIdRes.data || []), ...(manualByCodeRes.data || [])]);
+        for (const row of manualRows) {
+          for (const key of matchingTargetKeys(row)) {
+            const goodQty = Number(row?.good_qty || 0);
+            if (!Number.isFinite(goodQty) || goodQty <= 0) continue;
+            ensureTotal(key).manualPieces += goodQty;
+          }
+        }
+
+        if (!active) return;
+
+        setLocalAtivos((prev) => {
+          if (!prev) return prev;
+          const next = { ...prev };
+
+          for (const machineId of Object.keys(next)) {
+            next[machineId] = (next[machineId] || []).map((item) => {
+              const key = `${getOrderRecordId(item) || ""}|${getOrderRecordCode(item) || ""}`;
+              const total = totals.get(key);
+              if (!total) return item;
+
+              const fallbackScannedPieces = total.scannedPieces > 0
+                ? total.scannedPieces
+                : total.scannedCount * parsePiecesPerBox(item?.standard);
+              const updatedItem = {
+                ...item,
+                scanned_count: total.scannedCount,
+                scanned_pieces: fallbackScannedPieces,
+                manual_pieces: total.manualPieces,
+              };
+
+              return {
+                ...updatedItem,
+                apontadas_pieces: computeApontadasPieces(updatedItem),
+              };
+            });
+          }
+
+          return next;
+        });
+      } catch (err) {
+        console.warn("Painel: erro ao carregar totais de producao visiveis:", err);
+      }
+    }
+
+    fetchVisibleProductionTotals();
+    return () => {
+      active = false;
+    };
+  }, [ativosPorMaquina]);
+
+  function computeApontadasPieces(item) {
+    const scannedCount = Number(item?.scanned_count || 0);
+    const manualPieces = Number(item?.manual_pieces || 0);
+    const storedScannedPieces = Number(item?.scanned_pieces || 0);
+    const piecesPerBox = parsePiecesPerBox(item?.standard);
+    const scannedPieces = storedScannedPieces > 0
+      ? storedScannedPieces
+      : piecesPerBox > 0
+        ? scannedCount * piecesPerBox
+        : 0;
+    return manualPieces > 0 || scannedPieces > 0 ? manualPieces + scannedPieces : undefined;
+  }
+
   // util helper para testar se um item corresponde a um order_id / code
   function matchesOrder(item, orderIdOrCode) {
     if (!item || !orderIdOrCode) return false;
     const candidates = [
       item?.id,
+      item?.source_order_id,
       item?.order_id,
       item?.ordem?.id,
       item?.order?.id,
@@ -296,22 +496,42 @@ export default function Painel({
 
             // prefer machine_id informado no scan; se não vier, deixamos procurar em todas
             const scanOrderId = newRow.order_id;
+            const scanOpCode = String(newRow.op_code || "").trim();
             const scanMachineId = newRow.machine_id;
 
-            // obtém count atual de production_scans para essa order_id
+            // obtém contagem de caixas e peças atuais de production_scans para essa O.P.
             let scannedCount = 0;
+            let scanPieces = 0;
             try {
-              const { error: countErr, count } = await supabase
-                .from("production_scans")
-                .select("*", { head: true, count: "exact" })
-                .eq("order_id", scanOrderId);
+              const [scanByIdRes, scanByCodeRes] = await Promise.all([
+                scanOrderId != null
+                  ? supabase
+                      .from("production_scans")
+                      .select("id, qty_pieces")
+                      .eq("order_id", scanOrderId)
+                  : Promise.resolve({ data: [], error: null }),
+                scanOpCode
+                  ? supabase
+                      .from("production_scans")
+                      .select("id, qty_pieces")
+                      .eq("op_code", scanOpCode)
+                  : Promise.resolve({ data: [], error: null }),
+              ]);
 
-              if (!countErr) scannedCount = Number(count || 0);
-              else {
-                console.warn("Painel: falha ao calcular scanned_count:", countErr);
+              const scanErr = scanByIdRes.error || scanByCodeRes.error;
+              const scanRows = mergeRowsById([...(scanByIdRes.data || []), ...(scanByCodeRes.data || [])]);
+
+              if (!scanErr && Array.isArray(scanRows)) {
+                scannedCount = scanRows.length;
+                scanPieces = scanRows.reduce((sum, row) => {
+                  const pieces = Number(row?.qty_pieces ?? 0);
+                  return sum + (Number.isFinite(pieces) && pieces > 0 ? pieces : 0);
+                }, 0);
+              } else if (scanErr) {
+                console.warn("Painel: falha ao carregar production_scans para O.P.:", scanErr);
               }
             } catch (err) {
-              console.error("Painel: erro ao consultar scanned_count:", err);
+              console.error("Painel: erro ao consultar production_scans:", err);
             }
 
             // Atualiza localAtivos apenas na máquina afetada (se souber) ou procura em todas
@@ -319,6 +539,7 @@ export default function Painel({
               if (!prev) return prev;
               const copy = { ...prev };
               const orderIdStr = String(scanOrderId);
+              const orderTarget = scanOpCode || orderIdStr;
               let found = false;
 
               // prioridade: aplicar apenas na machine informada pelo scan (evita percorrer tudo)
@@ -329,9 +550,17 @@ export default function Painel({
 
               for (const machine of machinesToCheck) {
                 copy[machine] = (copy[machine] || []).map((item) => {
-                  if (matchesOrder(item, orderIdStr)) {
+                  if (matchesOrder(item, orderTarget)) {
                     found = true;
-                    return { ...item, scanned_count: scannedCount };
+                    const updatedItem = {
+                      ...item,
+                      scanned_count: scannedCount,
+                      scanned_pieces: scanPieces > 0 ? scanPieces : item.scanned_pieces,
+                    };
+                    return {
+                      ...updatedItem,
+                      apontadas_pieces: computeApontadasPieces(updatedItem),
+                    };
                   }
                   return item;
                 });
@@ -341,9 +570,17 @@ export default function Painel({
               if (!found) {
                 for (const machine of Object.keys(copy)) {
                   copy[machine] = (copy[machine] || []).map((item) => {
-                    if (matchesOrder(item, orderIdStr)) {
+                    if (matchesOrder(item, orderTarget)) {
                       found = true;
-                      return { ...item, scanned_count: scannedCount };
+                      const updatedItem = {
+                        ...item,
+                        scanned_count: scannedCount,
+                        scanned_pieces: scanPieces > 0 ? scanPieces : item.scanned_pieces,
+                      };
+                      return {
+                        ...updatedItem,
+                        apontadas_pieces: computeApontadasPieces(updatedItem),
+                      };
                     }
                     return item;
                   });
@@ -445,8 +682,10 @@ export default function Painel({
 
           // lidas / saldo: scanned_count agora pode vir do fetch inicial ou do realtime
           const lidas = Number(ativa?.scanned_count || 0);
+          const lidasPecas = Number(ativa?.apontadas_pieces || 0) > 0
+            ? Number(ativa?.apontadas_pieces)
+            : (Number(ativa?.manual_pieces || 0) + Number(ativa?.scanned_pieces || 0)) || undefined
           const saldo = ativa ? Math.max(0, (Number(ativa.boxes) || 0) - lidas) : 0;
-          const showPetCounts = ["P1", "P2", "P3", "P4"].includes(m);
 
           const priorityValue = machinePriorities?.[m];
 
@@ -496,8 +735,9 @@ export default function Painel({
                     <Etiqueta
                       o={ativa}
                       variant="painel"
-                      lidasCaixas={showPetCounts ? lidas : undefined}
-                      saldoCaixas={showPetCounts ? saldo : undefined}
+                      lidasCaixas={lidas}
+                      lidasPecas={lidasPecas}
+                      saldoCaixas={saldo}
                       paradaReason={openStop?.reason}
                       paradaNotes={openStop?.notes}
                     />

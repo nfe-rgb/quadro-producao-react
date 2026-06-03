@@ -24,6 +24,7 @@ function ItemResumo({
 
   const opCode = ordem?.code || ordem?.o?.code || ordem?.op_code || "-";
   const lidas = Number(ordem?.scanned_count || 0);
+  const lidasPecas = ordem?.apontadas_pieces
   const saldo = Math.max(0, (Number(ordem?.boxes) || 0) - lidas);
   const cycleSeconds = Number(tech?.cycleSeconds || 0);
   const cavities = Number(tech?.cavities || 0);
@@ -37,8 +38,9 @@ function ItemResumo({
         <Etiqueta
           o={ordem}
           variant="painel"
-          lidasCaixas={["P1", "P2", "P3"].includes(machineId) ? lidas : undefined}
-          saldoCaixas={["P1", "P2", "P3"].includes(machineId) ? saldo : undefined}
+          lidasCaixas={lidas}
+          lidasPecas={lidasPecas}
+          saldoCaixas={saldo}
           compactPills={true}
         />
 
