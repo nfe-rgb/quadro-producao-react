@@ -6,7 +6,7 @@ export const ACCESS_LEVEL_2_EMAILS = [];
 export const ACCESS_LEVEL_STOCK_EMAILS = ['producao@savantiplasticos.com.br'];
 export const ACCESS_LEVEL_MENDES_EMAILS = ['scalibur.representacoes@gmail.com'];
 
-export const MAQUINAS = ['P1','P2','P3','P4','I1','I2','I3','I4','I5','I6']
+export const MAQUINAS = ['P1','P2','P3','P4','I1','I2','I3','I4','I5','I6','I7']
 
 export const STATUS = ['AGUARDANDO','PRODUZINDO','BAIXA_EFICIENCIA','PARADA']
 
