@@ -33,12 +33,29 @@ export default function Etiqueta({ o, variant = 'painel', lidasCaixas, lidasPeca
   }
 
   const totalQty = parseNumber(o.qty)
+  const totalCaixas = parseNumber(o.boxes)
   const piecesPerBox = parsePiecesPerBox(o.standard)
-  const effectiveLidasCaixas = typeof lidasCaixas === 'number'
-    ? lidasCaixas
-    : Number.isFinite(Number(o?.scanned_count || 0))
-      ? Number(o.scanned_count || 0)
-      : undefined
+  const parsedLidasCaixas = parseNumber(lidasCaixas)
+  const parsedScannedCount = parseNumber(o?.scanned_count)
+  const caixasApontadas = Number.isFinite(parsedLidasCaixas)
+    ? parsedLidasCaixas
+    : Number.isFinite(parsedScannedCount)
+      ? parsedScannedCount
+      : 0
+  const hasTotalCaixas = Number.isFinite(totalCaixas)
+  const saldoCaixas = hasTotalCaixas ? Math.max(0, totalCaixas - caixasApontadas) : undefined
+  const volumeDisplay = hasTotalCaixas
+    ? `${fmtThousands(caixasApontadas)}/${fmtThousands(totalCaixas)}`
+    : null
+  const saldoBadge = hasTotalCaixas ? (
+    <div className={`etiqueta-saldo ${compactPills ? 'etiqueta-saldo-compact' : ''}`}>
+      <span>Saldo: <strong>{fmtThousands(saldoCaixas)}</strong> Caixas</span>
+    </div>
+  ) : null
+
+  const effectiveLidasCaixas = Number.isFinite(caixasApontadas)
+    ? caixasApontadas
+    : undefined
   const effectiveLidasPecas = typeof lidasPecas === 'number' && Number.isFinite(lidasPecas) && lidasPecas > 0
     ? lidasPecas
     : Number.isFinite(Number(o?.apontadas_pieces || 0)) && Number(o.apontadas_pieces || 0) > 0
@@ -65,7 +82,8 @@ export default function Etiqueta({ o, variant = 'painel', lidasCaixas, lidasPeca
   // ===== variante FILA =====
   if (variant === 'fila') {
     return (
-      <div className={`small etiqueta-fila-flex ${isProgrammedStop ? 'etiqueta-weekend' : ''}`}>
+      <div className={`small etiqueta-layout etiqueta-fila-flex ${isProgrammedStop ? 'etiqueta-weekend' : ''}`}>
+        {saldoBadge}
         <div className="etiqueta-fila-main">
           {interrompida && <div className="badge-interrompida">⚠️ Produção Interrompida</div>}
           {opCode && <div><b>O.P:</b> {opCode}</div>}
@@ -91,7 +109,7 @@ export default function Etiqueta({ o, variant = 'painel', lidasCaixas, lidasPeca
               <small>{progressPercent}%</small>
             </div>
           )}
-          {o.boxes && <div><b>Volumes:</b> {o.boxes}</div>}
+          {volumeDisplay && <div><b>Volumes:</b> {volumeDisplay}</div>}
           {o.standard && <div><b>Padrão:</b> {fmtThousands(o.standard)}</div>}
           {o.due_date && <div><b>Prazo:</b> {fmtDate(o.due_date)}</div>}
           {temObsLowEff && <div><b>Baixa Eficiência:</b> {o.loweff_notes}</div>}
@@ -104,7 +122,8 @@ export default function Etiqueta({ o, variant = 'painel', lidasCaixas, lidasPeca
     // ===== variante pet01 =====
   if (variant === 'pet01') {
   return (
-    <div className={`small ${isProgrammedStop ? 'etiqueta-weekend' : ''}`}>
+    <div className={`small etiqueta-layout ${isProgrammedStop ? 'etiqueta-weekend' : ''}`}>
+      {saldoBadge}
       {interrompida && <div className="badge-interrompida">⚠️ Produção Interrompida</div>}
 
       {customer && <div><b>Cliente:</b> {customer}</div>}
@@ -130,11 +149,7 @@ export default function Etiqueta({ o, variant = 'painel', lidasCaixas, lidasPeca
         </div>
       )}
 
-      {o.boxes && (
-        <>
-          <div><b>Volumes:</b> {o.boxes}</div>
-        </>
-      )}
+      {volumeDisplay && <div><b>Volumes:</b> {volumeDisplay}</div>}
 
       {o.standard && <div><b>Padrão:</b> {fmtThousands(o.standard)}</div>}
       {o.due_date && <div><b>Prazo:</b> {fmtDate(o.due_date)}</div>}
@@ -148,9 +163,9 @@ export default function Etiqueta({ o, variant = 'painel', lidasCaixas, lidasPeca
   // ===== variante PAINEL =====
   return (
     <div
-      className={`small ${weekendClass} ${compactPills ? 'compact-pills-layout' : ''}`}
-      style={{ position: 'relative' }}
+      className={`small etiqueta-layout ${weekendClass} ${compactPills ? 'compact-pills-layout' : ''}`}
     >
+      {saldoBadge}
       {interrompida && <div className="badge-interrompida">⚠️ Produção Interrompida</div>}
  
       {customer && <div><b>Cliente:</b> {customer}</div>}
@@ -176,11 +191,7 @@ export default function Etiqueta({ o, variant = 'painel', lidasCaixas, lidasPeca
         </div>
       )}
 
-      {o.boxes && (
-        <>
-          <div><b>Volumes:</b> {o.boxes}</div>
-        </>
-      )}
+      {volumeDisplay && <div><b>Volumes:</b> {volumeDisplay}</div>}
 
       {o.standard && <div><b>Padrão:</b> {fmtThousands(o.standard)}</div>}
       {o.due_date && <div><b>Prazo:</b> {fmtDate(o.due_date)}</div>}
