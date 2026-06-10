@@ -251,10 +251,22 @@
     padding-top: 82px;
   }
 
+  /* Força o saldo no pet01 a ficar no canto inferior direito sempre */
+  .etiqueta-layout > div[style*='position: absolute'][style*='right: 0'][style*='bottom: 0'] {
+    left: auto !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    min-height: 40px !important;
+    min-width: 40px !important;
+    display: flex;
+    align-items: flex-end;
+    justify-content: flex-end;
+  }
   .etiqueta-saldo {
-    left: 0;
-    right: auto;
-    min-height: 58px;
+    left: auto !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    min-height: 40px !important;
   }
 }
 

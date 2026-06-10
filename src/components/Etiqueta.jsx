@@ -83,7 +83,7 @@ export default function Etiqueta({ o, variant = 'painel', lidasCaixas, lidasPeca
   if (variant === 'fila') {
     return (
       <div className={`small etiqueta-layout etiqueta-fila-flex ${isProgrammedStop ? 'etiqueta-weekend' : ''}`}>
-        {saldoBadge}
+        {/* Removido saldoBadge da Fila */}
         <div className="etiqueta-fila-main">
           {interrompida && <div className="badge-interrompida">⚠️ Produção Interrompida</div>}
           {opCode && <div><b>O.P:</b> {opCode}</div>}
@@ -121,9 +121,9 @@ export default function Etiqueta({ o, variant = 'painel', lidasCaixas, lidasPeca
 
     // ===== variante pet01 =====
   if (variant === 'pet01') {
+  // Envolve saldoBadge numa div para aplicar posição fixa no canto inferior direito, compatível com mobile
   return (
-    <div className={`small etiqueta-layout ${isProgrammedStop ? 'etiqueta-weekend' : ''}`}>
-      {saldoBadge}
+    <div className={`small etiqueta-layout ${isProgrammedStop ? 'etiqueta-weekend' : ''}`} style={{position:'relative'}}>
       {interrompida && <div className="badge-interrompida">⚠️ Produção Interrompida</div>}
 
       {customer && <div><b>Cliente:</b> {customer}</div>}
@@ -156,6 +156,13 @@ export default function Etiqueta({ o, variant = 'painel', lidasCaixas, lidasPeca
 
       {temObsLowEff && <div><b>Baixa Eficiência:</b> {o.loweff_notes}</div>}
       {o.notes && <div className="muted">{o.notes}</div>}
+
+      {/* Wrapper para saldoBadge sempre fixo no canto inferior direito */}
+      {saldoBadge && (
+        <div style={{position: 'absolute', right: 0, bottom: 0, zIndex: 5}}>
+          {saldoBadge}
+        </div>
+      )}
     </div>
    )
   }
