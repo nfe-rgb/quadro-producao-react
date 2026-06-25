@@ -12,7 +12,7 @@ function createManualProductionInitialState() {
     turno: '',
     osCode: '',
     goodQty: '',
-    scrapEntries: [{ qty: '', reason: '' }],
+    scrapEntries: [{ qty: '', reason: REFUGO_MOTIVOS[0] || '' }],
   }
 }
 
@@ -65,6 +65,7 @@ export default function GlobalModals({
         ...v,
         data: now.toFormat('yyyy-LL-dd'),
         hora: now.toFormat('HH:mm'),
+        motivo: v?.motivo || MOTIVOS_PARADA[0] || '',
         __initApplied: true,
       }));
     }
@@ -371,7 +372,7 @@ export default function GlobalModals({
             </div>
             <div>
               <div className="label">Motivo da Parada *</div>
-              <select className="select" value={stopModal.motivo} onChange={e=>setStopModal(v=>({...v, motivo:e.target.value}))}>
+              <select className="select" value={stopModal.motivo || MOTIVOS_PARADA[0] || ''} onChange={e=>setStopModal(v=>({...v, motivo:e.target.value}))}>
                 {MOTIVOS_PARADA.map(m=> <option key={m} value={m}>{m}</option>)}
               </select>
             </div>
@@ -383,11 +384,12 @@ export default function GlobalModals({
             <div className="flex" style={{justifyContent:'flex-end', gap:8}}>
               <button className="btn ghost" onClick={()=>setStopModal(null)} disabled={!!actionSaving}>Cancelar</button>
               <button className="btn primary" onClick={async ()=>{
-                if (!String(stopModal.motivo || '').trim()) {
+                const motivo = stopModal.motivo || MOTIVOS_PARADA[0] || ''
+                if (!String(motivo || '').trim()) {
                   alert('Selecione o motivo da parada.')
                   return
                 }
-                const normalized = { ...stopModal, data: safeDate(stopModal.data), hora: safeTime(stopModal.hora) }
+                const normalized = { ...stopModal, motivo, data: safeDate(stopModal.data), hora: safeTime(stopModal.hora) }
                 const ok = await runModalAction('stop', async () => {
                   if (typeof onConfirmStop !== 'function') return true
                   return await onConfirmStop(normalized)
@@ -612,7 +614,7 @@ export default function GlobalModals({
                     className="btn"
                     onClick={() => setManualForm((current) => ({
                       ...current,
-                      scrapEntries: [...current.scrapEntries, { qty: '', reason: '' }],
+                      scrapEntries: [...current.scrapEntries, { qty: '', reason: REFUGO_MOTIVOS[0] || '' }],
                     }))}
                     title="Adicionar outro apontamento de refugo"
                   >

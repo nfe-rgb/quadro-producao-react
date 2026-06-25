@@ -27,7 +27,7 @@ export default function Pet04({
   const [proximo, setProximo] = useState(null);
   const [scans, setScans] = useState([]);
 
-  const [refugoForm, setRefugoForm] = useState({ operador: "", turno: "", quantidade: "", motivo: "",});
+  const [refugoForm, setRefugoForm] = useState({ operador: "", turno: "", quantidade: "", motivo: REFUGO_MOTIVOS[0] || "",});
 
   const [showRefugo, setShowRefugo] = useState(false);
   const [refugoSaving, setRefugoSaving] = useState(false);
@@ -779,7 +779,8 @@ if (typeof window !== "undefined") {
             return;
           }
 
-          const { operador, quantidade, motivo } = refugoForm;
+          const { operador, quantidade } = refugoForm;
+          const motivo = refugoForm.motivo || REFUGO_MOTIVOS[0] || "";
 
           if (!operador?.trim()) {
             showToast("Preencha o operador.", "err");
@@ -858,7 +859,7 @@ if (typeof window !== "undefined") {
         <label>Motivo *</label>
         <select
           className="input"
-          value={refugoForm.motivo}
+          value={refugoForm.motivo || REFUGO_MOTIVOS[0] || ""}
           disabled={refugoSaving}
           onChange={(e) =>
             setRefugoForm((f) => ({ ...f, motivo: e.target.value }))

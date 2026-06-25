@@ -27,7 +27,7 @@ export default function Pet01({
   const [proximo, setProximo] = useState(null);
   const [scans, setScans] = useState([]);
 
-  const [refugoForm, setRefugoForm] = useState({ operador: "", turno: "", quantidade: "", motivo: "",});
+  const [refugoForm, setRefugoForm] = useState({ operador: "", turno: "", quantidade: "", motivo: REFUGO_MOTIVOS[0] || "",});
 
   const [showRefugo, setShowRefugo] = useState(false);
   const [refugoSaving, setRefugoSaving] = useState(false);
@@ -73,7 +73,7 @@ export default function Pet01({
   }
   useEffect(() => { if (ativa?.id) loadScans(ativa.id); }, [ativa?.id]);
 
-  const lidas = scans.length;
+  const lidas = Number(ativa?.scanned_count || 0);
   const saldo = ativa ? Math.max(0, Number(ativa.boxes) - lidas) : 0;
 
     // cronômetros
@@ -677,7 +677,7 @@ if (typeof window !== "undefined") {
         </div>
 
         <div className={statusClass(ativa?.status)}>
-          <Etiqueta o={ativa} variant="pet01" saldoCaixas={saldo} lidasCaixas={lidas} lidasPecas={ativa?.apontadas_pieces} />
+          <Etiqueta o={{ ...ativa, qty: ativa?.qty }} variant="pet01" saldoCaixas={saldo} lidasCaixas={lidas} lidasPecas={ativa?.apontadas_pieces} />
                             {ativa?.status === "PARADA" && stopReason && (
                   <div className="stop-reason-below-p1">{stopReason}</div>
                   )}
@@ -779,7 +779,8 @@ if (typeof window !== "undefined") {
             return;
           }
 
-          const { operador, quantidade, motivo } = refugoForm;
+          const { operador, quantidade } = refugoForm;
+          const motivo = refugoForm.motivo || REFUGO_MOTIVOS[0] || "";
 
           if (!operador?.trim()) {
             showToast("Preencha o operador.", "err");
@@ -858,7 +859,7 @@ if (typeof window !== "undefined") {
         <label>Motivo *</label>
         <select
           className="input"
-          value={refugoForm.motivo}
+          value={refugoForm.motivo || REFUGO_MOTIVOS[0] || ""}
           disabled={refugoSaving}
           onChange={(e) =>
             setRefugoForm((f) => ({ ...f, motivo: e.target.value }))

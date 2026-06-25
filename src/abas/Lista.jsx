@@ -10,6 +10,55 @@ import { statusClass } from '../lib/utils'
 import { supabase } from '../lib/supabaseClient.js' // ✅ ESM correto
 import { DateTime } from 'luxon';
 
+function parsePiecesPerBox(val) {
+  if (val == null) return 0
+  const digits = String(val).replace(/[^0-9]/g, '')
+  return digits ? Number(digits) : 0
+}
+
+function mergeRowsById(rows) {
+  const byId = new Map()
+  const withoutId = []
+
+  for (const row of rows || []) {
+    const rowId = row?.id != null ? String(row.id).trim() : ''
+    if (rowId) byId.set(rowId, row)
+    else withoutId.push(row)
+  }
+
+  return [...byId.values(), ...withoutId]
+}
+
+function normalizeOptionalValue(value) {
+  const normalized = String(value ?? '').trim()
+  return normalized || null
+}
+
+function getOrderRecordId(order) {
+  return normalizeOptionalValue(order?.source_order_id ?? order?.id ?? order?.order_id)
+}
+
+function getOrderRecordCode(order) {
+  return normalizeOptionalValue(order?.code ?? order?.op_code ?? order?.o?.code ?? order?.ordem?.code)
+}
+
+function getOrderTotalKey(order) {
+  return `${getOrderRecordId(order) || ''}|${getOrderRecordCode(order) || ''}`
+}
+
+function computeApontadasPieces(item) {
+  const scannedCount = Number(item?.scanned_count || 0)
+  const manualPieces = Number(item?.manual_pieces || 0)
+  const storedScannedPieces = Number(item?.scanned_pieces || 0)
+  const piecesPerBox = parsePiecesPerBox(item?.standard)
+  const scannedPieces = storedScannedPieces > 0
+    ? storedScannedPieces
+    : piecesPerBox > 0
+      ? scannedCount * piecesPerBox
+      : 0
+  return manualPieces > 0 || scannedPieces > 0 ? manualPieces + scannedPieces : undefined
+}
+
 export default function Lista({
   ativosPorMaquina,
   sensors,
@@ -27,12 +76,12 @@ export default function Lista({
   const [insumosError, setInsumosError] = useState('')
   const [insumosByMachine, setInsumosByMachine] = useState([])
   const [filteredInsumosTotals, setFilteredInsumosTotals] = useState([])
-  const [weeklyInsumosTotals, setWeeklyInsumosTotals] = useState([])
   const [machineWeeklyCapacity, setMachineWeeklyCapacity] = useState([])
   const [machineRangeCapacity, setMachineRangeCapacity] = useState([])
   const [insumoDetailsByCode, setInsumoDetailsByCode] = useState({})
   const [structuresByCode, setStructuresByCode] = useState({})
   const [expandedMachines, setExpandedMachines] = useState(() => Object.fromEntries(MAQUINAS.map((machineId) => [machineId, false])))
+  const [productionTotalsByOrder, setProductionTotalsByOrder] = useState({})
   const [insumosFilter, setInsumosFilter] = useState('today')
   const [customFilterRange, setCustomFilterRange] = useState(() => ({
     start: DateTime.now().setZone('America/Sao_Paulo').toISODate(),
@@ -229,6 +278,122 @@ export default function Lista({
   useEffect(() => {
     let cancelled = false
 
+    async function fetchVisibleProductionTotals() {
+      const targetsMap = new Map()
+
+      for (const machineId of MAQUINAS) {
+        const item = (ativosPorMaquina?.[machineId] || [])[0]
+        if (!item) continue
+
+        const id = getOrderRecordId(item)
+        const code = getOrderRecordCode(item)
+        if (!id && !code) continue
+
+        targetsMap.set(`${id || ''}|${code || ''}`, { id, code })
+      }
+
+      const targets = Array.from(targetsMap.values())
+      if (targets.length === 0) {
+        setProductionTotalsByOrder({})
+        return
+      }
+
+      const orderIds = Array.from(new Set(targets.map((target) => target.id).filter(Boolean)))
+      const opCodes = Array.from(new Set(targets.map((target) => target.code).filter(Boolean)))
+      const emptyRes = { data: [], error: null }
+
+      try {
+        const [scansByIdRes, scansByCodeRes, manualByIdRes, manualByCodeRes] = await Promise.all([
+          orderIds.length
+            ? supabase
+                .from('production_scans')
+                .select('id, order_id, op_code, qty_pieces')
+                .in('order_id', orderIds)
+            : Promise.resolve(emptyRes),
+          opCodes.length
+            ? supabase
+                .from('production_scans')
+                .select('id, order_id, op_code, qty_pieces')
+                .in('op_code', opCodes)
+            : Promise.resolve(emptyRes),
+          orderIds.length
+            ? supabase
+                .from('injection_production_entries')
+                .select('id, order_id, order_code, good_qty')
+                .in('order_id', orderIds)
+            : Promise.resolve(emptyRes),
+          opCodes.length
+            ? supabase
+                .from('injection_production_entries')
+                .select('id, order_id, order_code, good_qty')
+                .in('order_code', opCodes)
+            : Promise.resolve(emptyRes),
+        ])
+
+        const scanErr = scansByIdRes.error || scansByCodeRes.error
+        const manualErr = manualByIdRes.error || manualByCodeRes.error
+        if (scanErr) console.warn('Lista: falha ao carregar bipagens visiveis:', scanErr)
+        if (manualErr) console.warn('Lista: falha ao carregar apontamentos visiveis:', manualErr)
+        if (scanErr && manualErr) return
+
+        const totals = new Map()
+        const ensureTotal = (key) => {
+          if (!totals.has(key)) {
+            totals.set(key, { scannedCount: 0, scannedPieces: 0, manualPieces: 0 })
+          }
+          return totals.get(key)
+        }
+        const matchingTargetKeys = (row) => {
+          const rowOrderId = normalizeOptionalValue(row?.order_id)
+          const rowCode = normalizeOptionalValue(row?.op_code ?? row?.order_code)
+          const keys = new Set()
+
+          for (const [key, target] of targetsMap.entries()) {
+            if ((rowOrderId && target.id === rowOrderId) || (rowCode && target.code === rowCode)) {
+              keys.add(key)
+            }
+          }
+
+          return keys
+        }
+
+        const scanRows = mergeRowsById([...(scansByIdRes.data || []), ...(scansByCodeRes.data || [])])
+        for (const row of scanRows) {
+          for (const key of matchingTargetKeys(row)) {
+            const total = ensureTotal(key)
+            const qtyPieces = Number(row?.qty_pieces || 0)
+            total.scannedCount += 1
+            if (Number.isFinite(qtyPieces) && qtyPieces > 0) total.scannedPieces += qtyPieces
+          }
+        }
+
+        const manualRows = mergeRowsById([...(manualByIdRes.data || []), ...(manualByCodeRes.data || [])])
+        for (const row of manualRows) {
+          for (const key of matchingTargetKeys(row)) {
+            const goodQty = Number(row?.good_qty || 0)
+            if (!Number.isFinite(goodQty) || goodQty <= 0) continue
+            ensureTotal(key).manualPieces += goodQty
+          }
+        }
+
+        if (cancelled) return
+
+        setProductionTotalsByOrder(Object.fromEntries(totals.entries()))
+      } catch (err) {
+        console.warn('Lista: erro ao carregar totais de producao visiveis:', err)
+      }
+    }
+
+    fetchVisibleProductionTotals()
+
+    return () => {
+      cancelled = true
+    }
+  }, [ativosPorMaquina])
+
+  useEffect(() => {
+    let cancelled = false
+
     async function loadInsumosView() {
       if (viewMode !== 'insumos') return
       setInsumosLoading(true)
@@ -238,7 +403,6 @@ export default function Lista({
         const finishedCodes = allOrderProductCodes.filter(Boolean)
         if (finishedCodes.length === 0) {
           setInsumosByMachine([])
-          setWeeklyInsumosTotals([])
           setMachineWeeklyCapacity([])
           return
         }
@@ -250,26 +414,25 @@ export default function Lista({
 
         if (structuresError) throw structuresError
 
-        const inputCodes = Array.from(new Set(
-          (structures || [])
-            .map((row) => normalizeCode(row?.input_item_code))
-            .filter(Boolean)
-        ))
+        const { data: inputItems = [], error: inputItemsError } = await supabase
+          .from('items')
+          .select('*')
 
-        const { data: inputItems = [] } = inputCodes.length > 0
-          ? await supabase.from('items').select('code, description, unidade, cliente, stock').in('code', inputCodes)
-          : { data: [] }
+        if (inputItemsError) throw inputItemsError
 
         const inputByCode = (inputItems || []).reduce((acc, item) => {
-          const code = normalizeCode(item?.code)
-          if (!code) return acc
-          acc[code] = {
-            code,
-            description: String(item?.description || '').trim() || code,
+          const rawCode = String(item?.code ?? '').trim()
+          const normalizedCode = normalizeCode(rawCode)
+          if (!normalizedCode) return acc
+          const details = {
+            code: rawCode || normalizedCode,
+            description: String(item?.description || '').trim() || rawCode || normalizedCode,
             unidade: String(item?.unidade || '').trim() || '-',
-            cliente: String(item?.cliente || '').trim() || '-',
-            stock: Number(item?.stock || 0),
+            cliente: String(item?.cliente || item?.client || '').trim() || 'Sem cliente',
+            stock: Number(item?.stock ?? item?.estoque ?? 0),
           }
+          acc[normalizedCode] = details
+          if (rawCode) acc[rawCode] = details
           return acc
         }, {})
 
@@ -300,9 +463,10 @@ export default function Lista({
               acc[inputCode] = acc[inputCode] || {
                 itemCode: inputCode,
                 description: inputByCode[inputCode]?.description || inputCode,
+                unidade: inputByCode[inputCode]?.unidade || '-',
                 totalQty: 0,
                 qtyPerPiece: row.qtyPerPiece,
-                cliente: inputByCode[inputCode]?.cliente || '-',
+                cliente: inputByCode[inputCode]?.cliente || 'Sem cliente',
               }
               acc[inputCode].totalQty += totalQty
               return acc
@@ -370,34 +534,29 @@ export default function Lista({
           })
         })
 
-        const weeklyTotalsByInputMap = {}
         const rangeTotalsByInputMap = {}
+        const addInputTotal = (map, inputCode, qty) => {
+          const cliente = inputByCode[inputCode]?.cliente || 'Sem cliente'
+          const key = `${cliente}||${inputCode}`
+          map[key] = map[key] || { itemCode: inputCode, cliente, totalQty: 0 }
+          map[key].totalQty += qty
+        }
         machineCapacityRows.forEach((machine) => {
-          Object.entries(machine.weeklyInputs || {}).forEach(([inputCode, qty]) => {
-            weeklyTotalsByInputMap[inputCode] = (weeklyTotalsByInputMap[inputCode] || 0) + qty
-          })
           Object.entries(machine.rangeInputs || {}).forEach(([inputCode, qty]) => {
-            rangeTotalsByInputMap[inputCode] = (rangeTotalsByInputMap[inputCode] || 0) + qty
+            addInputTotal(rangeTotalsByInputMap, inputCode, qty)
           })
         })
 
         setInsumosByMachine(orderMachines)
         setInsumoDetailsByCode(inputByCode)
         setStructuresByCode(structuresByFinished)
-        setFilteredInsumosTotals(Object.entries(rangeTotalsByInputMap).map(([itemCode, totalQty]) => ({
-          itemCode,
-          description: inputByCode[itemCode]?.description || itemCode,
-          unidade: inputByCode[itemCode]?.unidade || '-',
-          cliente: inputByCode[itemCode]?.cliente || '-',
-          totalQty,
-          stock: inputByCode[itemCode]?.stock || 0,
-        })))
-        setWeeklyInsumosTotals(Object.entries(weeklyTotalsByInputMap).map(([itemCode, totalQty]) => ({
-          itemCode,
-          description: inputByCode[itemCode]?.description || itemCode,
-          unidade: inputByCode[itemCode]?.unidade || '-',
-          cliente: inputByCode[itemCode]?.cliente || '-',
-          weeklyQty: totalQty,
+        setFilteredInsumosTotals(Object.values(rangeTotalsByInputMap).map((row) => ({
+          itemCode: row.itemCode,
+          description: inputByCode[row.itemCode]?.description || row.itemCode,
+          unidade: inputByCode[row.itemCode]?.unidade || '-',
+          cliente: row.cliente || 'Sem cliente',
+          totalQty: row.totalQty,
+          stock: inputByCode[row.itemCode]?.stock || 0,
         })))
         setMachineWeeklyCapacity(machineCapacityRows)
         setMachineRangeCapacity(machineCapacityRows)
@@ -493,6 +652,15 @@ export default function Lista({
     return num.toLocaleString('pt-BR', { maximumFractionDigits: 2 })
   }
 
+  const formatItemLabel = (code, description) => {
+    const itemCode = String(code || '').trim()
+    const itemDescription = String(description || '').trim()
+    if (itemCode && itemDescription && normalizeCode(itemDescription) !== normalizeCode(itemCode)) {
+      return `${itemCode} - ${itemDescription}`
+    }
+    return itemCode || itemDescription || '-'
+  }
+
   const toggleMachineExpanded = (machineId) => {
     setExpandedMachines((prev) => ({ ...prev, [machineId]: !prev[machineId] }))
   }
@@ -512,15 +680,6 @@ export default function Lista({
 
     // Agrupar insumos por cliente
     const insumosByCliente = filteredInsumosTotals.reduce((acc, row) => {
-      const cliente = row.cliente || 'Sem cliente'
-      if (!acc[cliente]) {
-        acc[cliente] = []
-      }
-      acc[cliente].push(row)
-      return acc
-    }, {})
-
-    const weeklyInsumosByCliente = weeklyInsumosTotals.reduce((acc, row) => {
       const cliente = row.cliente || 'Sem cliente'
       if (!acc[cliente]) {
         acc[cliente] = []
@@ -552,7 +711,7 @@ export default function Lista({
                     <tbody>
                       {insumos.map((row) => (
                         <tr key={row.itemCode}>
-                          <td>{row.description}</td>
+                          <td>{formatItemLabel(row.itemCode, row.description)}</td>
                           <td>{row.unidade}</td>
                           <td>{formatQty(row.totalQty)}</td>
                           <td>{formatQty(row.stock || 0)}</td>
@@ -628,7 +787,7 @@ export default function Lista({
                           <tbody>
                             {insumos.map((input) => (
                               <tr key={input.itemCode}>
-                                <td>{input.description}</td>
+                                <td>{formatItemLabel(input.itemCode, input.description)}</td>
                                 <td>{input.unidade}</td>
                                 <td>{formatQty(input.qty)}</td>
                               </tr>
@@ -682,6 +841,7 @@ export default function Lista({
                                     <thead>
                                       <tr>
                                         <th>Insumo</th>
+                                        <th>Unidade</th>
                                         <th>Qtd. por peça</th>
                                         <th>Total</th>
                                       </tr>
@@ -691,7 +851,8 @@ export default function Lista({
                                         const info = insumoDetailsByCode[input.itemCode] || {}
                                         return (
                                           <tr key={input.itemCode}>
-                                            <td>{info.description || input.itemCode}</td>
+                                            <td>{formatItemLabel(input.itemCode, info.description || input.description)}</td>
+                                            <td>{info.unidade || input.unidade || '-'}</td>
                                             <td>{formatQty(input.qtyPerPiece)}</td>
                                             <td>{formatQty(input.totalQty)}</td>
                                           </tr>
@@ -720,13 +881,6 @@ export default function Lista({
         })}
       </>
     )
-  }
-
-  function handleSeparationSave() {
-    Object.entries(separationInputs).forEach(([orderId, qty]) => {
-      updateSeparation(orderId, separationModal.itemCode, qty)
-    })
-    setSeparationModal(null)
   }
 
   return (
@@ -787,12 +941,33 @@ export default function Lista({
 
             {MAQUINAS .map((m) => {
           const lista = ativosPorMaquina[m] || []
-          const ativa = lista[0] || null
+          const ativaBase = lista[0] || null
+          const totalProducao = ativaBase ? productionTotalsByOrder[getOrderTotalKey(ativaBase)] : null
+          const ativa = totalProducao
+            ? (() => {
+                const fallbackScannedPieces = totalProducao.scannedPieces > 0
+                  ? totalProducao.scannedPieces
+                  : totalProducao.scannedCount * parsePiecesPerBox(ativaBase?.standard)
+                const updatedItem = {
+                  ...ativaBase,
+                  scanned_count: totalProducao.scannedCount,
+                  scanned_pieces: fallbackScannedPieces,
+                  manual_pieces: totalProducao.manualPieces,
+                }
+                return {
+                  ...updatedItem,
+                  apontadas_pieces: computeApontadasPieces(updatedItem),
+                }
+              })()
+            : ativaBase
           const fila  = lista.slice(1)
           const opCode = ativa?.code || ativa?.o?.code || ativa?.op_code || ""
           // lidas / saldo: usar mesma lógica do Painel
-          const lidas = Number(ativa?.scanned_count || 0)
-          const saldo = ativa ? Math.max(0, (Number(ativa.boxes) || 0) - lidas) : 0
+          const lidas = Number(ativa?.scanned_count || 0);
+          const lidasPecas = Number(ativa?.apontadas_pieces || 0) > 0
+            ? Number(ativa?.apontadas_pieces)
+            : (Number(ativa?.manual_pieces || 0) + Number(ativa?.scanned_pieces || 0)) || undefined
+          const saldo = ativa ? Math.max(0, (Number(ativa.boxes) || 0) - lidas) : 0;
 
           const productCode = String(ativa?.product || '').split('-')[0]?.trim()
           const itemTech = productCode ? itemTechByCode[productCode] : null
@@ -832,7 +1007,7 @@ export default function Lista({
                       o={ativa}
                       variant="painel"
                       lidasCaixas={lidas}
-                      lidasPecas={ativa?.apontadas_pieces}
+                      lidasPecas={lidasPecas}
                       saldoCaixas={saldo}
                     />
                     {previsaoFim && (
@@ -1015,7 +1190,7 @@ export default function Lista({
                   const separatedQty = Number(separationInputs[input.itemCode] || 0)
                   return (
                     <tr key={input.itemCode} style={{ borderTop: '1px solid #e5e7eb' }}>
-                      <td style={{ padding: '8px' }}>{input.description || input.itemCode}</td>
+                      <td style={{ padding: '8px' }}>{formatItemLabel(input.itemCode, input.description)}</td>
                       <td style={{ textAlign: 'right', padding: '8px' }}>{formatQty(input.qtyPerPiece)}</td>
                       <td style={{ textAlign: 'right', padding: '8px' }}>{formatQty(input.totalQty)}</td>
                       <td style={{ textAlign: 'right', padding: '8px' }}>
