@@ -73,7 +73,7 @@ export default function Pet01({
   }
   useEffect(() => { if (ativa?.id) loadScans(ativa.id); }, [ativa?.id]);
 
-  const lidas = Number(ativa?.scanned_count || 0);
+  const lidas = scans.length;
   const saldo = ativa ? Math.max(0, Number(ativa.boxes) - lidas) : 0;
 
     // cronômetros
@@ -677,9 +677,9 @@ if (typeof window !== "undefined") {
         </div>
 
         <div className={statusClass(ativa?.status)}>
-          <Etiqueta o={{ ...ativa, qty: ativa?.qty }} variant="pet01" saldoCaixas={saldo} lidasCaixas={lidas} lidasPecas={ativa?.apontadas_pieces} />
+          <Etiqueta o={ativa} variant="pet01" saldoCaixas={saldo} lidasCaixas={lidas} lidasPecas={ativa?.apontadas_pieces} />
                             {ativa?.status === "PARADA" && stopReason && (
-                  <div className="stop-reason-below-p1">{stopReason}</div>
+                  <div className="stop-reason-below-P1">{stopReason}</div>
                   )}
         </div>
                   
