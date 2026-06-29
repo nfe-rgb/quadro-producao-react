@@ -1056,7 +1056,7 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false }) {
                 onChange={(e) => setManualForm((f) => ({ ...f, machine: e.target.value, osCode: '' }))}
               >
                 <option value="">Selecione...</option>
-                {MAQUINAS.filter((m) => /^(P[1-4]|I[1-6])$/.test(m)).map((m) => (
+                {MAQUINAS.filter((m) => /^(P[1-4]|I[1-7])$/.test(m)).map((m) => (
                   <option key={m} value={m}>{m}</option>
                 ))}
               </select>

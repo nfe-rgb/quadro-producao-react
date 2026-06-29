@@ -75,7 +75,7 @@ export default function App(){
   const {
     ordens, paradas,
     fetchOrdensAbertas,
-    criarOrdem, atualizar, enviarParaFila, finalizar,
+    criarOrdem, atualizar, enviarParaFila, finalizar, cancelarFinalizacao,
     confirmarInicio, confirmarParada, confirmarRetomada, confirmarBaixaEf, confirmarEncerrarBaixaEf,
     ativosPorMaquina, registroGrupos, lastFinalizadoPorMaquina, onStatusChange
   } = useOrders()
@@ -667,7 +667,7 @@ export default function App(){
 
       {gestaoTabActive && !isMendes && (
         hasGestaoAccess ? (
-          <Gestao registroGrupos={registroGrupos} openSet={openSet} toggleOpen={toggleOpen} isAdmin={isAdmin} />
+          <Gestao registroGrupos={registroGrupos} openSet={openSet} toggleOpen={toggleOpen} isAdmin={isAdmin} onCancelFinalize={cancelarFinalizacao} />
         ) : (
           <div style={{ padding: 24 }}>
             <h2>Acesso Negado</h2>
