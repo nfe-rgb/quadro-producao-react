@@ -861,7 +861,7 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false }) {
                             title="Clique para ver registros por hora"
                             role="button"
                           >
-                            {/^(P[1-4]|I[1-6])$/.test(maq) ? (
+                            {/^(P[1-4]|I[1-7])$/.test(maq) ? (
                               <>Peças Boas: <span className="destaque-value">{dados.producaoPecas}</span></>
                             ) : (
                               <>Caixas bipadas: <span className="destaque-value">{dados.bipadas}</span></>
