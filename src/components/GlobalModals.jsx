@@ -522,7 +522,7 @@ export default function GlobalModals({
               onChange={(e) => setManualForm((current) => ({ ...current, machine: e.target.value, osCode: '' }))}
             >
               <option value="">Selecione...</option>
-              {MAQUINAS.filter((machineId) => /^(P[1-4]|I[1-6])$/.test(machineId)).map((machineId) => (
+              {MAQUINAS.filter((machineId) => /^(P[1-4]|I[1-7])$/.test(machineId)).map((machineId) => (
                 <option key={machineId} value={machineId}>{machineId}</option>
               ))}
             </select>
