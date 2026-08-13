@@ -1350,7 +1350,7 @@ export default function Gestao({ registroGrupos = [], openSet, toggleOpen, isAdm
 
     const plannedIntervals = getShiftWindowsInRange(range.start, range.end, {
       shiftKeys: shiftFilter !== 'all' ? [shiftFilter] : ACTIVE_SHIFT_KEYS,
-      setupMinutes: 30,
+      setupMinutes: 0,
     })
 
     let loadedPlannedMs = 0
