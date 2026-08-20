@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { DateTime } from 'luxon'
 import { supabase } from '../lib/supabaseClient'
 import { MAQUINAS } from '../lib/constants'
@@ -12,6 +12,13 @@ import {
   sumIntervals,
 } from '../lib/productionIntervals'
 import { ACTIVE_SHIFT_KEYS, getShiftLabel, getShiftWindowsInRange, normalizeShiftKey } from '../lib/shifts'
+import {
+  buildRegistroGroups,
+  isMissingRelationError,
+  mapLowEffLogsForUi,
+  mapRuntimeOrder,
+  mapStopsForUi,
+} from '../lib/productionRuntime'
 import GerenciamentoAvancado from './GerenciamentoAvancado'
 import '../styles/Gestao.css'
 
@@ -150,6 +157,28 @@ function formatHours(value) {
   return `${toNumber(value).toFixed(1)} h`
 }
 
+function formatDebugInterval(interval) {
+  if (!Array.isArray(interval) || interval.length !== 2) return null
+  const [startMs, endMs] = interval
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) return null
+  return {
+    start: DateTime.fromMillis(startMs).setZone('America/Sao_Paulo').toISO(),
+    end: DateTime.fromMillis(endMs).setZone('America/Sao_Paulo').toISO(),
+    hours: Number(((endMs - startMs) / 1000 / 60 / 60).toFixed(2)),
+  }
+}
+
+function describeSessionForDebug(session) {
+  return {
+    id: session?.id || null,
+    orderId: session?.order_id || null,
+    machineId: session?.machine_id || null,
+    startedAt: session?.started_at || null,
+    endedAt: session?.ended_at || null,
+    endReason: session?.end_reason || null,
+  }
+}
+
 function parsePiecesPerBox(value) {
   if (value == null) return 0
   const digitsOnly = String(value).replace(/[^0-9]/g, '')
@@ -167,6 +196,120 @@ function getSectorByMachine(machineId) {
   if (normalized.startsWith('P')) return 'PET'
   if (normalized.startsWith('I')) return 'INJEÇÃO'
   return 'OUTROS'
+}
+
+function normalizeMachineId(machineId) {
+  return text(machineId).toUpperCase().replace(/[^A-Z0-9]/g, '')
+}
+
+function getGroupOrderId(group) {
+  return text(group?.orderId || group?.ordem?.source_order_id || group?.ordem?.id)
+}
+
+function resolveGroupMachineId(group, productionMachineByOrderId = {}) {
+  const productionMachineId = productionMachineByOrderId[getGroupOrderId(group)]
+  const candidates = [
+    productionMachineId,
+    group?.ordem?.machine_id,
+    group?.session?.machine_id,
+    ...(Array.isArray(group?.sessions) ? group.sessions.map((session) => session?.machine_id) : []),
+    ...(Array.isArray(group?.stops) ? group.stops.map((stop) => stop?.machine_id) : []),
+    ...(Array.isArray(group?.lowEffLogs) ? group.lowEffLogs.map((event) => event?.machine_id) : []),
+  ]
+
+  return candidates.map(normalizeMachineId).find(Boolean) || ''
+}
+
+function getProductionRecordTime(row) {
+  const timestamp = row?.created_at || row?.entry_date || null
+  const timeMs = timestamp ? new Date(timestamp).getTime() : null
+  return Number.isFinite(timeMs) ? timeMs : null
+}
+
+function buildProductionFallbackRegistroGroups({
+  orders,
+  scanRows,
+  entryRows,
+  existingGroups,
+  rangeStartMs,
+  rangeEndMs,
+}) {
+  const ordersById = Object.fromEntries((orders || []).map((order) => [text(order?.id), order]).filter(([id]) => id))
+  const existingKeys = new Set((existingGroups || []).map((group) => {
+    const orderId = getGroupOrderId(group)
+    const machineId = resolveGroupMachineId(group)
+    return orderId && machineId ? `${orderId}:${machineId}` : ''
+  }).filter(Boolean))
+  const productionByOrderMachine = {}
+
+  for (const row of [...(scanRows || []), ...(entryRows || [])]) {
+    const orderId = text(row?.order_id)
+    const machineId = normalizeMachineId(row?.machine_id)
+    const timeMs = getProductionRecordTime(row)
+    if (!orderId || !machineId || !Number.isFinite(timeMs)) continue
+    if (timeMs < rangeStartMs || timeMs > rangeEndMs) continue
+
+    const key = `${orderId}:${machineId}`
+    if (existingKeys.has(key)) continue
+
+    if (!productionByOrderMachine[key]) {
+      productionByOrderMachine[key] = {
+        orderId,
+        machineId,
+        firstMs: timeMs,
+        lastMs: timeMs,
+        records: 0,
+      }
+    }
+
+    productionByOrderMachine[key].firstMs = Math.min(productionByOrderMachine[key].firstMs, timeMs)
+    productionByOrderMachine[key].lastMs = Math.max(productionByOrderMachine[key].lastMs, timeMs)
+    productionByOrderMachine[key].records += 1
+  }
+
+  return Object.values(productionByOrderMachine).map((item) => {
+    const order = ordersById[item.orderId] || {}
+    const startMs = Math.max(rangeStartMs, item.firstMs)
+    const endMs = Math.min(rangeEndMs, Math.max(item.lastMs, item.firstMs + 60 * 1000))
+    const startedAt = new Date(startMs).toISOString()
+    const endedAt = new Date(endMs).toISOString()
+    const sessionId = `production-fallback:${item.orderId}:${item.machineId}`
+
+    return {
+      id: sessionId,
+      orderId: item.orderId,
+      sessionIndex: 1,
+      session: {
+        id: sessionId,
+        order_id: item.orderId,
+        machine_id: item.machineId,
+        started_at: startedAt,
+        ended_at: endedAt,
+        end_reason: 'PRODUCTION_FALLBACK',
+      },
+      sessions: [{
+        id: sessionId,
+        order_id: item.orderId,
+        machine_id: item.machineId,
+        started_at: startedAt,
+        ended_at: endedAt,
+        end_reason: 'PRODUCTION_FALLBACK',
+      }],
+      stops: [],
+      lowEffLogs: [],
+      ordem: {
+        ...mapRuntimeOrder(order),
+        id: sessionId,
+        source_order_id: item.orderId,
+        machine_id: item.machineId,
+        started_at: startedAt,
+        finalized_at: endedAt,
+        status: 'PRODUZINDO',
+        inferred_from_production: true,
+        inferred_production_records: item.records,
+      },
+    }
+  })
 }
 
 function normalizeReason(value) {
@@ -292,6 +435,61 @@ async function fetchAllRowsInDateRange({
 
     pageIndex += 1
   }
+}
+
+async function fetchAllOverlappingRows({
+  table,
+  columns,
+  startIso,
+  endIso,
+  endColumn,
+  pageSize = DATA_PAGE_SIZE,
+}) {
+  const rows = []
+  let pageIndex = 0
+
+  while (true) {
+    const from = pageIndex * pageSize
+    const to = from + pageSize - 1
+
+    const response = await supabase
+      .from(table)
+      .select(columns)
+      .lt('started_at', endIso)
+      .or(`${endColumn}.gte.${startIso},${endColumn}.is.null`)
+      .order('started_at', { ascending: false })
+      .range(from, to)
+
+    if (response.error) return response
+
+    const chunk = response.data || []
+    rows.push(...chunk)
+
+    if (chunk.length < pageSize) {
+      return { data: rows, error: null }
+    }
+
+    pageIndex += 1
+  }
+}
+
+async function fetchOrdersByIds(orderIds) {
+  const ids = Array.from(new Set((orderIds || []).map(text).filter(Boolean)))
+  if (!ids.length) return { data: [], error: null }
+
+  const rows = []
+  for (let index = 0; index < ids.length; index += 500) {
+    const chunkIds = ids.slice(index, index + 500)
+    const response = await supabase
+      .from('orders')
+      .select('id, machine_id, code, customer, product, color, qty, boxes, standard, due_date, notes, status, pos, finalized, finalized_at, created_at, updated_at')
+      .in('id', chunkIds)
+
+    if (response.error) return response
+    rows.push(...(response.data || []))
+  }
+
+  return { data: rows, error: null }
 }
 
 function DashboardBarChart({ title, rows, selectedValue, onSelect, valueFormatter, subtitle }) {
@@ -496,11 +694,24 @@ export default function Gestao({ registroGrupos = [], openSet, toggleOpen, isAdm
   const [scans, setScans] = useState([])
   const [scraps, setScraps] = useState([])
   const [entries, setEntries] = useState([])
+  const [periodRegistroGrupos, setPeriodRegistroGrupos] = useState([])
   const [monthlyProducedValue, setMonthlyProducedValue] = useState(0)
   const [localOpenSet, setLocalOpenSet] = useState(() => new Set())
   const [isRecordsExpanded, setIsRecordsExpanded] = useState(true)
+  const lastProductiveHoursDebugRef = useRef('')
 
   const effectiveOpenSet = openSet ?? localOpenSet
+  const scopedRegistroGrupos = useMemo(() => {
+    if (!periodRegistroGrupos.length) return registroGrupos || []
+
+    const seen = new Set(periodRegistroGrupos.map((group) => String(group?.id || '')))
+    const fallbackGroups = (registroGrupos || []).filter((group) => {
+      const key = String(group?.id || '')
+      return key && !seen.has(key)
+    })
+
+    return [...periodRegistroGrupos, ...fallbackGroups]
+  }, [periodRegistroGrupos, registroGrupos])
 
   function handleToggle(recordId) {
     if (toggleOpen) {
@@ -556,7 +767,7 @@ export default function Gestao({ registroGrupos = [], openSet, toggleOpen, isAdm
       setLoading(true)
       setError('')
 
-      const [scansRes, scrapsRes, entriesRes] = await Promise.all([
+      const [scansRes, scrapsRes, entriesRes, rawSessionsRes, rawStopsRes, rawLowEffRes] = await Promise.all([
         fetchAllRowsInDateRange({
           table: 'production_scans',
           columns: 'id, created_at, order_id, op_code, machine_id, shift, scanned_box, qty_pieces, code',
@@ -575,18 +786,97 @@ export default function Gestao({ registroGrupos = [], openSet, toggleOpen, isAdm
           startIso: range.startIso,
           endIso: range.endIso,
         }),
+        fetchAllOverlappingRows({
+          table: 'order_machine_sessions',
+          columns: 'id, order_id, machine_id, started_at, ended_at, started_by, ended_by, end_reason',
+          startIso: range.startIso,
+          endIso: range.endIso,
+          endColumn: 'ended_at',
+        }),
+        fetchAllOverlappingRows({
+          table: 'machine_stops',
+          columns: 'id, order_id, machine_id, session_id, started_at, resumed_at, reason, notes, started_by',
+          startIso: range.startIso,
+          endIso: range.endIso,
+          endColumn: 'resumed_at',
+        }),
+        fetchAllOverlappingRows({
+          table: 'low_efficiency_logs',
+          columns: 'id, order_id, machine_id, session_id, started_at, ended_at, reason, notes, started_by, ended_by',
+          startIso: range.startIso,
+          endIso: range.endIso,
+          endColumn: 'ended_at',
+        }),
       ])
 
       if (!active) return
 
-      const firstError = scansRes.error || scrapsRes.error || entriesRes.error || null
+      const sessionsRes = isMissingRelationError(rawSessionsRes.error, 'order_machine_sessions')
+        ? { data: [], error: null }
+        : rawSessionsRes
+      const stopsRes = isMissingRelationError(rawStopsRes.error, 'machine_stops')
+        ? { data: [], error: null }
+        : rawStopsRes
+      const lowEffRes = isMissingRelationError(rawLowEffRes.error, 'low_efficiency_logs')
+        ? { data: [], error: null }
+        : rawLowEffRes
+
+      const firstError = scansRes.error || scrapsRes.error || entriesRes.error || sessionsRes.error || stopsRes.error || lowEffRes.error || null
       if (firstError) {
         setError(String(firstError.message || 'Falha ao carregar dados da gestão.'))
+      }
+
+      let nextPeriodRegistroGrupos = []
+      if (!firstError) {
+        const orderIds = Array.from(new Set([
+          ...(scansRes.data || []).map((row) => row?.order_id),
+          ...(scrapsRes.data || []).map((row) => row?.order_id),
+          ...(entriesRes.data || []).map((row) => row?.order_id),
+          ...(sessionsRes.data || []).map((row) => row?.order_id),
+          ...(stopsRes.data || []).map((row) => row?.order_id),
+          ...(lowEffRes.data || []).map((row) => row?.order_id),
+        ].map(text).filter(Boolean)))
+
+        const ordersRes = await fetchOrdersByIds(orderIds)
+        if (!active) return
+
+        if (ordersRes.error) {
+          setError(String(ordersRes.error.message || 'Falha ao carregar ordens da gestão.'))
+        } else {
+          nextPeriodRegistroGrupos = buildRegistroGroups(
+            (ordersRes.data || []).map(mapRuntimeOrder),
+            sessionsRes.data || [],
+            mapStopsForUi(stopsRes.data || []),
+            mapLowEffLogsForUi(lowEffRes.data || [])
+          )
+          const fallbackRegistroGrupos = buildProductionFallbackRegistroGroups({
+            orders: ordersRes.data || [],
+            scanRows: scansRes.data || [],
+            entryRows: entriesRes.data || [],
+            existingGroups: nextPeriodRegistroGrupos,
+            rangeStartMs: range.startMs,
+            rangeEndMs: range.endMs,
+          })
+          nextPeriodRegistroGrupos = [
+            ...nextPeriodRegistroGrupos,
+            ...fallbackRegistroGrupos,
+          ]
+          if (fallbackRegistroGrupos.length) {
+            console.warn('[Gestão] Grupos inferidos por produção sem sessão operacional', fallbackRegistroGrupos.map((group) => ({
+              orderId: group.orderId,
+              machineId: group.ordem?.machine_id,
+              startedAt: group.ordem?.started_at,
+              finalizedAt: group.ordem?.finalized_at,
+              records: group.ordem?.inferred_production_records,
+            })))
+          }
+        }
       }
 
       setScans(scansRes.data || [])
       setScraps(scrapsRes.data || [])
       setEntries(entriesRes.data || [])
+      setPeriodRegistroGrupos(nextPeriodRegistroGrupos)
       setLoading(false)
     }
 
@@ -594,7 +884,7 @@ export default function Gestao({ registroGrupos = [], openSet, toggleOpen, isAdm
     return () => {
       active = false
     }
-  }, [range.endIso, range.startIso])
+  }, [range.endIso, range.endMs, range.startIso, range.startMs])
 
   const itemsMap = useMemo(() => {
     const map = {}
@@ -712,8 +1002,9 @@ export default function Gestao({ registroGrupos = [], openSet, toggleOpen, isAdm
   }, [itemsMap, monthlyReference.endIso, monthlyReference.startIso])
 
   const orderGroupsInRange = useMemo(() => {
-    return (registroGrupos || []).filter((group) => {
+    return (scopedRegistroGrupos || []).filter((group) => {
       const order = group?.ordem || {}
+      if (order?.inferred_from_production) return true
       const eventMatches = [
         [order.started_at, order.finalized_at || order.interrupted_at || order.started_at],
         [order.restarted_at, order.finalized_at || order.interrupted_at || order.restarted_at],
@@ -725,17 +1016,28 @@ export default function Gestao({ registroGrupos = [], openSet, toggleOpen, isAdm
       if ((group?.lowEffLogs || []).some((log) => intersectsRange(log.started_at, log.ended_at || range.endIso, range.startMs, range.endMs))) return true
       return false
     })
-  }, [range.endIso, range.endMs, range.startMs, registroGrupos])
+  }, [range.endIso, range.endMs, range.startMs, scopedRegistroGrupos])
 
   const orderById = useMemo(() => {
     const map = {}
-    for (const group of registroGrupos || []) {
-      const sourceId = text(group?.orderId || group?.ordem?.source_order_id || group?.ordem?.id)
+    for (const group of scopedRegistroGrupos || []) {
+      const sourceId = getGroupOrderId(group)
       if (!sourceId) continue
       map[sourceId] = group
     }
     return map
-  }, [registroGrupos])
+  }, [scopedRegistroGrupos])
+
+  const productionMachineByOrderId = useMemo(() => {
+    const map = {}
+    for (const row of [...(scans || []), ...(entries || [])]) {
+      const orderId = text(row?.order_id)
+      const machineId = normalizeMachineId(row?.machine_id)
+      if (!orderId || !machineId) continue
+      map[orderId] = machineId
+    }
+    return map
+  }, [entries, scans])
 
   const machinesForSector = useMemo(() => {
     if (sectorFilter === 'PET') return MAQUINAS.filter((machineId) => getSectorByMachine(machineId) === 'PET')
@@ -753,24 +1055,24 @@ export default function Gestao({ registroGrupos = [], openSet, toggleOpen, isAdm
 
   const filteredGroupsForMetrics = useMemo(() => {
     return orderGroupsInRange.filter((group) => {
-      const machineId = text(group?.ordem?.machine_id)
+      const machineId = resolveGroupMachineId(group, productionMachineByOrderId)
       if (!machineId) return false
       if (!availableMachines.includes(machineId)) return false
       return true
     })
-  }, [availableMachines, orderGroupsInRange])
+  }, [availableMachines, orderGroupsInRange, productionMachineByOrderId])
 
   const groupsByMachine = useMemo(() => {
     const map = {}
     for (const machineId of availableMachines) map[machineId] = []
     for (const group of filteredGroupsForMetrics) {
-      const machineId = text(group?.ordem?.machine_id)
+      const machineId = resolveGroupMachineId(group, productionMachineByOrderId)
       if (!machineId) continue
       if (!map[machineId]) map[machineId] = []
       map[machineId].push(group)
     }
     return map
-  }, [availableMachines, filteredGroupsForMetrics])
+  }, [availableMachines, filteredGroupsForMetrics, productionMachineByOrderId])
 
   const occupancyMetrics = useMemo(() => {
     const zone = 'America/Sao_Paulo'
@@ -1488,6 +1790,174 @@ export default function Gestao({ registroGrupos = [], openSet, toggleOpen, isAdm
       missingTargets: Array.from(missingTargets),
     }
   }, [availableMachines, groupsByMachine, itemsMap, machineFilter, productionRecords, range.end, range.endMs, range.start, range.startMs, scrapRecords, sectorFilter, shiftFilter])
+
+  useEffect(() => {
+    if (loading) return
+    if (!valueRecords.length) return
+    if (toNumber(occupancyMetrics.totalProdH) > 0) return
+
+    const zone = 'America/Sao_Paulo'
+    const effectiveStart = selectedDay !== 'all'
+      ? DateTime.fromISO(selectedDay, { zone }).startOf('day')
+      : range.start
+    const effectiveEnd = selectedDay !== 'all'
+      ? DateTime.fromISO(selectedDay, { zone }).endOf('day')
+      : range.end
+    const effectiveStartMs = effectiveStart.toMillis()
+    const effectiveEndMs = effectiveEnd.toMillis()
+    const workWindows = getShiftWindowsInRange(effectiveStart, effectiveEnd, {
+      shiftKeys: shiftFilter !== 'all' ? [shiftFilter] : ACTIVE_SHIFT_KEYS,
+      setupMinutes: 0,
+    })
+
+    const producedByMachine = valueRecords.reduce((acc, record) => {
+      const machineId = text(record.machineId) || 'Sem máquina'
+      acc[machineId] = acc[machineId] || { records: 0, pieces: 0, value: 0 }
+      acc[machineId].records += 1
+      acc[machineId].pieces += toNumber(record.quantity)
+      acc[machineId].value += toNumber(record.value)
+      return acc
+    }, {})
+
+    const machineDiagnostics = availableMachines.map((machineId) => {
+      const groups = Array.isArray(groupsByMachine?.[machineId]) ? groupsByMachine[machineId] : []
+      const sessions = groups.flatMap((group) => {
+        if (Array.isArray(group?.sessions) && group.sessions.length) return group.sessions
+        if (group?.session) return [group.session]
+        if (group?.ordem?.started_at) {
+          return [{
+            id: group?.ordem?.id || null,
+            order_id: group?.orderId || group?.ordem?.source_order_id || null,
+            machine_id: group?.ordem?.machine_id || machineId,
+            started_at: group.ordem.started_at,
+            ended_at: group.ordem.finalized_at || group.ordem.interrupted_at || null,
+            end_reason: group.ordem.finalized_at ? 'FINALIZED' : null,
+          }]
+        }
+        return []
+      })
+      const sessionIntervals = mergeIntervals(mapRecordsToIntervals(sessions, {
+        rangeStartMs: effectiveStartMs,
+        rangeEndMs: effectiveEndMs,
+        fallbackEndMs: effectiveEndMs,
+      }))
+      const plannedSessionIntervals = intersectIntervals(workWindows, sessionIntervals)
+
+      return {
+        machineId,
+        groups: groups.length,
+        sessions: sessions.length,
+        stops: groups.reduce((total, group) => total + (group?.stops?.length || 0), 0),
+        lowEfficiencyEvents: groups.reduce((total, group) => total + (group?.lowEffLogs?.length || 0), 0),
+        rawSessions: sessions.slice(0, 8).map(describeSessionForDebug),
+        sessionIntervals: sessionIntervals.map(formatDebugInterval).filter(Boolean),
+        sessionIntervalsInsideWorkWindows: plannedSessionIntervals.map(formatDebugInterval).filter(Boolean),
+      }
+    })
+    const orderGroupMachineCandidates = orderGroupsInRange.slice(0, 12).map((group) => ({
+      groupId: group?.id || null,
+      orderId: getGroupOrderId(group),
+      ordemMachineId: group?.ordem?.machine_id || null,
+      sessionMachineId: group?.session?.machine_id || null,
+      sessionsMachineIds: Array.from(new Set((group?.sessions || []).map((session) => session?.machine_id).filter(Boolean))),
+      stopsMachineIds: Array.from(new Set((group?.stops || []).map((stop) => stop?.machine_id).filter(Boolean))),
+      productionMachineFallback: productionMachineByOrderId[getGroupOrderId(group)] || null,
+      resolvedMachineId: resolveGroupMachineId(group, productionMachineByOrderId),
+    }))
+
+    const hasGroups = machineDiagnostics.some((machine) => machine.groups > 0)
+    const hasSessions = machineDiagnostics.some((machine) => machine.sessions > 0)
+    const hasSessionInsideWorkWindow = machineDiagnostics.some((machine) => machine.sessionIntervalsInsideWorkWindows.length > 0)
+    const reason = !hasGroups
+      ? 'Há produção apontada, mas nenhum grupo operacional entrou em groupsByMachine para as máquinas filtradas.'
+      : !hasSessions
+        ? 'Há grupos operacionais, mas nenhum deles possui sessão/started_at para virar intervalo produtivo.'
+        : !workWindows.length
+          ? 'Não há janela de turno programada para este recorte/turno; por isso nenhuma sessão vira tempo planejado.'
+          : !hasSessionInsideWorkWindow
+            ? 'Existem sessões, mas elas não cruzam as janelas de turno usadas pelo cálculo.'
+            : 'Existem sessões dentro do turno, mas paradas/baixa eficiência ou dados de intervalo zeraram o tempo produtivo.'
+
+    const signature = JSON.stringify({
+      start: effectiveStart.toISO(),
+      end: effectiveEnd.toISO(),
+      machineFilter,
+      sectorFilter,
+      shiftFilter,
+      selectedDay,
+      producedByMachine,
+      diagnostics: machineDiagnostics.map((machine) => ({
+        machineId: machine.machineId,
+        groups: machine.groups,
+        sessions: machine.sessions,
+        sessionIntervalsInsideWorkWindows: machine.sessionIntervalsInsideWorkWindows.length,
+      })),
+    })
+    if (lastProductiveHoursDebugRef.current === signature) return
+    lastProductiveHoursDebugRef.current = signature
+
+    console.error('[Gestão] Produção com horas produtivas zeradas', {
+      reason,
+      filters: {
+        startDate: effectiveStart.toISO(),
+        endDate: effectiveEnd.toISO(),
+        sectorFilter,
+        machineFilter,
+        shiftFilter,
+        selectedDay,
+      },
+      production: {
+        totalRecords: valueRecords.length,
+        byMachine: producedByMachine,
+        sample: valueRecords.slice(0, 8).map((record) => ({
+          id: record.id,
+          orderId: record.orderId,
+          code: record.code,
+          machineId: record.machineId,
+          shift: record.shift,
+          timestamp: record.timestamp,
+          quantity: record.quantity,
+          value: record.value,
+        })),
+      },
+      dataLoaded: {
+        scans: scans.length,
+        manualEntries: entries.length,
+        periodRegistroGrupos: periodRegistroGrupos.length,
+        scopedRegistroGrupos: scopedRegistroGrupos.length,
+        orderGroupsInRange: orderGroupsInRange.length,
+        availableMachines,
+        productionMachineByOrderId,
+        orderGroupMachineCandidates,
+      },
+      calculation: {
+        occupancyMetrics,
+        oeeMetrics,
+        workWindows: workWindows.map(formatDebugInterval).filter(Boolean),
+        machineDiagnostics,
+      },
+    })
+  }, [
+    availableMachines,
+    entries.length,
+    groupsByMachine,
+    loading,
+    machineFilter,
+    occupancyMetrics,
+    oeeMetrics,
+    orderGroupsInRange,
+    orderGroupsInRange.length,
+    periodRegistroGrupos.length,
+    productionMachineByOrderId,
+    range.end,
+    range.start,
+    scans.length,
+    scopedRegistroGrupos.length,
+    sectorFilter,
+    selectedDay,
+    shiftFilter,
+    valueRecords,
+  ])
 
   const summaryCards = useMemo(() => {
     const hasOee = oeeMetrics.oeePercent != null
