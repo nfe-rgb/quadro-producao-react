@@ -226,6 +226,26 @@ function getProductionRecordTime(row) {
   return Number.isFinite(timeMs) ? timeMs : null
 }
 
+function groupHasRuntimeInRange(group, rangeStartMs, rangeEndMs) {
+  const sessions = Array.isArray(group?.sessions) && group.sessions.length
+    ? group.sessions
+    : group?.session
+      ? [group.session]
+      : []
+
+  if (sessions.some((session) => intersectsRange(session?.started_at, session?.ended_at || session?.started_at, rangeStartMs, rangeEndMs))) {
+    return true
+  }
+
+  const order = group?.ordem || {}
+  if (order?.inferred_from_production) return true
+
+  return [
+    [order.started_at, order.finalized_at || order.interrupted_at || order.started_at],
+    [order.restarted_at, order.finalized_at || order.interrupted_at || order.restarted_at],
+  ].some(([start, end]) => intersectsRange(start, end, rangeStartMs, rangeEndMs))
+}
+
 function buildProductionFallbackRegistroGroups({
   orders,
   scanRows,
@@ -238,7 +258,8 @@ function buildProductionFallbackRegistroGroups({
   const existingKeys = new Set((existingGroups || []).map((group) => {
     const orderId = getGroupOrderId(group)
     const machineId = resolveGroupMachineId(group)
-    return orderId && machineId ? `${orderId}:${machineId}` : ''
+    if (!orderId || !machineId) return ''
+    return groupHasRuntimeInRange(group, rangeStartMs, rangeEndMs) ? `${orderId}:${machineId}` : ''
   }).filter(Boolean))
   const productionByOrderMachine = {}
 
