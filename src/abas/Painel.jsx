@@ -56,22 +56,12 @@ export default function Painel({
   setStartModal,
   setFinalizando,
   lastFinalizadoPorMaquina,
-  metaPercent,
   onScanned, // opcional: callback do pai para re-fetch geral
   machinePriorities = {},
 }) {
-  const META_MENSAL = 770000;
-  const [producaoMesAtual, setProducaoMesAtual] = useState(0);
+  const [, setProducaoMesAtual] = useState(0);
   const [currentTimeMs, setCurrentTimeMs] = useState(() => Date.now());
   const [itemTechByCode, setItemTechByCode] = useState({});
-
-  const metaMensalPercent =
-    META_MENSAL > 0 ? (producaoMesAtual / META_MENSAL) * 100 : 0;
-  const pct = Math.max(0, Math.min(100, Number(metaPercent ?? metaMensalPercent)));
-  const pctText = `${pct.toLocaleString("pt-BR", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })}%`;
 
   useEffect(() => {
     const intervalId = setInterval(() => setCurrentTimeMs(Date.now()), 1000);
@@ -629,14 +619,6 @@ export default function Painel({
 
   return (
     <div className="board-wrapper">
-      <div className="meta-banner" role="status" aria-live="polite">
-        <div className="meta-banner-inner">
-          <span className="meta-msg">🚀 Alcançamos&nbsp;</span>
-          <span className="meta-percent">{pctText}</span>
-          <span className="meta-msg">&nbsp;da meta mensal! 🚀</span>
-        </div>
-      </div>
-
       <div className="board">
         {MAQUINAS.map((m) => {
           const lista = source[m] ?? [];

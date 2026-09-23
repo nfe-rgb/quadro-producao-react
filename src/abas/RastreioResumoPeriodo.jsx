@@ -142,7 +142,9 @@ function getRecordValue(record, ordersById, itemsByCode, quantityField) {
   const order = ordersById[String(record?.order_id || '')]
   const product = record?.product || order?.product || ''
   const itemCode = extractItemCodeFromOrderProduct(product)
-  const unitValue = itemCode ? toNumber(itemsByCode[itemCode]?.unit_value) : 0
+  const unitValue = toNumber(order?.unit_value) > 0
+    ? toNumber(order.unit_value)
+    : (itemCode ? toNumber(itemsByCode[itemCode]?.unit_value) : 0)
   const quantity = toNumber(record?.[quantityField])
   return {
     itemCode,
@@ -334,7 +336,7 @@ export default function RastreioResumoPeriodo() {
       if (orderIds.length) {
         const { data: ordersData, error: ordersErr } = await supabase
           .from('orders')
-          .select('id, code, customer, product, standard, machine_id, status, finalized, created_at, updated_at, finalized_at')
+          .select('id, code, customer, product, standard, unit_value, machine_id, status, finalized, created_at, updated_at, finalized_at')
           .in('id', orderIds)
 
         if (ordersErr) throw ordersErr

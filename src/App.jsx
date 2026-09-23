@@ -20,6 +20,7 @@ import Pet04 from './pages/Pet04'
 import Ficha from './pages/Ficha'
 import Prioridade from './pages/Prioridade'
 import MetaScreen from './components/MetaScreen'
+import AiAssistantChat from './components/AiAssistantChat'
 import useOrders from './hooks/useOrders'
 import useAuthAdmin from './hooks/useAuthAdmin'
 import GlobalModals from './components/GlobalModals'
@@ -34,7 +35,7 @@ export default function App(){
   const sensors = useSensors(mouseSensor, touchSensor)
 
   const [form,setForm] = useState({
-    code:'', customer:'', product:'', color:'', qty:'', boxes:'', standard:'', due_date:'', notes:'', machine_id:'P1'
+    code:'', customer:'', product:'', color:'', qty:'', boxes:'', standard:'', unit_value:'', due_date:'', notes:'', machine_id:'P1'
   })
 
   // modals state (local UI)
@@ -536,8 +537,7 @@ export default function App(){
   // controle de abas e renderização
 
   return (
-    <div className={`app ${tab === 'painel' ? 'has-meta' : ''}`}>
-
+    <div className="app">
 
 {/* mostre a barra de marca apenas quando não estivermos no painel */}
 {tab !== 'painel' && (
@@ -694,6 +694,7 @@ export default function App(){
         onConfirmLowEffStart={confirmarBaixaEf}
         onConfirmLowEffEnd={confirmarEncerrarBaixaEf}
       />
+      {!['login'].includes(tab) && <AiAssistantChat authUser={authUser} />}
     </div>
   )
 }

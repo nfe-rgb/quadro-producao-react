@@ -1,12 +1,16 @@
 // src/lib/constants.js
 export const ADMIN_EMAILS = ['nfe@savantiplasticos.com.br','suporte@savantiplasticos.com.br','qualidade@savantiplasticos.com.br','adm@savantiplasticos.com.br','savanti@savantiplasticos.com.br','expedicao@savantiplasticos.com.br'];
-
-export const ACCESS_LEVEL_1_EMAILS = ['pcp@savantiplasticos.com.br','gestao@savantiplasticos.com.br'];
+// Admin: acesso completo ao sistema. O e-mail nfe@savantiplasticos.com.br permanece como administrador principal.
+export const ACCESS_LEVEL_1_EMAILS = ['pcp@savantiplasticos.com.br','gestao@savantiplasticos.com.br','comercial@savantiplasticos.com.br'];
+// Gerentes/Donos: acesso completo, preservando internamente o nível 1 atual.
 export const ACCESS_LEVEL_2_EMAILS = [];
+// Grupo reservado para futuros gerentes/donos; internamente continua equivalente ao acesso completo.
 export const ACCESS_LEVEL_STOCK_EMAILS = ['producao@savantiplasticos.com.br'];
+// Produção: acesso aos campos operacionais com valores financeiros ocultos.
 export const ACCESS_LEVEL_MENDES_EMAILS = ['scalibur.representacoes@gmail.com'];
+// Clientes: acesso limitado ao estoque do cliente, preservado pela regra específica de isMendes.
 
-export const MAQUINAS = ['P1','P2','P3','P4','I1','I2','I3','I4','I5','I6','I7']
+export const MAQUINAS = ['P1','P2','P3','P4','I1','I2','I3','I4','I5','I7']
 
 export const STATUS = ['AGUARDANDO','PRODUZINDO','BAIXA_EFICIENCIA','PARADA']
 

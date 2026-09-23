@@ -503,7 +503,7 @@ async function fetchOrdersByIds(orderIds) {
     const chunkIds = ids.slice(index, index + 500)
     const response = await supabase
       .from('orders')
-      .select('id, machine_id, code, customer, product, color, qty, boxes, standard, due_date, notes, status, pos, finalized, finalized_at, created_at, updated_at')
+      .select('id, machine_id, code, customer, product, color, qty, boxes, standard, unit_value, due_date, notes, status, pos, finalized, finalized_at, created_at, updated_at')
       .in('id', chunkIds)
 
     if (response.error) return response
@@ -1158,7 +1158,7 @@ export default function Gestao({ registroGrupos = [], openSet, toggleOpen, isAdm
       const productCode = extractItemCodeFromOrderProduct(order?.product)
       const code = text(productCode || row?.code)
       const pieces = toNumber(row?.qty_pieces) || parsePiecesPerBox(order?.standard)
-      const unitValue = toNumber(itemsMap[code]?.unitValue)
+      const unitValue = toNumber(order?.unit_value) > 0 ? toNumber(order.unit_value) : toNumber(itemsMap[code]?.unitValue)
       const partWeightKg = toNumber(itemsMap[code]?.partWeightKg)
       const shift = resolveShift(row?.shift, row?.created_at)
       return {
@@ -1193,7 +1193,7 @@ export default function Gestao({ registroGrupos = [], openSet, toggleOpen, isAdm
       const sector = getSectorByMachine(machineId)
       const code = extractItemCodeFromOrderProduct(row?.product || order?.product)
       const pieces = toNumber(row?.good_qty)
-      const unitValue = toNumber(itemsMap[code]?.unitValue)
+      const unitValue = toNumber(order?.unit_value) > 0 ? toNumber(order.unit_value) : toNumber(itemsMap[code]?.unitValue)
       const partWeightKg = toNumber(itemsMap[code]?.partWeightKg)
       const shift = resolveShift(row?.shift, row?.created_at || row?.entry_date)
       return {

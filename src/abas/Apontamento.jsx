@@ -623,7 +623,12 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false }) {
       const n = Number(raw);
       return Number.isFinite(n) ? n : 0;
     };
-    const getUnitValueFromOrder = (order) => getUnitValueFromProduct(order?.product || '');
+    const getUnitValueFromOrder = (order) => {
+      const orderValue = Number(order?.unit_value)
+      return Number.isFinite(orderValue) && orderValue > 0
+        ? orderValue
+        : getUnitValueFromProduct(order?.product || '')
+    };
     const getItemMetaFromProduct = (productStr) => {
       const code = extractItemCodeFromOrderProduct(productStr);
       if (!code) return { unitValue: 0, cycleSeconds: 0, cavities: 0 };
@@ -680,7 +685,9 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false }) {
 
         // Valorização das produções manuais (quando houver item cadastrado)
         (dados.manualEntries || []).forEach(me => {
-          const unitVal = getUnitValueFromProduct(me.product || (me.order ? me.order.product : ''));
+          const unitVal = me.order
+            ? getUnitValueFromOrder(me.order)
+            : getUnitValueFromProduct(me.product || '');
           const qty = Number(me.good_qty) || 0;
           const productKey = String(me.product || me.order?.product || '').trim();
           if (productKey && qty > 0) {

@@ -1,5 +1,6 @@
 {
   "builds": [
+    { "src": "api/**/*.js", "use": "@vercel/node" },
     { "src": "package.json", "use": "@vercel/static-build" }
   ],
   "rewrites": [

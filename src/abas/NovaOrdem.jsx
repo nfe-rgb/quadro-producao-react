@@ -412,6 +412,16 @@ export default function NovaOrdem({ form, setForm, criarOrdem, setTab }) {
                 return next
               })
             }}/></div>
+          <div>
+            <div className="label">Valor unitário da O.P. (opcional)</div>
+            <input
+              className="input"
+              value={form.unit_value || ''}
+              onChange={e=>setForm(f=>({...f, unit_value:e.target.value}))}
+              inputMode="decimal"
+              placeholder={pickedItem?.unit_value != null ? `Cadastro: R$ ${pickedItem.unit_value}` : 'Usa o valor cadastrado se vazio'}
+            />
+          </div>
           <div><div className="label">Prazo de Entrega</div><input type="date" className="input" value={form.due_date} onChange={e=>setForm(f=>({...f, due_date:e.target.value}))}/></div>
           <div><div className="label">Observações</div><input className="input" value={form.notes} onChange={e=>setForm(f=>({...f, notes:e.target.value}))}/></div>
         </div>

@@ -2,6 +2,7 @@ import { createClient } from '@supabase/supabase-js';
 
 const url = import.meta.env.VITE_SUPABASE_URL;
 const anon = import.meta.env.VITE_SUPABASE_ANON_KEY;
+const anonymousSignInEnabled = import.meta.env.VITE_SUPABASE_ANONYMOUS_SIGN_IN === 'true';
 
 function resolveCacheScope(value) {
 	try {
@@ -32,6 +33,7 @@ export async function ensureAnonymousSession() {
 
 	if (sessionError) throw sessionError;
 	if (session) return session;
+	if (!anonymousSignInEnabled) return null;
 
 	if (!anonymousSessionPromise) {
 		anonymousSessionPromise = supabase.auth

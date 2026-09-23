@@ -12,5 +12,8 @@ export default defineConfig({
     host: true,   // permite acesso por IP na rede
     port: 5173,   // porta padrão
     strictPort: true, // garante que não mude de porta automaticamente
+    proxy: {
+      '/api': 'http://localhost:3001',
+    },
   },
 })

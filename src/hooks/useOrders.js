@@ -827,6 +827,7 @@ export default function useOrders() {
       qty: form.qty,
       boxes: normalizeOptionalOrderField(form.boxes),
       standard: normalizeOptionalOrderField(form.standard),
+      unit_value: normalizeOptionalOrderField(form.unit_value),
       due_date: form.due_date || null,
       notes: form.notes,
       status: 'AGUARDANDO',
@@ -840,7 +841,7 @@ export default function useOrders() {
       return false
     }
 
-    setForm({ code: '', customer: '', product: '', color: '', qty: '', boxes: '', standard: '', due_date: '', notes: '', machine_id: 'P1' })
+    setForm({ code: '', customer: '', product: '', color: '', qty: '', boxes: '', standard: '', unit_value: '', due_date: '', notes: '', machine_id: 'P1' })
     setTab('painel')
     void scheduleRuntimeRefresh()
     return true
