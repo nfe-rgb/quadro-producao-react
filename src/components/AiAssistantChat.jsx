@@ -103,14 +103,15 @@ function buildToolSummary(toolCall) {
   }
 }
 
-async function readJsonResponse(response) {
+async function readJsonResponse(response, endpoint) {
   const text = await response.text()
   if (!text) return null
 
   try {
     return JSON.parse(text)
   } catch {
-    throw new Error('A rota /api/ai-assistant não retornou JSON. Em desenvolvimento local, rode com vercel dev em vez de npm run dev para ativar a função backend.')
+    const contentType = response.headers.get('content-type') || 'tipo de conteúdo desconhecido'
+    throw new Error(`${endpoint} respondeu HTTP ${response.status} com ${contentType}, não JSON. No ambiente local, inicie npm run dev:api e npm run dev em terminais separados.`)
   }
 }
 
@@ -241,7 +242,7 @@ export default function AiAssistantChat({ authUser, isAdmin = false }) {
     try {
       const token = await getAccountToken()
       const response = await fetch('/api/ai-assistant-account', { headers: { Authorization: `Bearer ${token}` } })
-      const payload = await readJsonResponse(response)
+      const payload = await readJsonResponse(response, '/api/ai-assistant-account')
       if (!response.ok) throw new Error(payload?.error || 'Não foi possível carregar a conta do Ícaro.')
       setPreferences((current) => ({ ...current, ...(payload.preferences || {}) }))
       setMessages(Array.isArray(payload.messages) ? payload.messages : [])
@@ -275,7 +276,7 @@ export default function AiAssistantChat({ authUser, isAdmin = false }) {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${token}` },
       })
-      const payload = await readJsonResponse(response)
+      const payload = await readJsonResponse(response, '/api/ai-assistant-account')
       if (!response.ok) throw new Error(payload?.error || 'Não foi possível limpar a conversa.')
       setMessages([])
       setActiveContext(null)
@@ -295,7 +296,7 @@ export default function AiAssistantChat({ authUser, isAdmin = false }) {
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify(preferences),
       })
-      const payload = await readJsonResponse(response)
+      const payload = await readJsonResponse(response, '/api/ai-assistant-account')
       if (!response.ok) throw new Error(payload?.error || 'Não foi possível salvar as preferências.')
       setPreferences((current) => ({ ...current, ...(payload.preferences || {}) }))
       setSettingsOpen(false)
@@ -323,7 +324,7 @@ export default function AiAssistantChat({ authUser, isAdmin = false }) {
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify(nextPreferences),
       })
-      const payload = await readJsonResponse(response)
+      const payload = await readJsonResponse(response, '/api/ai-assistant-account')
       if (!response.ok) throw new Error(payload?.error || 'Não foi possível salvar as preferências.')
       setPreferences((current) => ({ ...current, ...(payload.preferences || {}) }))
     } catch (err) {
@@ -515,7 +516,7 @@ export default function AiAssistantChat({ authUser, isAdmin = false }) {
         }),
       })
 
-      const payload = await readJsonResponse(response)
+      const payload = await readJsonResponse(response, '/api/ai-assistant')
       if (!response.ok) throw new Error(payload?.error || 'Falha ao consultar o assistente.')
 
       setActiveContext(payload.activeContext || null)
