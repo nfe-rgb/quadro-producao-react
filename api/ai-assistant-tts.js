@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js'
+import { assertAiAssistantAdmin } from './ai-assistant-auth.js'
 
 const TTS_MODEL = process.env.OPENAI_TTS_MODEL || 'gpt-4o-mini-tts'
 const TTS_VOICE = process.env.OPENAI_TTS_VOICE || 'marin'
@@ -38,6 +39,7 @@ export default async function handler(req, res) {
       res.status(401).json({ error: 'Sessao invalida. Faca login novamente.' })
       return
     }
+    assertAiAssistantAdmin(userData.user)
 
     const input = text(req.body?.text)
     if (!input) {

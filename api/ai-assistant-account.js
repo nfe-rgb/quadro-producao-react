@@ -1,7 +1,6 @@
 import { createClient } from '@supabase/supabase-js'
+import { assertAiAssistantAdmin } from './ai-assistant-auth.js'
 
-const ADMIN_EMAIL = 'nfe@savantiplasticos.com.br'
-const DEFAULT_MONTHLY_CREDITS = 1000
 const VALID_TONES = new Set(['padrao', 'franco', 'profissional', 'amigavel', 'diferentao', 'eficiente', 'cinico'])
 
 function text(value) {
@@ -24,23 +23,6 @@ function buildSupabaseClient(req) {
   })
 }
 
-function isAdmin(user) {
-  return text(user?.email).toLowerCase() === ADMIN_EMAIL
-}
-
-function defaultAccount(user) {
-  return {
-    user_id: user.id,
-    email: user.email || '',
-    monthly_credits: DEFAULT_MONTHLY_CREDITS,
-    monthly_used: 0,
-    purchased_credits: 0,
-    available_credits: DEFAULT_MONTHLY_CREDITS,
-    monthly_remaining: DEFAULT_MONTHLY_CREDITS,
-    cycle_start: new Date().toISOString().slice(0, 10),
-  }
-}
-
 export default async function handler(req, res) {
   try {
     const supabase = buildSupabaseClient(req)
@@ -50,25 +32,18 @@ export default async function handler(req, res) {
       return
     }
     const user = userData.user
-    const admin = isAdmin(user)
+    assertAiAssistantAdmin(user)
 
     if (req.method === 'GET') {
-      const [{ data: preferences, error: preferencesError }, { data: account, error: accountError }] = await Promise.all([
+      const [{ data: preferences, error: preferencesError }, { data: messages, error: messagesError }] = await Promise.all([
         supabase.from('ai_user_preferences').select('*').eq('user_id', user.id).maybeSingle(),
-        supabase.from('ai_credit_accounts').select('*').eq('user_id', user.id).maybeSingle(),
+        supabase.from('ai_assistant_messages').select('id, role, content, metadata, created_at').eq('user_id', user.id).order('created_at', { ascending: true }).limit(100),
       ])
       if (preferencesError) throw preferencesError
-      if (accountError) throw accountError
-      const userAccount = account ? { ...account, monthly_remaining: Math.max(0, account.monthly_credits - account.monthly_used), available_credits: Math.max(0, account.monthly_credits - account.monthly_used) + account.purchased_credits } : defaultAccount(user)
+      if (messagesError) throw messagesError
       const response = {
         preferences: preferences || { tone_style: 'padrao', nickname: '', characteristics: '', memory_enabled: true, memory_summary: '' },
-        account: admin ? { ...userAccount, available_credits: -1, monthly_remaining: -1 } : userAccount,
-        admin,
-      }
-      if (admin) {
-        const { data: accounts, error: accountsError } = await supabase.from('ai_credit_accounts').select('*').order('email', { ascending: true })
-        if (accountsError) throw accountsError
-        response.users = (accounts || []).map((item) => ({ ...item, monthly_remaining: Math.max(0, item.monthly_credits - item.monthly_used), available_credits: Math.max(0, item.monthly_credits - item.monthly_used) + item.purchased_credits }))
+        messages: (messages || []).map((message) => ({ id: message.id, role: message.role, content: message.content, ...(message.metadata || {}) })),
       }
       res.status(200).json(response)
       return
@@ -92,32 +67,36 @@ export default async function handler(req, res) {
       return
     }
 
-    if (req.method === 'POST' && admin) {
-      const body = req.body || {}
-      const targetUserId = text(body.user_id)
-      const purchasedCredits = Number(body.purchased_credits)
-      const monthlyCredits = Number(body.monthly_credits)
-      if (!targetUserId) {
-        res.status(400).json({ error: 'Usuário não informado.' })
-        return
-      }
-      if (!Number.isInteger(purchasedCredits) && !Number.isInteger(monthlyCredits)) {
-        res.status(400).json({ error: 'Informe créditos extras ou novo limite mensal.' })
-        return
-      }
-      const { data: target, error: targetError } = await supabase.from('ai_credit_accounts').select('*').eq('user_id', targetUserId).maybeSingle()
-      if (targetError) throw targetError
-      if (!target) {
-        res.status(404).json({ error: 'Conta de créditos ainda não criada para este usuário.' })
-        return
-      }
-      const updates = { updated_at: new Date().toISOString() }
-      if (Number.isInteger(purchasedCredits)) updates.purchased_credits = Math.max(0, target.purchased_credits + purchasedCredits)
-      if (Number.isInteger(monthlyCredits) && monthlyCredits >= 0) updates.monthly_credits = monthlyCredits
-      const { data, error } = await supabase.from('ai_credit_accounts').update(updates).eq('user_id', targetUserId).select('*').single()
+    if (req.method === 'DELETE') {
+      const { error } = await supabase.from('ai_assistant_messages').delete().eq('user_id', user.id)
       if (error) throw error
-      await supabase.from('ai_credit_transactions').insert({ user_id: targetUserId, amount: purchasedCredits || 0, kind: 'admin_adjustment', description: 'Ajuste manual pelo administrador', created_by: user.id })
-      res.status(200).json({ account: data })
+      res.status(200).json({ cleared: true })
+      return
+    }
+
+    if (req.method === 'POST' && text(req.body?.action) === 'save_message') {
+      const message = req.body?.message || {}
+      const role = text(message.role)
+      const content = text(message.content)
+      if (!['user', 'assistant'].includes(role) || !content) {
+        res.status(400).json({ error: 'Mensagem inválida.' })
+        return
+      }
+      const { error } = await supabase.from('ai_assistant_messages').insert({
+        id: text(message.id) || undefined,
+        user_id: user.id,
+        role,
+        content: content.slice(0, 12000),
+        metadata: {
+          fallback: Boolean(message.fallback),
+          fallbackReason: text(message.fallbackReason),
+          sources: Array.isArray(message.sources) ? message.sources.slice(0, 20) : [],
+          toolCalls: Array.isArray(message.toolCalls) ? message.toolCalls.slice(0, 20) : [],
+          machineProjection: Array.isArray(message.machineProjection) ? message.machineProjection.slice(0, 50) : null,
+        },
+      })
+      if (error) throw error
+      res.status(201).json({ saved: true })
       return
     }
 

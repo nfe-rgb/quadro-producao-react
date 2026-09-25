@@ -185,7 +185,7 @@ function AssistantMessage({ message }) {
   )
 }
 
-export default function AiAssistantChat({ authUser }) {
+export default function AiAssistantChat({ authUser, isAdmin = false }) {
   const [open, setOpen] = useState(false)
   const [closing, setClosing] = useState(false)
   const [messages, setMessages] = useState([])
@@ -194,11 +194,8 @@ export default function AiAssistantChat({ authUser }) {
   const [error, setError] = useState('')
   const [newMessageAvailable, setNewMessageAvailable] = useState(false)
   const [activeContext, setActiveContext] = useState(null)
-  const [account, setAccount] = useState(null)
   const [preferences, setPreferences] = useState({ tone_style: 'padrao', nickname: '', characteristics: '', memory_enabled: true, memory_summary: '' })
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const [creditsModalOpen, setCreditsModalOpen] = useState(false)
-  const [adminUsers, setAdminUsers] = useState([])
   const [savingPreferences, setSavingPreferences] = useState(false)
   const [voiceInputState, setVoiceInputState] = useState('idle')
   const [voiceOutputEnabled, setVoiceOutputEnabled] = useState(() => {
@@ -214,7 +211,7 @@ export default function AiAssistantChat({ authUser }) {
   const recognitionRef = useRef(null)
   const audioRef = useRef(null)
 
-  const canUseAssistant = !!authUser
+  const canUseAssistant = !!authUser && isAdmin
   const historySummary = useMemo(() => buildHistorySummary(messages), [messages])
   const statusLabel = error ? 'Problema de conexão' : voiceInputState === 'listening' ? 'Ouvindo' : voiceInputState === 'processing' ? 'Processando voz' : loading ? 'Analisando' : 'Online'
 
@@ -246,9 +243,8 @@ export default function AiAssistantChat({ authUser }) {
       const response = await fetch('/api/ai-assistant-account', { headers: { Authorization: `Bearer ${token}` } })
       const payload = await readJsonResponse(response)
       if (!response.ok) throw new Error(payload?.error || 'Não foi possível carregar a conta do Ícaro.')
-      setAccount(payload.account)
       setPreferences((current) => ({ ...current, ...(payload.preferences || {}) }))
-      setAdminUsers(payload.users || [])
+      setMessages(Array.isArray(payload.messages) ? payload.messages : [])
     } catch (err) {
       console.warn('Falha ao carregar conta do Ícaro:', err)
     }
@@ -257,6 +253,37 @@ export default function AiAssistantChat({ authUser }) {
   useEffect(() => {
     if (authUser) loadAccount()
   }, [authUser, loadAccount])
+
+  const persistMessage = useCallback(async (message) => {
+    try {
+      const token = await getAccountToken()
+      await fetch('/api/ai-assistant-account', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'save_message', message }),
+      })
+    } catch (err) {
+      console.warn('Falha ao persistir mensagem do Ícaro:', err)
+    }
+  }, [getAccountToken])
+
+  async function clearConversation() {
+    if (loading) return
+    try {
+      const token = await getAccountToken()
+      const response = await fetch('/api/ai-assistant-account', {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      const payload = await readJsonResponse(response)
+      if (!response.ok) throw new Error(payload?.error || 'Não foi possível limpar a conversa.')
+      setMessages([])
+      setActiveContext(null)
+      setError('')
+    } catch (err) {
+      setError(err.message)
+    }
+  }
 
   async function savePreferences(event) {
     event?.preventDefault()
@@ -276,22 +303,6 @@ export default function AiAssistantChat({ authUser }) {
       setError(err.message)
     } finally {
       setSavingPreferences(false)
-    }
-  }
-
-  async function adjustAdminCredits(userId, amount) {
-    try {
-      const token = await getAccountToken()
-      const response = await fetch('/api/ai-assistant-account', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: userId, purchased_credits: amount }),
-      })
-      const payload = await readJsonResponse(response)
-      if (!response.ok) throw new Error(payload?.error || 'Não foi possível ajustar os créditos.')
-      await loadAccount()
-    } catch (err) {
-      setError(err.message)
     }
   }
 
@@ -486,6 +497,7 @@ export default function AiAssistantChat({ authUser }) {
 
     const userMessage = { id: createMessageId(), role: 'user', content: question }
     setMessages((current) => [...current, userMessage])
+    persistMessage(userMessage)
 
     try {
       const token = await getAccountToken()
@@ -504,17 +516,10 @@ export default function AiAssistantChat({ authUser }) {
       })
 
       const payload = await readJsonResponse(response)
-      if (response.status === 402 && payload?.code === 'CREDITS_EXHAUSTED') {
-        setCreditsModalOpen(true)
-        throw new Error('Seus créditos acabaram. Selecione um pacote para comprar créditos adicionais.')
-      }
       if (!response.ok) throw new Error(payload?.error || 'Falha ao consultar o assistente.')
 
       setActiveContext(payload.activeContext || null)
-      if (payload.credit?.available_credits != null) setAccount((current) => current ? { ...current, ...payload.credit } : current)
-      setMessages((current) => [
-        ...current,
-        {
+      const assistantMessage = {
           id: createMessageId(),
           role: 'assistant',
           content: payload.answer || 'Não encontrei uma resposta para essa pergunta.',
@@ -523,8 +528,9 @@ export default function AiAssistantChat({ authUser }) {
           sources: payload.sources || [],
           toolCalls: payload.toolCalls || [],
           machineProjection: payload.machineProjection || null,
-        },
-      ])
+        }
+      setMessages((current) => [...current, assistantMessage])
+      persistMessage(assistantMessage)
       speakResponse(payload.answer)
     } catch (err) {
       console.warn('Falha ao consultar assistente IA:', err)
@@ -561,13 +567,13 @@ export default function AiAssistantChat({ authUser }) {
               </div>
             </div>
             <div className="ai-chat-header-actions">
-              <span className="ai-credit-balance" title="Créditos Ícaro">
-                {account?.available_credits === -1 ? 'Ilimitado' : `${Number(account?.available_credits ?? 1000).toLocaleString('pt-BR')}/${Number(account?.monthly_credits ?? 1000).toLocaleString('pt-BR')}`}
-              </span>
+              <button type="button" className="ai-chat-clear" onClick={clearConversation} disabled={loading || !messages.length} aria-label="Limpar conversa" title="Limpar conversa">
+                Limpar
+              </button>
               <button type="button" className={`ai-chat-voice-output ${voiceOutputEnabled ? 'is-enabled' : ''}`} onClick={toggleVoiceOutput} aria-label={voiceOutputEnabled ? 'Desativar voz do Ícaro' : 'Ativar voz do Ícaro'} title={voiceOutputEnabled ? 'Ouvir Ícaro: ativado' : 'Ouvir Ícaro: desativado'}>
                 {voiceOutputEnabled ? '🔊' : '🔇'}
               </button>
-              <button type="button" className="ai-chat-settings" onClick={() => setSettingsOpen((current) => !current)} aria-label="Abrir configurações" title="Configurações">
+              <button type="button" className="ai-chat-settings" onClick={() => setSettingsOpen(true)} aria-label="Abrir configurações" title="Configurações">
                 ⚙
               </button>
               <button type="button" className="ai-chat-close" onClick={closePanel} aria-label="Fechar Ícaro">
@@ -575,31 +581,6 @@ export default function AiAssistantChat({ authUser }) {
               </button>
             </div>
           </header>
-
-          {settingsOpen ? (
-            <section className="ai-settings-panel" aria-label="Configurações do Ícaro">
-              <form onSubmit={savePreferences}>
-                <div className="ai-settings-heading"><strong>Personalização</strong><button type="button" onClick={() => setSettingsOpen(false)} aria-label="Fechar configurações">×</button></div>
-                <label>Como Ícaro deve falar?
-                  <select value={preferences.tone_style || 'padrao'} onChange={(event) => setPreferences((current) => ({ ...current, tone_style: event.target.value }))}>
-                    {TONE_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-                  </select>
-                </label>
-                <label>Como ele deve chamar você?
-                  <input value={preferences.nickname || ''} onChange={(event) => setPreferences((current) => ({ ...current, nickname: event.target.value }))} maxLength={80} placeholder="Seu apelido" />
-                </label>
-                <label>Características e preferências
-                  <textarea value={preferences.characteristics || ''} onChange={(event) => setPreferences((current) => ({ ...current, characteristics: event.target.value }))} maxLength={1000} rows={3} placeholder="Ex.: seja direto e use exemplos da produção" />
-                </label>
-                <label className="ai-settings-toggle"><input type="checkbox" checked={preferences.memory_enabled !== false} onChange={(event) => setPreferences((current) => ({ ...current, memory_enabled: event.target.checked }))} /> Usar memória nas conversas</label>
-                <button type="submit" className="ai-settings-save" disabled={savingPreferences}>{savingPreferences ? 'Salvando...' : 'Salvar configurações'}</button>
-                <div className="ai-settings-secondary-actions"><button type="button" onClick={() => clearPreferences(false)} disabled={savingPreferences}>Limpar memória</button><button type="button" onClick={() => clearPreferences(true)} disabled={savingPreferences}>Restaurar configurações</button></div>
-              </form>
-              {authUser?.email?.toLowerCase() === 'nfe@savantiplasticos.com.br' ? (
-                <div className="ai-admin-credits"><strong>Administração de créditos</strong>{adminUsers.length ? adminUsers.map((user) => <div className="ai-admin-credit-row" key={user.user_id}><span>{user.email}<small>{Number(user.available_credits || 0).toLocaleString('pt-BR')} disponíveis</small></span><button type="button" onClick={() => adjustAdminCredits(user.user_id, 100)}>+100</button><button type="button" onClick={() => adjustAdminCredits(user.user_id, 500)}>+500</button></div>) : <small>Nenhuma conta de usuário registrada ainda.</small>}</div>
-              ) : null}
-            </section>
-          ) : null}
 
           <div className="ai-chat-body" ref={bodyRef} onScroll={handleBodyScroll}>
             {!messages.length ? (
@@ -663,17 +644,30 @@ export default function AiAssistantChat({ authUser }) {
           </form>
         </aside>
       ) : null}
-      {creditsModalOpen ? (
-        <div className="ai-credits-modal-backdrop" role="presentation" onClick={() => setCreditsModalOpen(false)}>
-          <div className="ai-credits-modal" role="dialog" aria-modal="true" aria-labelledby="ai-credits-title" onClick={(event) => event.stopPropagation()}>
-            <strong id="ai-credits-title">Seus créditos acabaram</strong>
-            <p>Selecione um pacote para comprar créditos adicionais.</p>
-            <div className="ai-credit-packages">
-              {[100, 250, 500].map((amount) => <button type="button" key={amount} disabled title="Compra manual: solicite ao administrador">{amount} créditos<br /><small>R$ {(amount * 0.15).toFixed(2).replace('.', ',')}</small></button>)}
-            </div>
-            <small>A compra é manual nesta primeira versão. Solicite a liberação ao administrador.</small>
-            <button type="button" className="ai-modal-dismiss" onClick={() => setCreditsModalOpen(false)}>Fechar</button>
-          </div>
+      {settingsOpen ? (
+        <div className="ai-settings-modal-backdrop" role="presentation" onClick={() => setSettingsOpen(false)}>
+          <section className="ai-settings-panel" role="dialog" aria-modal="true" aria-label="Configurações do Ícaro" onClick={(event) => event.stopPropagation()}>
+            <form onSubmit={savePreferences}>
+              <div className="ai-settings-heading"><strong>Personalização</strong><button type="button" onClick={() => setSettingsOpen(false)} aria-label="Fechar configurações">×</button></div>
+              <label>Como Ícaro deve falar?
+                <select value={preferences.tone_style || 'padrao'} onChange={(event) => setPreferences((current) => ({ ...current, tone_style: event.target.value }))}>
+                  {TONE_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                </select>
+              </label>
+              <label>Como ele deve chamar você?
+                <input value={preferences.nickname || ''} onChange={(event) => setPreferences((current) => ({ ...current, nickname: event.target.value }))} maxLength={80} placeholder="Seu apelido" />
+              </label>
+              <label>Características e preferências
+                <textarea value={preferences.characteristics || ''} onChange={(event) => setPreferences((current) => ({ ...current, characteristics: event.target.value }))} maxLength={1000} rows={3} placeholder="Ex.: seja direto e use exemplos da produção" />
+              </label>
+              <label className="ai-settings-toggle"><input type="checkbox" checked={preferences.memory_enabled !== false} onChange={(event) => setPreferences((current) => ({ ...current, memory_enabled: event.target.checked }))} /> Usar memória nas conversas</label>
+              <div className="ai-settings-secondary-actions"><button type="button" onClick={() => clearPreferences(false)} disabled={savingPreferences}>Limpar memória</button><button type="button" onClick={() => clearPreferences(true)} disabled={savingPreferences}>Restaurar configurações</button></div>
+              <div className="ai-settings-actions">
+                <button type="button" className="ai-settings-cancel" onClick={() => setSettingsOpen(false)} disabled={savingPreferences}>Cancelar</button>
+                <button type="submit" className="ai-settings-save" disabled={savingPreferences}>{savingPreferences ? 'Salvando...' : 'Salvar personalização'}</button>
+              </div>
+            </form>
+          </section>
         </div>
       ) : null}
     </>

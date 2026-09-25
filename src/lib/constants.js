@@ -1,7 +1,7 @@
 // src/lib/constants.js
-export const ADMIN_EMAILS = ['nfe@savantiplasticos.com.br','suporte@savantiplasticos.com.br','qualidade@savantiplasticos.com.br','adm@savantiplasticos.com.br','savanti@savantiplasticos.com.br','expedicao@savantiplasticos.com.br'];
+export const ADMIN_EMAILS = ['nfe@savantiplasticos.com.br','savanti@savantiplasticos.com.br','suporte@savantiplasticos.com.br','adm@savantiplasticos.com.br','comercial@savantiplasticos.com.br'];
 // Admin: acesso completo ao sistema. O e-mail nfe@savantiplasticos.com.br permanece como administrador principal.
-export const ACCESS_LEVEL_1_EMAILS = ['pcp@savantiplasticos.com.br','gestao@savantiplasticos.com.br','comercial@savantiplasticos.com.br'];
+export const ACCESS_LEVEL_1_EMAILS = ['qualidade@savantiplasticos.com.br','expedicao@savantiplasticos.com.br'];
 // Gerentes/Donos: acesso completo, preservando internamente o nível 1 atual.
 export const ACCESS_LEVEL_2_EMAILS = [];
 // Grupo reservado para futuros gerentes/donos; internamente continua equivalente ao acesso completo.

@@ -694,7 +694,7 @@ export default function App(){
         onConfirmLowEffStart={confirmarBaixaEf}
         onConfirmLowEffEnd={confirmarEncerrarBaixaEf}
       />
-      {!['login'].includes(tab) && <AiAssistantChat authUser={authUser} />}
+      {!['login'].includes(tab) && <AiAssistantChat authUser={authUser} isAdmin={isAdmin} />}
     </div>
   )
 }

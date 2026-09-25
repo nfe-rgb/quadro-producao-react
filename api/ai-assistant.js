@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js'
+import { assertAiAssistantAdmin } from './ai-assistant-auth.js'
 
 const MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini'
 const ZONE = 'America/Sao_Paulo'
@@ -1979,14 +1980,34 @@ function periodFromPreset(preset) {
   }
 }
 
+function customPeriodFromArgs(args = {}) {
+  const startDate = text(args.data_inicio)
+  const endDate = text(args.data_fim)
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) return null
+  const start = new Date(`${startDate}T00:00:00-03:00`)
+  const end = new Date(`${endDate}T23:59:59.999-03:00`)
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end < start) return null
+  return {
+    label: `periodo personalizado ${startDate} a ${endDate}`,
+    start: toIso(start),
+    end: toIso(end),
+    startDate,
+    endDate,
+    custom: true,
+  }
+}
+
 function normalizeToolRequest(name, args = {}) {
-  const period = periodFromPreset(text(args.periodo) || 'hoje_ate_agora')
+  const requestedPeriod = text(args.periodo) || 'hoje_ate_agora'
+  const period = requestedPeriod === 'personalizado' ? (customPeriodFromArgs(args) || periodFromPreset('hoje_ate_agora')) : periodFromPreset(requestedPeriod)
   const machineId = normalizeMachineId(args.maquina_id)
   return {
     name,
     args: {
-      periodo: text(args.periodo) || 'hoje_ate_agora',
+      periodo: requestedPeriod,
       maquina_id: machineId,
+      data_inicio: period.custom ? period.startDate : null,
+      data_fim: period.custom ? period.endDate : null,
     },
     period,
     filters: machineId ? { machineId } : {},
@@ -2000,6 +2021,29 @@ function buildToolCacheKey(name, args) {
 function findKnownToolResult(knownToolResults, name, args) {
   const key = buildToolCacheKey(name, args)
   return (knownToolResults || []).find((item) => item?.cacheKey === key) || null
+}
+
+function applyReportContextToToolArgs(name, args = {}, reportContext = {}) {
+  if (!reportContext?.enabled) return args
+  const next = { ...args }
+  const periodPreset = text(reportContext.periodPreset)
+  if (periodPreset === 'today') next.periodo = name === 'projetar_producao' ? 'ate_fim_dia' : 'hoje_completo'
+  else if (periodPreset === 'week') next.periodo = name === 'projetar_producao' ? 'ate_fim_semana' : 'esta_semana'
+  else if (periodPreset === 'month') next.periodo = name === 'projetar_producao' ? 'ate_fim_mes' : 'este_mes'
+  else if (periodPreset === 'custom' && reportContext.startDate && reportContext.endDate && name !== 'projetar_producao') {
+    next.periodo = 'personalizado'
+    next.data_inicio = reportContext.startDate
+    next.data_fim = reportContext.endDate
+  }
+
+  const machineId = normalizeMachineId(reportContext.machineId)
+  if (machineId && name !== 'consultar_ordem_producao') next.maquina_id = machineId
+
+  const opCode = normalizeOrderCode(reportContext.orderCode)
+  if (opCode && name === 'consultar_ordem_producao') next.codigo_op = opCode
+  if (opCode && name === 'projetar_producao') next.op_alvo = opCode
+
+  return next
 }
 
 async function executeAssistantTool({ name, rawArgs, supabase, userId, knownToolResults }) {
@@ -2087,13 +2131,6 @@ async function writeTelemetry(supabase, payload) {
   }
 }
 
-async function consumeAiCredit(supabase, userId) {
-  const { data, error } = await supabase.rpc('consume_ai_credit', { p_user_id: userId })
-  if (error) throw error
-  const result = Array.isArray(data) ? data[0] : data
-  return result || { allowed: false, available_credits: 0, reason: 'credits_exhausted' }
-}
-
 async function fetchAiPreferences(supabase, userId) {
   const { data, error } = await supabase.from('ai_user_preferences').select('tone_style, nickname, characteristics, memory_enabled, memory_summary').eq('user_id', userId).maybeSingle()
   if (error) {
@@ -2118,6 +2155,7 @@ export default async function handler(req, res) {
       res.status(401).json({ error: 'Sessao invalida. Faca login novamente.' })
       return
     }
+    assertAiAssistantAdmin(userData.user)
 
     const body = req.body || {}
     const question = text(body.question)
@@ -2126,12 +2164,6 @@ export default async function handler(req, res) {
       return
     }
 
-    const deterministicQuestion = isProjectedRevenueQuestion(question) || isMachineProjectionDetailQuestion(question) || isMachineSituationQuestion(question) || isOeeQuestion(question)
-    const creditResult = deterministicQuestion ? { allowed: true, is_admin: false, available_credits: null } : await consumeAiCredit(supabase, userData.user.id)
-    if (!creditResult.allowed) {
-      res.status(402).json({ code: 'CREDITS_EXHAUSTED', error: 'Seus créditos acabaram. Selecione um pacote para comprar créditos adicionais.', credit: creditResult })
-      return
-    }
     const preferences = await fetchAiPreferences(supabase, userData.user.id)
     const activeContext = body.activeContext || {}
     const answerResult = await orchestrateWithOpenAI({
@@ -2141,6 +2173,7 @@ export default async function handler(req, res) {
       preferences,
       supabase,
       userId: userData.user.id,
+      reportContext: body.reportContext || null,
     })
 
     const toolResults = answerResult.toolResults || []
@@ -2158,7 +2191,6 @@ export default async function handler(req, res) {
       fallback: !!answerResult.fallback,
       fallbackReason: answerResult.fallbackReason || null,
       machineProjection: answerResult.machineProjection || null,
-      credit: creditResult,
       activeContext: {
         summary: answerResult.answer,
         toolResults: nextToolResults,
@@ -2381,7 +2413,7 @@ function machineFromQuestion(question) {
   return normalizeMachineId(match?.[0] || '')
 }
 
-async function orchestrateWithOpenAI({ question, historySummary, activeContext, preferences, supabase, userId }) {
+async function orchestrateWithOpenAI({ question, historySummary, activeContext, preferences, supabase, userId, reportContext }) {
   const knownToolResults = Array.isArray(activeContext?.toolResults) ? activeContext.toolResults.slice(-12) : []
   if (isMachineProjectionDetailQuestion(question)) {
     const directResult = await executeAssistantTool({ name: 'consultar_capacidade', rawArgs: { periodo: 'hoje_completo', maquina_id: null }, supabase, userId, knownToolResults })
@@ -2552,7 +2584,7 @@ async function orchestrateWithOpenAI({ question, historySummary, activeContext, 
           : name === 'consultar_capacidade' && forceTotalCapacity
             ? { periodo: requestedArgs.periodo || 'hoje_ate_agora', maquina_id: null }
             : requestedArgs
-      const result = await executeAssistantTool({ name, rawArgs, supabase, userId, knownToolResults: [...knownToolResults, ...toolResults] })
+      const result = await executeAssistantTool({ name, rawArgs: applyReportContextToToolArgs(name, rawArgs, reportContext), supabase, userId, knownToolResults: [...knownToolResults, ...toolResults] })
       toolResults.push({ ...result, requestedTool: requestedName })
       messages.push({
         role: 'tool',
