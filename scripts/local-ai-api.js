@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import aiAssistantHandler from '../api/ai-assistant.js'
 import aiAssistantAccountHandler from '../api/ai-assistant-account.js'
+import aiAssistantRealtimeHandler from '../api/ai-assistant-realtime.js'
 import aiAssistantTtsHandler from '../api/ai-assistant-tts.js'
 
 const PORT = Number(process.env.LOCAL_AI_API_PORT || 3001)
@@ -86,6 +87,8 @@ const server = createServer(async (req, res) => {
     ? aiAssistantHandler
     : url.pathname === '/api/ai-assistant-account'
       ? aiAssistantAccountHandler
+      : url.pathname === '/api/ai-assistant-realtime'
+        ? aiAssistantRealtimeHandler
       : url.pathname === '/api/ai-assistant-tts'
         ? aiAssistantTtsHandler
       : null
