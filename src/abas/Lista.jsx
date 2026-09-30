@@ -9,6 +9,7 @@ import { MAQUINAS, STATUS } from '../lib/constants'
 import { statusClass } from '../lib/utils'
 import { supabase } from '../lib/supabaseClient.js' // ✅ ESM correto
 import { DateTime } from 'luxon';
+import { estimateInputsForQueue } from '../lib/estimatedInputs.js'
 
 function parsePiecesPerBox(val) {
   if (val == null) return 0
@@ -403,22 +404,35 @@ export default function Lista({
         const finishedCodes = allOrderProductCodes.filter(Boolean)
         if (finishedCodes.length === 0) {
           setInsumosByMachine([])
+          setFilteredInsumosTotals([])
           setMachineWeeklyCapacity([])
+          setMachineRangeCapacity([])
           return
         }
 
-        const { data: structures, error: structuresError } = await supabase
-          .from('item_structures')
-          .select('finished_item_code, input_item_code, quantity_per_piece')
-          .in('finished_item_code', finishedCodes)
+        const fetchAllRows = async (createQuery) => {
+          const pageSize = 1000
+          const rows = []
+          for (let from = 0; ; from += pageSize) {
+            const { data, error } = await createQuery().range(from, from + pageSize - 1)
+            if (error) throw error
+            rows.push(...(data || []))
+            if ((data || []).length < pageSize) return rows
+          }
+        }
 
-        if (structuresError) throw structuresError
-
-        const { data: inputItems = [], error: inputItemsError } = await supabase
-          .from('items')
-          .select('*')
-
-        if (inputItemsError) throw inputItemsError
+        const [structures, inputItems] = await Promise.all([
+          fetchAllRows(() => supabase
+            .from('item_structures')
+            .select('finished_item_code, input_item_code, quantity_per_piece')
+            .in('finished_item_code', finishedCodes)
+            .order('finished_item_code')
+            .order('input_item_code')),
+          fetchAllRows(() => supabase
+            .from('items')
+            .select('*')
+            .order('code')),
+        ])
 
         const inputByCode = (inputItems || []).reduce((acc, item) => {
           const rawCode = String(item?.code ?? '').trim()
@@ -465,10 +479,11 @@ export default function Lista({
                 description: inputByCode[inputCode]?.description || inputCode,
                 unidade: inputByCode[inputCode]?.unidade || '-',
                 totalQty: 0,
-                qtyPerPiece: row.qtyPerPiece,
+                qtyPerPiece: 0,
                 cliente: inputByCode[inputCode]?.cliente || 'Sem cliente',
               }
               acc[inputCode].totalQty += totalQty
+              acc[inputCode].qtyPerPiece += Number(row.qtyPerPiece || 0)
               return acc
             }, {})
 
@@ -500,12 +515,7 @@ export default function Lista({
 
           const rangeCapacityPieces = piecesPerHour * filterHours
           const rangePieces = Math.min(rangeCapacityPieces, totalQueuePieces)
-          const rangeInputs = (structuresByFinished[activeCode] || []).reduce((acc, row) => {
-            const qty = rangePieces * Number(row.qtyPerPiece || 0)
-            if (!Number.isFinite(qty) || qty === 0) return acc
-            acc[row.inputCode] = (acc[row.inputCode] || 0) + qty
-            return acc
-          }, {})
+          const rangeInputs = estimateInputsForQueue(orders, rangePieces)
 
           machineCapacityRows.push({
             machineId,
