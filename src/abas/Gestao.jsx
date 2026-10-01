@@ -717,6 +717,7 @@ export default function Gestao({ registroGrupos = [], openSet, toggleOpen, isAdm
   const [entries, setEntries] = useState([])
   const [periodRegistroGrupos, setPeriodRegistroGrupos] = useState([])
   const [monthlyProducedValue, setMonthlyProducedValue] = useState(0)
+  const [invoicedValue, setInvoicedValue] = useState(0)
   const [localOpenSet, setLocalOpenSet] = useState(() => new Set())
   const [isRecordsExpanded, setIsRecordsExpanded] = useState(true)
   const lastProductiveHoursDebugRef = useRef('')
@@ -906,6 +907,35 @@ export default function Gestao({ registroGrupos = [], openSet, toggleOpen, isAdm
       active = false
     }
   }, [range.endIso, range.endMs, range.startIso, range.startMs])
+
+  useEffect(() => {
+    let active = true
+
+    async function loadInvoicedPieces() {
+      const { data, error: queryError } = await supabase
+        .from('sales_invoices')
+        .select('invoice_date, invoice_value')
+        .gte('invoice_date', startDate)
+        .lte('invoice_date', endDate)
+
+      if (!active) return
+      if (queryError) {
+        console.warn('Gestão: falha ao buscar quantidade faturada:', queryError)
+        setInvoicedValue(0)
+        return
+      }
+
+      const matchingRows = selectedDay === 'all'
+        ? data || []
+        : (data || []).filter((row) => row.invoice_date === selectedDay)
+      setInvoicedValue(matchingRows.reduce((total, row) => total + toNumber(row.invoice_value), 0))
+    }
+
+    loadInvoicedPieces()
+    return () => {
+      active = false
+    }
+  }, [endDate, selectedDay, startDate])
 
   const itemsMap = useMemo(() => {
     const map = {}
@@ -2020,6 +2050,14 @@ export default function Gestao({ registroGrupos = [], openSet, toggleOpen, isAdm
         tone: 'brand',
       },
       {
+        label: 'Valor faturado no período',
+        value: formatCurrency(invoicedValue),
+        hint: selectedDay === 'all'
+          ? 'No período selecionado'
+          : `Data da NF: ${DateTime.fromISO(selectedDay, { zone: 'America/Sao_Paulo' }).toFormat('dd/LL/yyyy')}`,
+        tone: 'brand',
+      },
+      {
         label: 'Refugo apontado',
         value: formatCurrency(scrapSummary.value),
         hint: [
@@ -2039,13 +2077,8 @@ export default function Gestao({ registroGrupos = [], openSet, toggleOpen, isAdm
         hint: `${occupancyMetrics.totalMaquinasParadas} máquinas com parada`,
         tone: 'danger',
       },
-      {
-        label: 'Baixa eficiência',
-        value: formatHours(occupancyMetrics.totalLowEffH),
-        hint: 'Tempo ocupado em baixa eficiência',
-      },
     ]
-  }, [occupancyMetrics.totalDisponivelH, occupancyMetrics.totalLowEffH, occupancyMetrics.totalMaquinasParadas, occupancyMetrics.totalParadaH, occupancyMetrics.totalProdH, oeeMetrics.availabilityPercent, oeeMetrics.missingTargets, oeeMetrics.oeePercent, oeeMetrics.performancePercent, oeeMetrics.qualityPercent, oeeMetrics.semProgramacaoHours, scrapPercent, scrapSummary.qty, scrapSummary.value, scrapSummary.weightKg, valueSummary.totalPieces, valueSummary.totalValue, valueSummary.totalWeightKg])
+  }, [invoicedValue, occupancyMetrics.totalDisponivelH, occupancyMetrics.totalMaquinasParadas, occupancyMetrics.totalParadaH, occupancyMetrics.totalProdH, oeeMetrics.availabilityPercent, oeeMetrics.missingTargets, oeeMetrics.oeePercent, oeeMetrics.performancePercent, oeeMetrics.qualityPercent, oeeMetrics.semProgramacaoHours, scrapPercent, scrapSummary.qty, scrapSummary.value, scrapSummary.weightKg, selectedDay, valueSummary.totalPieces, valueSummary.totalValue, valueSummary.totalWeightKg])
 
   return (
     <div className="gestao-dashboard">

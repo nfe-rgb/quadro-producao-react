@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { DateTime } from 'luxon'
 import { supabase } from '../lib/supabaseClient'
 import { fmtDateTime, getTurnoAtual } from '../lib/utils'
@@ -20,6 +20,11 @@ const TABS = [
 const MANUAL_PURCHASE_INVOICE = 'Lançamento Manual'
 
 const nowIsoDate = () => new Date().toISOString().slice(0, 10)
+const nowBusinessDate = () => DateTime.now().setZone('America/Sao_Paulo').toISODate()
+const formatIsoDate = (value) => {
+  const [year, month, day] = String(value || '').slice(0, 10).split('-')
+  return year && month && day ? `${day}/${month}/${year}` : '-'
+}
 
 const toPositiveNumber = (value) => {
   const parsed = Number(String(value ?? '').replace(',', '.').trim())
@@ -155,6 +160,14 @@ const emptyRequisitionForm = {
   opQuantity: '',
 }
 
+const emptySalesInvoiceForm = {
+  identifier: '',
+  salesOrderItemId: '',
+  invoiceNumber: '',
+  quantity: '',
+  invoiceDate: nowBusinessDate(),
+}
+
 const emptyReturnForm = {
   op: '',
   itemCode: '',
@@ -247,6 +260,7 @@ function ProductCellWithHoverImage({
 export default function Estoque({ readOnly = false, allowedClient = '', enableProductImagePreview = false }) {
   const [stockContext, setStockContext] = useState('inputs')
   const [tab, setTab] = useState('inventario')
+  const [finishedTab, setFinishedTab] = useState('inventory')
   const [inventoryClientFilter, setInventoryClientFilter] = useState('')
   const [finishedInventoryClientFilter, setFinishedInventoryClientFilter] = useState('')
   const [items, setItems] = useState([])
@@ -280,6 +294,14 @@ export default function Estoque({ readOnly = false, allowedClient = '', enablePr
   const [itemStructures, setItemStructures] = useState([])
   const [requisitionManualByCode, setRequisitionManualByCode] = useState({})
   const [finishedScans, setFinishedScans] = useState([])
+  const [finishedInvoices, setFinishedInvoices] = useState([])
+  const [finishedInvoicesError, setFinishedInvoicesError] = useState('')
+  const [invoiceOrders, setInvoiceOrders] = useState([])
+  const [invoiceOrdersLoading, setInvoiceOrdersLoading] = useState(false)
+  const [salesInvoiceForm, setSalesInvoiceForm] = useState(emptySalesInvoiceForm)
+  const [salesInvoiceSaving, setSalesInvoiceSaving] = useState(false)
+  const [salesInvoiceError, setSalesInvoiceError] = useState('')
+  const [salesInvoiceInfo, setSalesInvoiceInfo] = useState('')
   const [finishedScansLoading, setFinishedScansLoading] = useState(false)
   const [finishedScansError, setFinishedScansError] = useState('')
   const [finishedScanCode, setFinishedScanCode] = useState('')
@@ -295,13 +317,39 @@ export default function Estoque({ readOnly = false, allowedClient = '', enablePr
     error: '',
   })
   const allowedClientNormalized = useMemo(() => normalizeClientValue(allowedClient), [allowedClient])
+  const fetchInvoiceOrders = useCallback(async () => {
+    setInvoiceOrdersLoading(true)
+    const { data, error: queryError } = await supabase
+      .from('sales_orders')
+      .select('id, identifier, customer_order_number, customer, delivery_date, items:sales_order_items(id, code, description, color, quantity, unit_value, ipi_percent, invoiced_quantity)')
+      .order('created_at', { ascending: false })
+
+    if (queryError) {
+      setSalesInvoiceError(queryError.message)
+      setInvoiceOrders([])
+      setInvoiceOrdersLoading(false)
+      return
+    }
+
+    setInvoiceOrders((data || []).map((order) => ({
+      ...order,
+      items: (order.items || []).filter((line) => (
+        Number(line.quantity) > Number(line.invoiced_quantity || 0)
+      )),
+    })).filter((order) => (
+      order.items.length > 0 && matchesAllowedClient(order.customer, allowedClientNormalized)
+    )))
+    setInvoiceOrdersLoading(false)
+  }, [allowedClientNormalized])
 
   useEffect(() => {
     fetchItems()
     fetchStockMovements()
     fetchItemStructures()
     fetchFinishedProductScans()
-  }, [])
+    fetchSalesInvoices()
+    fetchInvoiceOrders()
+  }, [fetchInvoiceOrders])
 
   useEffect(() => {
     const channel = supabase
@@ -348,12 +396,20 @@ export default function Estoque({ readOnly = false, allowedClient = '', enablePr
           fetchFinishedProductScans()
         }
       )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'sales_invoices' },
+        () => {
+          fetchSalesInvoices()
+          fetchInvoiceOrders()
+        }
+      )
       .subscribe()
 
     return () => {
       supabase.removeChannel(channel)
     }
-  }, [])
+  }, [fetchInvoiceOrders])
 
   function buildReturnAllocationPlan(op, itemCode, quantity, returnsBase = []) {
     const matchingRequisitions = [...(requisitions || [])]
@@ -537,6 +593,87 @@ export default function Estoque({ readOnly = false, allowedClient = '', enablePr
       setFinishedScansError(err?.message || 'Não foi possível carregar as bipagens de produtos acabados.')
     } finally {
       setFinishedScansLoading(false)
+    }
+  }
+
+  async function fetchSalesInvoices() {
+    const { data, error: queryError } = await supabase
+      .from('sales_invoices')
+      .select('*')
+      .order('created_at', { ascending: false })
+
+    if (queryError) {
+      setFinishedInvoicesError(queryError.message)
+      setFinishedInvoices([])
+      return
+    }
+
+    setFinishedInvoicesError('')
+    setFinishedInvoices(data || [])
+  }
+
+  async function handleSalesInvoiceSubmit(event) {
+    event.preventDefault()
+    setSalesInvoiceError('')
+    setSalesInvoiceInfo('')
+
+    const invoiceNumber = normalize(salesInvoiceForm.invoiceNumber)
+    const quantity = toPositiveNumber(salesInvoiceForm.quantity)
+    const invoiceDate = normalize(salesInvoiceForm.invoiceDate)
+    const selectedOrder = invoiceOrders.find((order) => order.identifier === salesInvoiceForm.identifier)
+    const selectedLine = selectedOrder?.items.find((line) => line.id === salesInvoiceForm.salesOrderItemId)
+
+    if (!selectedOrder || !selectedLine) {
+      setSalesInvoiceError('Selecione o identificador e o item do pedido.')
+      return
+    }
+    if (!invoiceNumber) {
+      setSalesInvoiceError('Informe o número da Nota Fiscal.')
+      return
+    }
+    if (!invoiceDate) {
+      setSalesInvoiceError('Informe a Data da Nota.')
+      return
+    }
+    if (!quantity) {
+      setSalesInvoiceError('A quantidade faturada deve ser maior que zero.')
+      return
+    }
+
+    const openBalance = Number(selectedLine.quantity) - Number(selectedLine.invoiced_quantity || 0)
+    if (quantity > openBalance) {
+      setSalesInvoiceError(`Quantidade maior que o saldo aberto do pedido (${formatQty(openBalance)}).`)
+      return
+    }
+
+    const availableStock = Number(finishedStockByCode[normalize(selectedLine.code)] || 0)
+    if (quantity > availableStock) {
+      setSalesInvoiceError(`Estoque insuficiente. Disponível: ${formatQty(availableStock)}.`)
+      return
+    }
+
+    setSalesInvoiceSaving(true)
+    try {
+      const { error: registerError } = await supabase.rpc('register_sales_invoice', {
+        p_sales_order_item_id: selectedLine.id,
+        p_invoice_number: invoiceNumber,
+        p_quantity: quantity,
+        p_invoice_date: invoiceDate,
+      })
+
+      if (registerError) throw registerError
+
+      setSalesInvoiceForm({ ...emptySalesInvoiceForm, invoiceDate: nowBusinessDate() })
+      await Promise.all([
+        fetchSalesInvoices(),
+        fetchInvoiceOrders(),
+        fetchFinishedProductScans(),
+      ])
+      setSalesInvoiceInfo(`Nota Fiscal ${invoiceNumber} registrada; saldo do pedido e estoque atualizados.`)
+    } catch (err) {
+      setSalesInvoiceError(err?.message || 'Não foi possível registrar a Nota Fiscal.')
+    } finally {
+      setSalesInvoiceSaving(false)
     }
   }
 
@@ -820,6 +957,27 @@ export default function Estoque({ readOnly = false, allowedClient = '', enablePr
       .filter(Boolean)
   }, [finishedScans, allItemsByCode, allowedClientNormalized, finishedInventoryClientFilter])
 
+  const finishedStockByCode = useMemo(() => {
+    const stockByCode = new Map()
+    ;(finishedScans || []).forEach((row) => {
+      const code = normalize(row?.finishedItemCode)
+      if (!code) return
+      stockByCode.set(code, (stockByCode.get(code) || 0) + (Number(row?.qtyPieces) || 0))
+    })
+    ;(finishedInvoices || []).forEach((invoice) => {
+      const code = normalize(invoice?.item_code)
+      if (!code) return
+      stockByCode.set(code, (stockByCode.get(code) || 0) - (Number(invoice?.quantity) || 0))
+    })
+    return Object.fromEntries(Array.from(stockByCode.entries()).map(([code, quantity]) => [code, Math.max(0, quantity)]))
+  }, [finishedScans, finishedInvoices])
+
+  const invoiceSelectedOrder = invoiceOrders.find((order) => order.identifier === salesInvoiceForm.identifier)
+  const invoiceSelectedLine = invoiceSelectedOrder?.items.find((line) => line.id === salesInvoiceForm.salesOrderItemId)
+  const visibleFinishedInvoices = useMemo(() => (
+    (finishedInvoices || []).filter((invoice) => matchesAllowedClient(invoice?.customer, allowedClientNormalized))
+  ), [finishedInvoices, allowedClientNormalized])
+
   const finishedInventoryRows = useMemo(() => {
     const grouped = new Map()
 
@@ -862,20 +1020,32 @@ export default function Estoque({ readOnly = false, allowedClient = '', enablePr
       grouped.set(key, current)
     })
 
-    return Array.from(grouped.values()).sort((left, right) => {
+    const selectedClientNormalized = allowedClientNormalized || normalizeClientValue(finishedInventoryClientFilter)
+    const invoicedByCode = new Map()
+    ;(finishedInvoices || []).forEach((invoice) => {
+      if (selectedClientNormalized && !matchesAllowedClient(invoice?.customer, selectedClientNormalized)) return
+      const code = normalize(invoice?.item_code)
+      if (!code) return
+      invoicedByCode.set(code, (invoicedByCode.get(code) || 0) + (Number(invoice?.quantity) || 0))
+    })
+
+    return Array.from(grouped.values()).map((row) => ({
+      ...row,
+      pieces: Math.max(0, row.pieces - (invoicedByCode.get(row.itemCode) || 0)),
+    })).sort((left, right) => {
       const leftDate = new Date(left?.lastEntryAt || 0).getTime()
       const rightDate = new Date(right?.lastEntryAt || 0).getTime()
       return rightDate - leftDate
     })
-  }, [finishedScanRows])
+  }, [finishedScanRows, finishedInvoices, allowedClientNormalized, finishedInventoryClientFilter])
 
   const finishedInventoryTotals = useMemo(() => {
-    return finishedScanRows.reduce((acc, row) => {
-      acc.boxes += 1
-      acc.pieces += Number(row?.qtyPieces) || 0
+    return finishedInventoryRows.reduce((acc, row) => {
+      acc.boxes += Number(row?.boxes) || 0
+      acc.pieces += Number(row?.pieces) || 0
       return acc
     }, { boxes: 0, pieces: 0 })
-  }, [finishedScanRows])
+  }, [finishedInventoryRows])
 
   const recentFinishedScanRows = useMemo(
     () => finishedScanRows.slice(0, 80),
@@ -1648,6 +1818,26 @@ export default function Estoque({ readOnly = false, allowedClient = '', enablePr
 
       {stockContext === 'finished' && (
         <>
+          <div className="estoque-tabs">
+            <button
+              className={`estoque-tabbtn ${finishedTab === 'inventory' ? 'active' : ''}`}
+              onClick={() => setFinishedTab('inventory')}
+            >
+              Estoque
+            </button>
+            <button
+              className={`estoque-tabbtn ${finishedTab === 'invoices' ? 'active' : ''}`}
+              onClick={() => {
+                setFinishedTab('invoices')
+                setSalesInvoiceError('')
+                void fetchInvoiceOrders()
+              }}
+            >
+              Notas faturadas
+            </button>
+          </div>
+
+          {finishedTab === 'inventory' && <>
           <div className="estoque-card">
             <div className="estoque-card-head">
               <div>
@@ -1687,7 +1877,7 @@ export default function Estoque({ readOnly = false, allowedClient = '', enablePr
             <div className="estoque-card-head">
               <div>
                 <h3>Estoque de produtos acabados</h3>
-                <p className="estoque-sub">{formatQty(finishedInventoryTotals.boxes)} caixas registradas • {formatQty(finishedInventoryTotals.pieces)} peças no acumulado.</p>
+                <p className="estoque-sub">{formatQty(finishedInventoryTotals.boxes)} caixas registradas • {formatQty(finishedInventoryTotals.pieces)} peças disponíveis após faturamentos.</p>
               </div>
 
               <div className="estoque-inventory-controls">
@@ -1709,6 +1899,7 @@ export default function Estoque({ readOnly = false, allowedClient = '', enablePr
             </div>
 
             {finishedScansError ? <div className="estoque-alert">{finishedScansError}</div> : null}
+            {finishedInvoicesError ? <div className="estoque-alert">Não foi possível carregar as baixas de notas fiscais: {finishedInvoicesError}</div> : null}
 
             <div className="estoque-table-wrap">
               <table className="estoque-table">
@@ -1809,6 +2000,160 @@ export default function Estoque({ readOnly = false, allowedClient = '', enablePr
               </table>
             </div>
           </div>
+          </>}
+
+          {finishedTab === 'invoices' && (
+            <>
+              <div className="estoque-card">
+                <div className="estoque-card-head">
+                  <div>
+                    <h3>Registrar nota faturada</h3>
+                    <p className="estoque-sub">Informe o pedido, o item faturado, a NF e a quantidade para baixar do pedido e do estoque acabado.</p>
+                  </div>
+                </div>
+
+                {!readOnly ? (
+                  <form className="estoque-form" onSubmit={handleSalesInvoiceSubmit}>
+                    <div className="estoque-form-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))' }}>
+                      <label>
+                        Identificador do pedido
+                        <select
+                          required
+                          value={salesInvoiceForm.identifier}
+                          onChange={(event) => setSalesInvoiceForm({
+                            ...emptySalesInvoiceForm,
+                            identifier: event.target.value,
+                          })}
+                          disabled={invoiceOrdersLoading || salesInvoiceSaving}
+                        >
+                          <option value="">Selecione o identificador</option>
+                          {invoiceOrders.map((order) => (
+                            <option key={order.id} value={order.identifier}>
+                              {order.identifier} - {order.customer_order_number} - {order.customer}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+
+                      <label>
+                        Item do pedido
+                        <select
+                          required
+                          value={salesInvoiceForm.salesOrderItemId}
+                          onChange={(event) => setSalesInvoiceForm((current) => ({ ...current, salesOrderItemId: event.target.value }))}
+                          disabled={!invoiceSelectedOrder || salesInvoiceSaving}
+                        >
+                          <option value="">Selecione o item</option>
+                          {(invoiceSelectedOrder?.items || []).map((line) => {
+                            const openBalance = Number(line.quantity) - Number(line.invoiced_quantity || 0)
+                            const availableStock = Number(finishedStockByCode[normalize(line.code)] || 0)
+                            return (
+                              <option key={line.id} value={line.id}>
+                                {line.code} - {line.description} • Pedido: {formatQty(openBalance)} • Estoque: {formatQty(availableStock)}
+                              </option>
+                            )
+                          })}
+                        </select>
+                      </label>
+
+                      <label>
+                        Número da Nota Fiscal
+                        <input
+                          required
+                          value={salesInvoiceForm.invoiceNumber}
+                          onChange={(event) => setSalesInvoiceForm((current) => ({ ...current, invoiceNumber: event.target.value }))}
+                          disabled={salesInvoiceSaving}
+                        />
+                      </label>
+
+                      <label>
+                        Data da Nota
+                        <input
+                          required
+                          type="date"
+                          value={salesInvoiceForm.invoiceDate}
+                          onChange={(event) => setSalesInvoiceForm((current) => ({ ...current, invoiceDate: event.target.value }))}
+                          disabled={salesInvoiceSaving}
+                        />
+                      </label>
+
+                      <label>
+                        Quantidade faturada
+                        <input
+                          required
+                          type="number"
+                          min="0.001"
+                          step="0.001"
+                          max={invoiceSelectedLine ? Math.min(
+                            Number(invoiceSelectedLine.quantity) - Number(invoiceSelectedLine.invoiced_quantity || 0),
+                            Number(finishedStockByCode[normalize(invoiceSelectedLine.code)] || 0)
+                          ) : undefined}
+                          value={salesInvoiceForm.quantity}
+                          onChange={(event) => setSalesInvoiceForm((current) => ({ ...current, quantity: event.target.value }))}
+                          disabled={!invoiceSelectedLine || salesInvoiceSaving}
+                        />
+                      </label>
+                    </div>
+
+                    {invoiceSelectedLine && (
+                      <p className="estoque-sub">
+                        Saldo do pedido: {formatQty(Number(invoiceSelectedLine.quantity) - Number(invoiceSelectedLine.invoiced_quantity || 0))}
+                        {' • '}
+                        Estoque disponível: {formatQty(finishedStockByCode[normalize(invoiceSelectedLine.code)] || 0)}
+                      </p>
+                    )}
+                    {salesInvoiceError && <div className="estoque-alert">{salesInvoiceError}</div>}
+                    {salesInvoiceInfo && <div className="estoque-alert">{salesInvoiceInfo}</div>}
+
+                    <div className="estoque-form-actions">
+                      <button className="btn primary" type="submit" disabled={salesInvoiceSaving || invoiceOrdersLoading || !invoiceOrders.length}>
+                        {salesInvoiceSaving ? 'Salvando…' : 'Registrar faturamento'}
+                      </button>
+                    </div>
+                  </form>
+                ) : (
+                  <div className="estoque-alert">Visualização habilitada. O registro de notas fiscais está bloqueado para este perfil.</div>
+                )}
+                {invoiceOrdersLoading && <p className="estoque-sub">Carregando pedidos com saldo...</p>}
+                {!invoiceOrdersLoading && invoiceOrders.length === 0 && <p className="estoque-sub">Nenhum pedido com saldo em aberto disponível para faturamento.</p>}
+              </div>
+
+              <div className="estoque-card">
+                <div className="estoque-card-head">
+                  <div>
+                    <h3>Notas faturadas</h3>
+                    <p className="estoque-sub">Histórico das baixas registradas no pedido e no estoque de produtos acabados.</p>
+                  </div>
+                </div>
+                {finishedInvoicesError && <div className="estoque-alert">{finishedInvoicesError}</div>}
+                <div className="estoque-table-wrap">
+                  <table className="estoque-table">
+                    <thead>
+                      <tr>
+                        <th>Data da NF</th><th>Identificador</th><th>Nota Fiscal</th><th>Cod Item</th><th>Produto</th><th>Cor</th><th>Cliente</th><th>Quantidade</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {visibleFinishedInvoices.length === 0 ? (
+                        <tr><td colSpan="8" className="estoque-empty">Nenhuma nota faturada registrada.</td></tr>
+                      ) : visibleFinishedInvoices.map((invoice) => (
+                        <tr key={invoice.id}>
+                          <td>{formatIsoDate(invoice.invoice_date)}</td>
+                          <td>{invoice.sales_order_identifier}</td>
+                          <td>{invoice.invoice_number}</td>
+                          <td>{invoice.item_code}</td>
+                          <td>{invoice.item_description}</td>
+                          <td>{invoice.color || '-'}</td>
+                          <td>{invoice.customer}</td>
+                          <td>{formatQty(invoice.quantity)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </>
+          )}
         </>
       )}
 

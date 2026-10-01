@@ -10,6 +10,7 @@ import Painel from './abas/Painel'
 import Lista from './abas/Lista'
 import NovaOrdem from './abas/NovaOrdem'
 import Estoque from './abas/Estoque'
+import PedidosVenda from './abas/PedidosVenda'
 import Gestao from './abas/Gestao'
 import Rastreio from './abas/Rastreio'
 import PainelTV from './abas/PainelTV'
@@ -35,7 +36,7 @@ export default function App(){
   const sensors = useSensors(mouseSensor, touchSensor)
 
   const [form,setForm] = useState({
-    code:'', customer:'', product:'', color:'', qty:'', boxes:'', standard:'', unit_value:'', due_date:'', notes:'', machine_id:'P1'
+    code:'', customer:'', product:'', color:'', qty:'', boxes:'', standard:'', unit_value:'', due_date:'', notes:'', machine_id:'P1', sales_order_identifier:'', customer_order_number:'', sales_order_item_id:''
   })
 
   // modals state (local UI)
@@ -260,6 +261,11 @@ export default function App(){
     }
 
     if (tab === 'estoque' && accessLevel !== 2 && accessLevel !== 3) {
+      setTab('painel')
+      return
+    }
+
+    if (tab === 'pedidos' && !hasGestaoAccess) {
       setTab('painel')
       return
     }
@@ -562,6 +568,9 @@ export default function App(){
             <>
               <button className={`tabbtn ${tab==='painel'?'active':''}`} onClick={()=>setTab('painel')}>Painel</button>
               <button className={`tabbtn ${tab==='lista'?'active':''}`} onClick={()=>setTab('lista')}>Lista</button>
+              {hasGestaoAccess && (
+                <button className={`tabbtn ${tab==='pedidos'?'active':''}`} onClick={()=>setTab('pedidos')}>Pedidos</button>
+              )}
               {isAdmin && (
                 <button className={`tabbtn ${tab==='nova'?'active':''}`} onClick={()=>setTab('nova')}>Nova Ordem</button>
               )}
@@ -633,6 +642,10 @@ export default function App(){
           refreshOrdens={fetchOrdensAbertas}
           isAdmin={isAdmin}
         />
+      )}
+
+      {tab === 'pedidos' && hasGestaoAccess && (
+        <PedidosVenda />
       )}
 
       {tab === 'nova' && accessLevel === 2 && !isMendes && (

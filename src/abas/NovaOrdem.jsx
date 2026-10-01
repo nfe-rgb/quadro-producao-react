@@ -16,6 +16,9 @@ export default function NovaOrdem({ form, setForm, criarOrdem, setTab }) {
   const [creatingOrder, setCreatingOrder] = useState(false)
   const [missingItemModal, setMissingItemModal] = useState({ open: false, code: '' })
   const [duplicateOrderModal, setDuplicateOrderModal] = useState({ open: false, code: '', matches: [], pendingForm: null, busy: false })
+  const [salesOrders, setSalesOrders] = useState([])
+  const [salesOrderLines, setSalesOrderLines] = useState([])
+  const [salesOrdersError, setSalesOrdersError] = useState('')
   const debRef = useRef(null)
   const listRef = useRef(null)
   const creatingOrderRef = useRef(false)
@@ -37,6 +40,89 @@ export default function NovaOrdem({ form, setForm, criarOrdem, setTab }) {
 
   // mantém qProd sincronizado quando a tela monta
   useEffect(() => { setQProd(form.product || '') }, []) // ao montar
+
+  useEffect(() => {
+    let active = true
+    async function loadSalesOrders() {
+      const { data, error } = await supabase
+        .from('sales_orders')
+        .select('id, identifier, customer_order_number, customer, delivery_date, items:sales_order_items(id, code, description, color, quantity, unit_value, invoiced_quantity)')
+        .order('created_at', { ascending: false })
+
+      if (!active) return
+      if (error) {
+        setSalesOrdersError(error.message)
+        return
+      }
+
+      const { data: linkedItems, error: linkedItemsError } = await supabase
+        .from('orders')
+        .select('sales_order_item_id')
+        .not('sales_order_item_id', 'is', null)
+      if (!active) return
+      if (linkedItemsError) {
+        setSalesOrdersError(linkedItemsError.message)
+        return
+      }
+      const linkedItemIds = new Set((linkedItems || []).map((order) => order.sales_order_item_id))
+
+      setSalesOrders((data || []).map((order) => ({
+        ...order,
+        items: (order.items || []).filter((item) => (
+          Number(item.quantity) > Number(item.invoiced_quantity || 0) && !linkedItemIds.has(item.id)
+        )),
+      })).filter((order) => order.items.length > 0))
+    }
+    void loadSalesOrders()
+    return () => { active = false }
+  }, [])
+
+  function applySalesOrderLine(order, line) {
+    setQProd(`${line.code} - ${line.description}`)
+    setPickedItem(null)
+    setOpenList(false)
+    setForm((current) => ({
+      ...current,
+      sales_order_identifier: order.identifier,
+      customer_order_number: order.customer_order_number,
+      sales_order_item_id: line.id,
+      customer: order.customer,
+      product: `${line.code} - ${line.description}`,
+      color: line.color || '',
+      qty: String(line.quantity),
+      unit_value: line.unit_value == null ? '' : String(line.unit_value),
+      due_date: order.delivery_date || '',
+    }))
+  }
+
+  function selectSalesOrder(identifier) {
+    const order = salesOrders.find((entry) => entry.identifier === identifier)
+    setSalesOrderLines(order?.items || [])
+    if (!order) {
+      setForm((current) => ({ ...current, sales_order_identifier: '', customer_order_number: '', sales_order_item_id: '' }))
+      return
+    }
+
+    if (order.items.length === 1) {
+      applySalesOrderLine(order, order.items[0])
+      return
+    }
+
+    setQProd('')
+    setPickedItem(null)
+    setForm((current) => ({
+      ...current,
+      sales_order_identifier: order.identifier,
+      customer_order_number: order.customer_order_number,
+      sales_order_item_id: '',
+      customer: order.customer,
+      product: '',
+      color: '',
+      qty: '',
+      unit_value: '',
+      due_date: order.delivery_date || '',
+    }))
+  }
 
   // Debounce de busca conforme digita no Produto
   useEffect(() => {
@@ -294,6 +380,51 @@ export default function NovaOrdem({ form, setForm, criarOrdem, setTab }) {
     <div className="grid" style={{ maxWidth: 900 }}>
       <div className="card">
         <div className="grid2">
+          <div>
+            <div className="label">Número do pedido interno (Identificador)</div>
+            <select
+              className="select"
+              value={form.sales_order_identifier || ''}
+              onChange={(event) => selectSalesOrder(event.target.value)}
+            >
+              <option value="">O.P. sem pedido de venda</option>
+              {salesOrders.map((order) => (
+                <option key={order.id} value={order.identifier}>
+                  {order.identifier} - {order.customer_order_number} - {order.customer}
+                </option>
+              ))}
+            </select>
+            {salesOrdersError && <div style={{ color: '#b00020', fontSize: 12, marginTop: 6 }}>Pedidos indisponíveis: {salesOrdersError}</div>}
+          </div>
+
+          {form.sales_order_identifier && (
+            <div>
+              <div className="label">Número do pedido do cliente</div>
+              <input className="input" value={form.customer_order_number || ''} readOnly />
+            </div>
+          )}
+
+          {salesOrderLines.length > 1 && (
+            <div>
+              <div className="label">Item do pedido de venda</div>
+              <select
+                className="select"
+                required
+                value={form.sales_order_item_id || ''}
+                onChange={(event) => {
+                  const order = salesOrders.find((entry) => entry.identifier === form.sales_order_identifier)
+                  const line = salesOrderLines.find((entry) => entry.id === event.target.value)
+                  if (order && line) applySalesOrderLine(order, line)
+                }}
+              >
+                <option value="">Selecione o produto</option>
+                {salesOrderLines.map((line) => (
+                  <option key={line.id} value={line.id}>{line.code} - {line.description}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
           {/* Número O.P (independente do cadastro de itens) */}
           <div>
             <div className="label">Número O.P</div>

@@ -37,8 +37,125 @@ export default function GlobalModals({
   const [manualOrderOptionsLoading, setManualOrderOptionsLoading] = useState(false)
   const [manualSaving, setManualSaving] = useState(false)
   const [actionSaving, setActionSaving] = useState(null)
+  const [editSalesOrders, setEditSalesOrders] = useState([])
+  const [editSalesOrderLines, setEditSalesOrderLines] = useState([])
+  const [editSalesOrdersLoading, setEditSalesOrdersLoading] = useState(false)
+  const [editSalesOrdersError, setEditSalesOrdersError] = useState('')
   const manualSavingRef = useRef(false)
   const actionSavingRef = useRef(false)
+
+  useEffect(() => {
+    const editingId = editando?.id
+    if (!editingId) {
+      setEditSalesOrders([])
+      setEditSalesOrderLines([])
+      setEditSalesOrdersError('')
+      return
+    }
+
+    let active = true
+    async function loadEditSalesOrders() {
+      setEditSalesOrdersLoading(true)
+      setEditSalesOrdersError('')
+      const [currentOrderResult, salesOrdersResult, linkedItemsResult] = await Promise.all([
+        supabase
+          .from('orders')
+          .select('unit_value, customer_order_number, sales_order_item_id')
+          .eq('id', editingId)
+          .maybeSingle(),
+        supabase
+          .from('sales_orders')
+          .select('id, identifier, customer_order_number, customer, delivery_date, items:sales_order_items(id, code, description, color, quantity, unit_value, invoiced_quantity)')
+          .order('created_at', { ascending: false }),
+        supabase
+          .from('orders')
+          .select('id, sales_order_item_id')
+          .not('sales_order_item_id', 'is', null),
+      ])
+
+      if (!active) return
+      const queryError = currentOrderResult.error || salesOrdersResult.error || linkedItemsResult.error
+      if (queryError) {
+        setEditSalesOrdersError(queryError.message)
+        setEditSalesOrdersLoading(false)
+        return
+      }
+
+      const currentOrder = currentOrderResult.data || {}
+      const currentLineId = currentOrder.sales_order_item_id || ''
+      const linkedByLine = new Map((linkedItemsResult.data || []).map((row) => [row.sales_order_item_id, row.id]))
+      const availableOrders = (salesOrdersResult.data || []).map((order) => ({
+        ...order,
+        items: (order.items || []).filter((line) => {
+          const linkedOrderId = linkedByLine.get(line.id)
+          const hasBalance = Number(line.quantity) > Number(line.invoiced_quantity || 0)
+          return (hasBalance || line.id === currentLineId) && (!linkedOrderId || String(linkedOrderId) === String(editingId))
+        }),
+      })).filter((order) => order.items.length > 0)
+      const linkedSalesOrder = availableOrders.find((order) => order.items.some((line) => line.id === currentLineId))
+
+      setEditSalesOrders(availableOrders)
+      setEditSalesOrderLines(linkedSalesOrder?.items || [])
+      setEditando((current) => current?.id === editingId ? {
+        ...current,
+        unit_value: currentOrder.unit_value ?? current.unit_value ?? '',
+        customer_order_number: currentOrder.customer_order_number || linkedSalesOrder?.customer_order_number || current.customer_order_number || '',
+        sales_order_item_id: currentLineId,
+        sales_order_identifier: linkedSalesOrder?.identifier || current.sales_order_identifier || '',
+      } : current)
+      setEditSalesOrdersLoading(false)
+    }
+
+    void loadEditSalesOrders()
+    return () => { active = false }
+  }, [editando?.id, setEditando])
+
+  function applyEditSalesOrderLine(order, line) {
+    setEditando((current) => ({
+      ...current,
+      sales_order_identifier: order.identifier,
+      customer_order_number: order.customer_order_number,
+      sales_order_item_id: line.id,
+      customer: order.customer,
+      product: `${line.code} - ${line.description}`,
+      color: line.color || '',
+      qty: String(line.quantity),
+      unit_value: line.unit_value == null ? '' : String(line.unit_value),
+      due_date: order.delivery_date || '',
+    }))
+  }
+
+  function selectEditSalesOrder(identifier) {
+    const order = editSalesOrders.find((entry) => entry.identifier === identifier)
+    setEditSalesOrderLines(order?.items || [])
+    if (!order) {
+      setEditando((current) => ({
+        ...current,
+        sales_order_identifier: '',
+        customer_order_number: '',
+        sales_order_item_id: '',
+      }))
+      return
+    }
+
+    if (order.items.length === 1) {
+      applyEditSalesOrderLine(order, order.items[0])
+      return
+    }
+
+    setEditando((current) => ({
+      ...current,
+      sales_order_identifier: order.identifier,
+      customer_order_number: order.customer_order_number,
+      sales_order_item_id: '',
+      customer: order.customer,
+      product: '',
+      color: '',
+      qty: '',
+      unit_value: '',
+      due_date: order.delivery_date || '',
+    }))
+  }
 
   async function runModalAction(actionKey, callback) {
     if (actionSavingRef.current) return false
@@ -286,12 +403,44 @@ export default function GlobalModals({
         {editando && (
           <div className="grid">
             <div className="grid2">
+              <div>
+                <div className="label">Pedido interno (Identificador)</div>
+                <select className="select" value={editando.sales_order_identifier || ''} onChange={(event) => selectEditSalesOrder(event.target.value)} disabled={editSalesOrdersLoading}>
+                  <option value="">O.P. sem pedido de venda</option>
+                  {editSalesOrders.map((order) => (
+                    <option key={order.id} value={order.identifier}>{order.identifier} - {order.customer_order_number} - {order.customer}</option>
+                  ))}
+                </select>
+                {editSalesOrdersError && <div style={{ color: '#b00020', fontSize: 12, marginTop: 6 }}>Pedidos indisponíveis: {editSalesOrdersError}</div>}
+              </div>
+              {editando.sales_order_identifier && (
+                <div><div className="label">Pedido do cliente</div><input className="input" value={editando.customer_order_number || ''} readOnly /></div>
+              )}
+              {editSalesOrderLines.length > 1 && (
+                <div>
+                  <div className="label">Item do pedido de venda</div>
+                  <select
+                    className="select"
+                    required
+                    value={editando.sales_order_item_id || ''}
+                    onChange={(event) => {
+                      const order = editSalesOrders.find((entry) => entry.identifier === editando.sales_order_identifier)
+                      const line = editSalesOrderLines.find((entry) => entry.id === event.target.value)
+                      if (order && line) applyEditSalesOrderLine(order, line)
+                    }}
+                  >
+                    <option value="">Selecione o produto</option>
+                    {editSalesOrderLines.map((line) => <option key={line.id} value={line.id}>{line.code} - {line.description}</option>)}
+                  </select>
+                </div>
+              )}
               <div><div className="label">Número O.P</div><input className="input" value={editando.code} onChange={e=>setEditando(v=>({...v, code:e.target.value}))}/></div>
               <div><div className="label">Máquina</div><select className="select" value={editando.machine_id} onChange={e=>setEditando(v=>({...v, machine_id:e.target.value}))}>{MAQUINAS.map(m=><option key={m} value={m}>{m}</option>)}</select></div>
               <div><div className="label">Cliente</div><input className="input" value={editando.customer||''} onChange={e=>setEditando(v=>({...v, customer:e.target.value}))}/></div>
               <div><div className="label">Produto</div><input className="input" value={editando.product||''} onChange={e=>setEditando(v=>({...v, product:e.target.value}))}/></div>
               <div><div className="label">Cor</div><input className="input" value={editando.color||''} onChange={e=>setEditando(v=>({...v, color:e.target.value}))}/></div>
               <div><div className="label">Quantidade</div><input className="input" value={editando.qty||''} onChange={e=>setEditando(v=>({...v, qty:e.target.value}))}/></div>
+              <div><div className="label">Valor unitário (R$)</div><input className="input" type="number" min="0" step="any" value={editando.unit_value ?? ''} onChange={e=>setEditando(v=>({...v, unit_value:e.target.value}))}/></div>
               <div><div className="label">Volumes</div><input className="input" value={editando.boxes||''} onChange={e=>setEditando(v=>({...v, boxes:e.target.value}))}/></div>
               <div><div className="label">Padrão</div><input className="input" value={editando.standard||''} onChange={e=>setEditando(v=>({...v, standard:e.target.value}))}/></div>
               <div><div className="label">Prazo de Entrega</div><input type="date" className="input" value={editando.due_date||''} onChange={e=>setEditando(v=>({...v, due_date:e.target.value}))}/></div>

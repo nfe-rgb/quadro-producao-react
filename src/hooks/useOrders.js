@@ -829,6 +829,8 @@ export default function useOrders() {
       standard: normalizeOptionalOrderField(form.standard),
       unit_value: normalizeOptionalOrderField(form.unit_value),
       due_date: form.due_date || null,
+      sales_order_item_id: form.sales_order_item_id || null,
+      customer_order_number: form.customer_order_number || null,
       notes: form.notes,
       status: 'AGUARDANDO',
       pos: nextPos,
@@ -841,7 +843,7 @@ export default function useOrders() {
       return false
     }
 
-    setForm({ code: '', customer: '', product: '', color: '', qty: '', boxes: '', standard: '', unit_value: '', due_date: '', notes: '', machine_id: 'P1' })
+    setForm({ code: '', customer: '', product: '', color: '', qty: '', boxes: '', standard: '', unit_value: '', due_date: '', notes: '', machine_id: 'P1', sales_order_identifier: '', customer_order_number: '', sales_order_item_id: '' })
     setTab('painel')
     void scheduleRuntimeRefresh()
     return true
@@ -876,7 +878,10 @@ export default function useOrders() {
       qty: ordemParcial.qty,
       boxes: normalizeOptionalOrderField(ordemParcial.boxes),
       standard: normalizeOptionalOrderField(ordemParcial.standard),
+      unit_value: normalizeOptionalOrderField(ordemParcial.unit_value),
       due_date: ordemParcial.due_date || null,
+      sales_order_item_id: ordemParcial.sales_order_item_id || null,
+      customer_order_number: ordemParcial.customer_order_number || null,
       notes: ordemParcial.notes,
       pos: ordemParcial.pos ?? null,
     }
