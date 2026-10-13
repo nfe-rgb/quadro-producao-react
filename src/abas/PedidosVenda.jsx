@@ -45,6 +45,7 @@ export default function PedidosVenda() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [showForm, setShowForm] = useState(false)
+  const [editingOrderId, setEditingOrderId] = useState(null)
   const [header, setHeader] = useState({
     identifier: '',
     customerOrderNumber: '',
@@ -91,8 +92,7 @@ export default function PedidosVenda() {
         ...order,
         items: (order.items || [])
           .map((item) => ({ ...item, generatedOp: generatedOps[item.id] || '' }))
-          .filter((item) => numberValue(item.quantity) - numberValue(item.invoiced_quantity) > 0),
-      })).filter((order) => order.items.length > 0)
+      })).filter((order) => order.items.some((item) => numberValue(item.quantity) - numberValue(item.invoiced_quantity) > 0))
       setSalesOrders(openOrders)
     }
 
@@ -126,11 +126,35 @@ export default function PedidosVenda() {
   function resetForm() {
     setHeader({ identifier: '', customerOrderNumber: '', customer: '', deliveryDate: '' })
     setLines([createLine()])
+    setEditingOrderId(null)
     setShowForm(false)
   }
 
-  async function handleSubmit(event) {
-    event.preventDefault()
+  function editOrder(order) {
+    setError('')
+    setEditingOrderId(order.id)
+    setHeader({
+      identifier: order.identifier || '',
+      customerOrderNumber: order.customer_order_number || '',
+      customer: order.customer || '',
+      deliveryDate: order.delivery_date || '',
+    })
+    setLines(order.items.map((item) => ({
+      key: `sales-order-item-${item.id}`,
+      id: item.id,
+      generatedOp: item.generatedOp,
+      invoicedQuantity: item.invoiced_quantity,
+      code: item.code || '',
+      description: item.description || '',
+      color: item.color || '',
+      quantity: String(item.quantity ?? ''),
+      unitValue: String(item.unit_value ?? ''),
+      ipiPercent: String(item.ipi_percent ?? 0),
+    })))
+    setShowForm(true)
+  }
+
+  async function handleSave() {
     const normalizedLines = lines.map((line) => ({
       ...line,
       quantity: numberValue(line.quantity),
@@ -147,8 +171,94 @@ export default function PedidosVenda() {
       return
     }
 
+    const originalOrder = salesOrders.find((order) => order.id === editingOrderId)
+    const protectedItems = (originalOrder?.items || []).filter((item) => item.generatedOp || numberValue(item.invoiced_quantity) > 0)
+    if (protectedItems.some((item) => !normalizedLines.some((line) => line.id === item.id && line.code === item.code))) {
+      setError('Itens com O.P. gerada ou quantidade faturada não podem ser removidos nem ter o produto alterado.')
+      return
+    }
+    if (normalizedLines.some((line) => line.id && line.quantity < numberValue(line.invoicedQuantity))) {
+      setError('A quantidade do item não pode ser menor que a quantidade já faturada.')
+      return
+    }
+
     setSaving(true)
     setError('')
+
+    if (editingOrderId) {
+      const { error: orderError } = await supabase
+        .from('sales_orders')
+        .update({
+          identifier: header.identifier.trim(),
+          customer_order_number: header.customerOrderNumber.trim(),
+          customer: header.customer.trim(),
+          delivery_date: header.deliveryDate,
+        })
+        .eq('id', editingOrderId)
+
+      if (orderError) {
+        setError(orderError.code === '23505'
+          ? 'Já existe um pedido com esse identificador interno.'
+          : `Não foi possível atualizar o pedido: ${orderError.message}`)
+        setSaving(false)
+        return
+      }
+
+      const toSalesOrderItem = (line) => ({
+        sales_order_id: editingOrderId,
+        code: line.code,
+        description: line.description,
+        color: line.color.trim() || null,
+        quantity: line.quantity,
+        unit_value: line.unitValue,
+        ipi_percent: line.ipiPercent,
+      })
+      const existingItemRecords = normalizedLines
+        .filter((line) => line.id)
+        .map((line) => ({ ...toSalesOrderItem(line), id: line.id }))
+      const newItemRecords = normalizedLines.filter((line) => !line.id).map(toSalesOrderItem)
+      let itemsError = null
+
+      if (existingItemRecords.length) {
+        const { error: updateItemsError } = await supabase
+          .from('sales_order_items')
+          .upsert(existingItemRecords, { onConflict: 'id' })
+        itemsError = updateItemsError
+      }
+      if (!itemsError && newItemRecords.length) {
+        const { error: insertItemsError } = await supabase
+          .from('sales_order_items')
+          .insert(newItemRecords)
+        itemsError = insertItemsError
+      }
+
+      if (itemsError) {
+        setError(`Pedido atualizado, mas não foi possível atualizar os itens: ${itemsError.message}`)
+        setSaving(false)
+        return
+      }
+
+      const retainedIds = normalizedLines.filter((line) => line.id).map((line) => line.id)
+      const removedItems = (originalOrder?.items || []).filter((item) => !retainedIds.includes(item.id))
+      if (removedItems.length) {
+        const { error: deleteError } = await supabase
+          .from('sales_order_items')
+          .delete()
+          .in('id', removedItems.map((item) => item.id))
+
+        if (deleteError) {
+          setError(`Pedido atualizado, mas não foi possível remover os itens excluídos: ${deleteError.message}`)
+          setSaving(false)
+          return
+        }
+      }
+
+      await loadData()
+      setSaving(false)
+      resetForm()
+      return
+    }
+
     const { data: createdOrder, error: orderError } = await supabase
       .from('sales_orders')
       .insert({
@@ -213,7 +323,7 @@ export default function PedidosVenda() {
       {error && <div className="sales-orders-error" role="alert">{error}</div>}
 
       {showForm ? (
-        <form className="sales-orders-form" onSubmit={handleSubmit}>
+        <div className="sales-orders-form">
           <section className="sales-orders-fields">
             <label>
               <span>Número do pedido interno (Identificador)</span>
@@ -247,9 +357,9 @@ export default function PedidosVenda() {
               <tbody>
                 {lines.map((line) => (
                   <tr key={line.key}>
-                    <td className="sales-orders-pending-op">Aguardando</td>
+                    <td className="sales-orders-pending-op">{line.generatedOp || 'Aguardando'}</td>
                     <td>
-                      <select required value={line.code} onChange={(event) => selectCatalogItem(line.key, event.target.value)}>
+                      <select required value={line.code} disabled={Boolean(line.generatedOp) || numberValue(line.invoicedQuantity) > 0} onChange={(event) => selectCatalogItem(line.key, event.target.value)}>
                         <option value="">Selecionar produto</option>
                         {catalog.map((item) => <option key={item.code} value={item.code}>{item.code} - {item.description}</option>)}
                       </select>
@@ -259,7 +369,7 @@ export default function PedidosVenda() {
                     <td><input type="number" min="0" step="any" required value={line.unitValue} onChange={(event) => updateLine(line.key, { unitValue: event.target.value })} /></td>
                     <td><input type="number" min="0" step="any" value={line.ipiPercent} onChange={(event) => updateLine(line.key, { ipiPercent: event.target.value })} /></td>
                     <td className="sales-orders-total">{formatMoney(lineTotal(line))}</td>
-                    <td><button className="sales-orders-remove" type="button" aria-label="Remover item" title="Remover item" disabled={lines.length === 1} onClick={() => setLines((current) => current.filter((entry) => entry.key !== line.key))}>×</button></td>
+                    <td><button className="sales-orders-remove" type="button" aria-label="Remover item" title="Remover item" disabled={lines.length === 1 || Boolean(line.generatedOp) || numberValue(line.invoicedQuantity) > 0} onClick={() => setLines((current) => current.filter((entry) => entry.key !== line.key))}>×</button></td>
                   </tr>
                 ))}
               </tbody>
@@ -267,22 +377,22 @@ export default function PedidosVenda() {
           </div>
           {!catalog.length && !loading && <p className="sales-orders-hint">Nenhum produto acabado (código iniciado por 5) disponível no cadastro.</p>}
           <footer className="sales-orders-form-actions">
-            <button className="btn primary" type="submit" disabled={saving || loading}>{saving ? 'Salvando...' : 'Salvar pedido'}</button>
+            <button className="btn primary" type="button" disabled={saving || loading} onClick={handleSave}>{saving ? 'Salvando...' : editingOrderId ? 'Salvar alterações' : 'Salvar pedido'}</button>
           </footer>
-        </form>
+        </div>
       ) : (
         <section className="sales-orders-report">
           <div className="sales-orders-table-wrap">
             <table className="sales-orders-table">
               <thead>
                 <tr>
-                  <th>Identificador</th><th>Pedido cliente</th><th>Cliente</th><th>Prazo</th><th>O.P. gerada</th><th>Código - descrição</th><th>Cor</th><th>Qtd. pedida</th><th>Saldo aberto</th><th>Valor unitário</th><th>IPI %</th><th>Total aberto c/ IPI</th>
+                  <th>Identificador</th><th>Pedido cliente</th><th>Cliente</th><th>Prazo</th><th>O.P. gerada</th><th>Código - descrição</th><th>Cor</th><th>Qtd. pedida</th><th>Saldo aberto</th><th>Valor unitário</th><th>IPI %</th><th>Total aberto c/ IPI</th><th>Ações</th>
                 </tr>
               </thead>
               <tbody>
                 {loading ? (
-                  <tr><td colSpan="12" className="sales-orders-empty">Carregando pedidos...</td></tr>
-                ) : salesOrders.length ? salesOrders.flatMap((order) => order.items.map((item) => {
+                  <tr><td colSpan="13" className="sales-orders-empty">Carregando pedidos...</td></tr>
+                ) : salesOrders.length ? salesOrders.flatMap((order) => order.items.filter((item) => numberValue(item.quantity) - numberValue(item.invoiced_quantity) > 0).map((item) => {
                   const balance = numberValue(item.quantity) - numberValue(item.invoiced_quantity)
                   return (
                     <tr key={item.id}>
@@ -298,10 +408,11 @@ export default function PedidosVenda() {
                       <td>{formatMoney(item.unit_value)}</td>
                       <td>{formatQuantity(item.ipi_percent)}%</td>
                       <td>{formatMoney(lineTotal(item, balance))}</td>
+                      <td><button className="btn" type="button" onClick={() => editOrder(order)}>Editar pedido</button></td>
                     </tr>
                   )
                 })) : (
-                  <tr><td colSpan="12" className="sales-orders-empty">Nenhum pedido com saldo em aberto.</td></tr>
+                  <tr><td colSpan="13" className="sales-orders-empty">Nenhum pedido com saldo em aberto.</td></tr>
                 )}
               </tbody>
             </table>

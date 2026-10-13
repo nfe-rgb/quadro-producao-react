@@ -60,6 +60,25 @@ function computeApontadasPieces(item) {
   return manualPieces > 0 || scannedPieces > 0 ? manualPieces + scannedPieces : undefined
 }
 
+function applyProductionTotals(item, total) {
+  if (!total) return item
+
+  const fallbackScannedPieces = total.scannedPieces > 0
+    ? total.scannedPieces
+    : total.scannedCount * parsePiecesPerBox(item?.standard)
+  const updatedItem = {
+    ...item,
+    scanned_count: total.scannedCount,
+    scanned_pieces: fallbackScannedPieces,
+    manual_pieces: total.manualPieces,
+  }
+
+  return {
+    ...updatedItem,
+    apontadas_pieces: computeApontadasPieces(updatedItem),
+  }
+}
+
 export default function Lista({
   ativosPorMaquina,
   sensors,
@@ -283,14 +302,13 @@ export default function Lista({
       const targetsMap = new Map()
 
       for (const machineId of MAQUINAS) {
-        const item = (ativosPorMaquina?.[machineId] || [])[0]
-        if (!item) continue
+        for (const item of ativosPorMaquina?.[machineId] || []) {
+          const id = getOrderRecordId(item)
+          const code = getOrderRecordCode(item)
+          if (!id && !code) continue
 
-        const id = getOrderRecordId(item)
-        const code = getOrderRecordCode(item)
-        if (!id && !code) continue
-
-        targetsMap.set(`${id || ''}|${code || ''}`, { id, code })
+          targetsMap.set(`${id || ''}|${code || ''}`, { id, code })
+        }
       }
 
       const targets = Array.from(targetsMap.values())
@@ -953,23 +971,7 @@ export default function Lista({
           const lista = ativosPorMaquina[m] || []
           const ativaBase = lista[0] || null
           const totalProducao = ativaBase ? productionTotalsByOrder[getOrderTotalKey(ativaBase)] : null
-          const ativa = totalProducao
-            ? (() => {
-                const fallbackScannedPieces = totalProducao.scannedPieces > 0
-                  ? totalProducao.scannedPieces
-                  : totalProducao.scannedCount * parsePiecesPerBox(ativaBase?.standard)
-                const updatedItem = {
-                  ...ativaBase,
-                  scanned_count: totalProducao.scannedCount,
-                  scanned_pieces: fallbackScannedPieces,
-                  manual_pieces: totalProducao.manualPieces,
-                }
-                return {
-                  ...updatedItem,
-                  apontadas_pieces: computeApontadasPieces(updatedItem),
-                }
-              })()
-            : ativaBase
+          const ativa = applyProductionTotals(ativaBase, totalProducao)
           const fila  = lista.slice(1)
           const opCode = ativa?.code || ativa?.o?.code || ativa?.op_code || ""
           // lidas / saldo: usar mesma lógica do Painel
@@ -1128,7 +1130,7 @@ export default function Lista({
                           {fila.map(f => (
                             <FilaSortableItem
                               key={f.id}
-                              ordem={f}
+                              ordem={applyProductionTotals(f, productionTotalsByOrder[getOrderTotalKey(f)])}
                               onEdit={() => setEditando(f)}
                               etiquetaVariant="fila"
                               highlightInterrompida={f.status === 'AGUARDANDO' && !!f.interrupted_at}
@@ -1144,7 +1146,10 @@ export default function Lista({
                           <div className="card fila-item" style={{ minWidth: 260, opacity: 0.95 }}>
                             <div className="drag-handle" style={{ visibility: 'hidden' }}>⠿</div>
                             <div className="fila-content">
-                              <Etiqueta o={draggingOrder} variant="fila" />
+                              <Etiqueta
+                                o={applyProductionTotals(draggingOrder, productionTotalsByOrder[getOrderTotalKey(draggingOrder)])}
+                                variant="fila"
+                              />
                             </div>
                           </div>
                         ) : null}
@@ -1157,7 +1162,7 @@ export default function Lista({
                       {fila.map(f => (
                         <FilaSortableItem
                           key={f.id}
-                          ordem={f}
+                          ordem={applyProductionTotals(f, productionTotalsByOrder[getOrderTotalKey(f)])}
                           onEdit={() => setEditando(f)}
                           etiquetaVariant="fila"
                           highlightInterrompida={f.status === 'AGUARDANDO' && !!f.interrupted_at}
